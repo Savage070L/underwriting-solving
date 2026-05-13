@@ -493,6 +493,43 @@
       </div>
     </section>
 
+    <!-- AI Consultant FAB + Panel -->
+    <button class="ai-fab" id="ai-fab" onclick="AIConsultant.toggle()" aria-label="Спросить ИИ">
+      <svg class="ai-fab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
+        <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+      </svg>
+      <span class="ai-fab-label">Спросить&nbsp;ИИ</span>
+      <span class="ai-fab-dot"></span>
+    </button>
+
+    <aside class="ai-panel" id="ai-panel" aria-hidden="true">
+      <div class="ai-panel-head">
+        <div class="ai-panel-title">
+          <span class="ai-panel-emoji">🤖</span>
+          <div>
+            <h3>ИИ-консультант второго мнения</h3>
+            <p>Скопируйте промпт и вставьте в ChatGPT / Claude / Gemini — ИИ выступит в роли «второго андеррайтера» и даст независимую оценку</p>
+          </div>
+        </div>
+        <button class="ai-close" onclick="AIConsultant.toggle()" aria-label="Закрыть">×</button>
+      </div>
+      <div class="ai-panel-actions">
+        <button class="ai-btn ai-btn--primary" id="ai-copy-btn" onclick="AIConsultant.copy()">
+          <span class="ai-btn-icon">📋</span> Скопировать промпт
+        </button>
+        <a class="ai-btn ai-btn--secondary" href="https://chat.openai.com/" target="_blank" rel="noopener">→ ChatGPT</a>
+        <a class="ai-btn ai-btn--secondary" href="https://claude.ai/new" target="_blank" rel="noopener">→ Claude</a>
+        <a class="ai-btn ai-btn--secondary" href="https://gemini.google.com/" target="_blank" rel="noopener">→ Gemini</a>
+      </div>
+      <textarea class="ai-prompt-text" id="ai-prompt-text" readonly></textarea>
+      <div class="ai-panel-foot">
+        <span id="ai-prompt-stats">—</span>
+        <span class="ai-tip">Tip: после вставки можно задать дополнительные вопросы — у ИИ будет весь контекст</span>
+      </div>
+    </aside>
+    <div class="ai-overlay" id="ai-overlay" onclick="AIConsultant.toggle()"></div>
+
     <footer class="dash-footer">
       <span>Standard Life · Аналитика убытков</span>
       <span class="dot">·</span>

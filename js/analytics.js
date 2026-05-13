@@ -2705,4 +2705,277 @@
       </div>`;
   })();
 
+  // ===== AI CONSULTANT PROMPT =====
+  window.AIConsultant = (function () {
+    let isOpen = false;
+    let cachedPrompt = null;
+
+    function buildPrompt() {
+      const z = snap.zayavka || {};
+      const A = a;
+      const sev = A.bySeverity || {};
+      const conc = A.concentration || {};
+      const fs = A.freqSeverity || {};
+      const premium = z.premiumWithCoeff || z.premiumBase || 0;
+      const sumInsured = z.insuranceSum || 0;
+      const expectedLoss = A.avgSumPerYear || 0;
+      const forecastLR = premium > 0 ? 100 * expectedLoss / premium : null;
+      const burningCost = sumInsured > 0 ? (expectedLoss / sumInsured) * 100 : 0;
+      const lambda = A.avgFreq || 0;
+      const mu = A.finance?.avg || 0;
+      const cv = fs.cv || 1;
+      const sigmaS = Math.sqrt(lambda * mu * mu * (cv * cv + 1));
+      const ES = lambda * mu;
+      const PML99 = ES + 2.326 * sigmaS;
+      const PML995 = ES + 2.576 * sigmaS;
+      const TVaR99 = ES + 2.665 * sigmaS;
+      const EC = 2.576 * sigmaS;
+      const expenses = premium * 0.25;
+      const uwProfit = premium - ES - expenses;
+      const raroc = EC > 0 ? (uwProfit / EC) * 100 : null;
+      const portfolioLR = snap.ku ? snap.ku.lossRatioWith * 100 : null;
+      const assets = snap.normativ?.fullAssetsTenge || 0;
+      const solvImpact = assets > 0 ? (PML99 / assets) * 100 : null;
+      const company = (typeof Utils !== 'undefined' && Utils.formatCompanyName)
+        ? Utils.formatCompanyName(z.insurerName) : (z.insurerName || '—');
+
+      const fmtT = (n) => n != null ? Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' ₸' : '—';
+      const fmtT_M = (n) => {
+        if (n == null) return '—';
+        const abs = Math.abs(n);
+        if (abs >= 1e9) return (n / 1e9).toFixed(2).replace('.', ',') + ' млрд ₸';
+        if (abs >= 1e6) return (n / 1e6).toFixed(1).replace('.', ',') + ' М ₸';
+        if (abs >= 1e3) return (n / 1e3).toFixed(0) + ' тыс ₸';
+        return fmtT(n);
+      };
+      const pct = (n, d = 1) => n != null ? n.toFixed(d).replace('.', ',') + ' %' : '—';
+      const num = (n) => n != null ? Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : '—';
+      const date = (iso) => {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const insurerLines = (A.byInsurer || []).slice(0, 5).map(i =>
+        `  • ${i.name}: ${num(i.count)} дел, ${fmtT_M(i.sum)} выплат, ср. выплата ${fmtT_M(i.avgPayment)}`
+      ).join('\n');
+      const yearLines = (A.byYear || []).map(y =>
+        `  • ${y.year}: ${num(y.cases)} НС, выплат ${fmtT_M(y.sum)}, смертельных ${num(y.death)}`
+      ).join('\n');
+
+      const sevDeath = sev.death?.count || 0;
+      const sevUptHigh = (sev.upt90?.count || 0) + (sev.upt60?.count || 0) + (sev.upt30?.count || 0);
+      const sevEarn = sev.earnLoss?.count || 0;
+      const sevOther = sev.other?.count || 0;
+      const deathPct = A.recognition.recognized > 0 ? 100 * sevDeath / A.recognition.recognized : 0;
+      const breakEven = expectedLoss;
+      const ratioForKU70 = (breakEven / 0.7) / Math.max(premium, 1);
+      const normFreq = snap.activity ? (snap.activity.deathRate + snap.activity.injuryRate) : null;
+      const normDeath = snap.activity ? snap.activity.deathRate : null;
+      const factFreq = z.workers > 0 ? lambda * 1000 / z.workers : null;
+      const factDeath = z.workers > 0 ? (sevDeath / 3) * 1000 / z.workers : null;
+      const ratioFreq = normFreq && factFreq ? factFreq / normFreq : null;
+      const ratioDeath = normDeath && factDeath ? factDeath / normDeath : null;
+
+      const verdictMap = {
+        accept_standard: 'Принятие со стандартным коэффициентом',
+        accept_adjusted: 'Принятие с повышенным/пониженным коэффициентом',
+        reject: 'Отклонение в соответствии со степенью риска',
+        defer: 'Отложение страхования на определённый срок',
+      };
+      const verdictText = (snap.verdict && snap.verdict !== 'auto')
+        ? verdictMap[snap.verdict] : 'не зафиксирован (вычисляется автоматически по коэффициенту)';
+
+      const L = [];
+      L.push('Ты опытный андеррайтер страховой компании в Казахстане. Дай профессиональную оценку: стоит ли заключать договор обязательного страхования работников от несчастных случаев (ОСНС) на текущих условиях.');
+      L.push('');
+      L.push('Ниже — полный аналитический отчёт по потенциальному договору.');
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  1. КЛИЕНТ');
+      L.push('═════════════════════════════════════════');
+      L.push(`• Страхователь: ${company}`);
+      if (z.bin) L.push(`• БИН/ИИН: ${z.bin}`);
+      if (z.oked) L.push(`• ОКЭД: ${z.oked}`);
+      if (z.activity) L.push(`• Вид деятельности: ${z.activity}`);
+      if (z.riskClass) L.push(`• Класс профессионального риска: ${z.riskClass} (из 25)`);
+      if (z.workers) L.push(`• Численность застрахованных: ${num(z.workers)} чел.`);
+      if (z.region) L.push(`• Регион / филиал: ${z.region}`);
+      if (z.govParticipation) L.push(`• Государственное участие: ${z.govParticipation}`);
+      if (z.legalAddress) L.push(`• Юр. адрес: ${z.legalAddress}`);
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  2. УСЛОВИЯ ДОГОВОРА');
+      L.push('═════════════════════════════════════════');
+      L.push(`• Страховая сумма: ${fmtT(sumInsured)}`);
+      if (z.tariff != null) L.push(`• Базовый тариф: ${pct(z.tariff * 100, 3)}`);
+      if (z.coeff != null) L.push(`• Поправочный коэффициент: ${z.coeff}`);
+      if (z.coeffDown) L.push(`• Понижающий коэффициент: ${pct(z.coeffDown * 100, 0)}`);
+      L.push(`• Премия по договору: ${fmtT(premium)}`);
+      if (z.periodFrom && z.periodTo) L.push(`• Период страхования: ${date(z.periodFrom)} – ${date(z.periodTo)}`);
+      if (z.paymentOrder) L.push(`• Порядок оплаты: ${z.paymentOrder}`);
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  3. ИСТОРИЯ УБЫТКОВ (3 года)');
+      L.push('═════════════════════════════════════════');
+      L.push(`Период анализа: ${date(A.cutoffDate)} – ${date(A.reportDate)}`);
+      L.push('');
+      L.push('Объёмы:');
+      L.push(`  • Заявленных страховых случаев: ${num(A.recognition.filed)}`);
+      L.push(`  • Признано страховыми: ${num(A.recognition.recognized)} (${pct(100 * A.recognition.recognized / Math.max(A.recognition.filed, 1), 1)})`);
+      L.push(`  • С произведённой выплатой: ${num(A.recognition.paid)}`);
+      L.push(`  • Отказов (недоказанность): ${num(A.recognition.rejected)}`);
+      L.push(`  • На рассмотрении: ${num(A.recognition.pending)}`);
+      L.push(`  • РЗНУ на отчётную дату: ${num(A.recognition.rznu)} ${A.recognition.rznu === 0 ? '(резервов нет)' : '(есть незакрытые)'}`);
+      L.push('');
+      L.push('Финансовые показатели:');
+      L.push(`  • Совокупная сумма выплат: ${fmtT(A.sumTotal3y)}`);
+      L.push(`  • Среднегодовая сумма: ${fmtT(A.avgSumPerYear)}`);
+      L.push(`  • Среднегодовая частота: ${num(lambda)} НС/год`);
+      L.push(`  • Средняя выплата на дело: ${fmtT(mu)}`);
+      L.push(`  • Медиана выплаты: ${fmtT(A.finance.median)}`);
+      L.push(`  • P90: ${fmtT(A.finance.p90)} · P99: ${fmtT(A.finance.p99)}`);
+      L.push(`  • Максимальная выплата: ${fmtT(A.finance.max)}`);
+      L.push('');
+      L.push('Структура по тяжести:');
+      L.push(`  • Смертельные случаи: ${num(sevDeath)} (${pct(deathPct)})`);
+      L.push(`  • УПТ ≥ 30 %: ${num(sevUptHigh)}`);
+      L.push(`  • Утрата заработка > 1 года (аннуитеты): ${num(sevEarn)}`);
+      L.push(`  • Иное / не классифицировано: ${num(sevOther)}`);
+      L.push('');
+      L.push('По годам:');
+      L.push(yearLines || '  • (нет данных)');
+
+      if ((A.byInsurer || []).length > 0) {
+        const concName = conc.hhiBand === 'low' ? 'фрагментированный'
+          : conc.hhiBand === 'moderate' ? 'умеренная'
+          : conc.hhiBand === 'high' ? 'высокая' : 'крайне высокая';
+        L.push('');
+        L.push(`Страховщики (концентрация HHI = ${num(conc.hhi)}, ${concName}):`);
+        L.push(insurerLines);
+      }
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  4. СРАВНЕНИЕ С ОТРАСЛЕВЫМИ НОРМАМИ');
+      L.push('═════════════════════════════════════════');
+      if (snap.activity) {
+        L.push(`Норматив по ОКЭД ${z.oked || ''}:`);
+        L.push(`  • Фактическая частота НС: ${factFreq ? factFreq.toFixed(2).replace('.', ',') : '—'} / 1000 чел./год`);
+        L.push(`  • Норма ОКЭД (частота): ${normFreq ? normFreq.toFixed(3).replace('.', ',') : '—'} / 1000 чел./год`);
+        L.push(`  • Отклонение по частоте: ${ratioFreq ? '× ' + (ratioFreq >= 100 ? ratioFreq.toFixed(0) : ratioFreq.toFixed(1).replace('.', ',')) : '—'}`);
+        L.push(`  • Фактическая смертность: ${factDeath ? factDeath.toFixed(2).replace('.', ',') : '—'} / 1000 чел./год`);
+        L.push(`  • Норма смертности: ${normDeath ? normDeath.toFixed(3).replace('.', ',') : '—'} / 1000 чел./год`);
+        L.push(`  • Отклонение по смертности: ${ratioDeath ? '× ' + (ratioDeath >= 100 ? ratioDeath.toFixed(0) : ratioDeath.toFixed(1).replace('.', ',')) : '—'}`);
+      } else {
+        L.push('(Калькулятор отраслевых норм не загружен — нет данных для сравнения с ОКЭД.)');
+      }
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  5. АКТУАРНЫЕ ПОКАЗАТЕЛИ');
+      L.push('═════════════════════════════════════════');
+      L.push(`• Burning Cost (выплаты / страх. сумма): ${pct(burningCost, 2)}`);
+      L.push(`• Pure Premium Rate: ${pct(burningCost, 2)} (текущий тариф ${pct((z.tariff || 0) * 100, 2)})`);
+      L.push(`• Прогнозный КУ (Loss Ratio): ${pct(forecastLR, 1)}`);
+      if (portfolioLR != null) L.push(`• Портфельный КУ компании: ${pct(portfolioLR, 2)}`);
+      L.push(`• Combined Ratio (LR + 25 % расходы): ${pct((forecastLR || 0) + 25, 1)}`);
+      L.push(`• Андеррайтинговая прибыль/убыток: ${fmtT_M(uwProfit)}/год`);
+      L.push(`• Coefficient of Variation выплат (CV): ${cv.toFixed(2).replace('.', ',')}`);
+      L.push('');
+      L.push('Хвостовой риск:');
+      L.push(`  • PML 99 % (Compound Poisson): ${fmtT(PML99)}`);
+      L.push(`  • TVaR / CVaR 99 % (Expected Shortfall): ${fmtT(TVaR99)}`);
+      L.push(`  • 1-в-100 лет (Solvency II): ${fmtT(PML99)}`);
+      L.push(`  • 1-в-250 лет (катастрофический): ${fmtT(PML995)}`);
+      L.push('');
+      L.push('Капитал и доходность:');
+      L.push(`  • Economic Capital (99,5 %): ${fmtT(EC)}`);
+      if (solvImpact != null) L.push(`  • Solvency Impact (PML / Активы Компании): ${pct(solvImpact, 2)}`);
+      L.push(`  • RAROC (риск-скорректированная доходность): ${raroc != null ? pct(raroc, 1) : '—'}`);
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  6. ПРОГНОЗ');
+      L.push('═════════════════════════════════════════');
+      L.push(`• Ожидаемое число НС на год: ${num(lambda)}`);
+      L.push(`• Ожидаемая сумма выплат: ${fmtT(expectedLoss)}/год`);
+      L.push(`• Прогнозный КУ: ${pct(forecastLR)}`);
+      L.push(`• Точка безубыточности (премия = выплаты): ${fmtT(breakEven)}/год`);
+      L.push(`• Требуемая премия при КУ 70 % (целевой): ${fmtT(breakEven / 0.7)}`);
+      if (ratioForKU70 > 1) L.push(`  → текущая премия меньше требуемой в ${ratioForKU70.toFixed(1).replace('.', ',')} раз`);
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  7. ТЕКУЩЕЕ РЕШЕНИЕ АНДЕРРАЙТЕРА');
+      L.push('═════════════════════════════════════════');
+      L.push(`Зафиксированный статус: ${verdictText}`);
+
+      L.push('');
+      L.push('═════════════════════════════════════════');
+      L.push('  ВОПРОСЫ К ТЕБЕ');
+      L.push('═════════════════════════════════════════');
+      L.push('1. Стоит ли заключать договор на текущих условиях? Если да — на каких корректировках?');
+      L.push('2. Какие риски ты видишь как критические, а какие — приемлемые?');
+      L.push('3. Если отказать — приведи 3 главных причины.');
+      L.push('4. Если принимать — какую структуру перестрахования рекомендуешь');
+      L.push('   (Quota Share / Surplus / Per-Risk XOL / Cat XOL — с конкретными лимитами в тенге)?');
+      L.push('5. На сколько раз нужно увеличить премию для финансовой устойчивости (целевой КУ 70 %)?');
+      L.push('6. Какие дополнительные данные стоит запросить у страхователя перед окончательным решением');
+      L.push('   (мероприятия по охране труда, статистика по подразделениям, и т.п.)?');
+      L.push('7. Дай свой композитный риск-скор от 0 до 100 (как у меня) и сравни с моим.');
+      L.push('');
+      L.push('Отвечай как опытный коллега, дай конкретные цифры и формулировки. Если видишь моменты, которые я мог упустить — обязательно укажи.');
+
+      return L.join('\n');
+    }
+
+    function open() {
+      if (!cachedPrompt) cachedPrompt = buildPrompt();
+      const ta = document.getElementById('ai-prompt-text');
+      ta.value = cachedPrompt;
+      const stats = document.getElementById('ai-prompt-stats');
+      const words = cachedPrompt.split(/\s+/).filter(Boolean).length;
+      stats.textContent = `${cachedPrompt.length.toLocaleString('ru-RU')} символов · ${words.toLocaleString('ru-RU')} слов · ≈ ${Math.ceil(cachedPrompt.length / 4).toLocaleString('ru-RU')} токенов`;
+      document.getElementById('ai-panel').classList.add('is-open');
+      document.getElementById('ai-overlay').classList.add('is-open');
+      document.getElementById('ai-fab').classList.add('is-hidden');
+      isOpen = true;
+    }
+
+    function close() {
+      document.getElementById('ai-panel').classList.remove('is-open');
+      document.getElementById('ai-overlay').classList.remove('is-open');
+      document.getElementById('ai-fab').classList.remove('is-hidden');
+      isOpen = false;
+    }
+
+    function toggle() { isOpen ? close() : open(); }
+
+    function copy() {
+      const ta = document.getElementById('ai-prompt-text');
+      const btn = document.getElementById('ai-copy-btn');
+      const txt = ta.value;
+      const onSuccess = () => {
+        btn.classList.add('is-copied');
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<span class="ai-btn-icon">✓</span> Скопировано';
+        setTimeout(() => { btn.classList.remove('is-copied'); btn.innerHTML = orig; }, 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(onSuccess).catch(() => {
+          ta.select(); document.execCommand('copy'); onSuccess();
+        });
+      } else {
+        ta.select(); document.execCommand('copy'); onSuccess();
+      }
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && isOpen) close(); });
+
+    return { toggle, open, close, copy };
+  })();
+
 })();
