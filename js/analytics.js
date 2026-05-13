@@ -2973,9 +2973,87 @@
       }
     }
 
+    function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      const ta = document.getElementById('ai-prompt-text');
+      ta.select();
+      document.execCommand('copy');
+      return Promise.resolve();
+    }
+
+    function showToast(html, durationMs = 4500) {
+      const toast = document.getElementById('ai-toast');
+      toast.innerHTML = html;
+      toast.classList.add('is-visible');
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => toast.classList.remove('is-visible'), durationMs);
+    }
+
+    function isMac() {
+      return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    }
+
+    function sendTo(service) {
+      if (!cachedPrompt) cachedPrompt = buildPrompt();
+      const prompt = cachedPrompt;
+      const enc = encodeURIComponent(prompt);
+
+      const URL_LIMIT = 1900; // safe length for query param
+
+      let url, prefillSupported = false;
+      switch (service) {
+        case 'chatgpt':
+          // ChatGPT supports ?q= and ?prompt= — pre-fills the input
+          if (enc.length <= URL_LIMIT) {
+            url = 'https://chatgpt.com/?q=' + enc;
+            prefillSupported = true;
+          } else {
+            url = 'https://chatgpt.com/';
+          }
+          break;
+        case 'claude':
+          // claude.ai has no public URL-param for pre-fill
+          url = 'https://claude.ai/new';
+          break;
+        case 'gemini':
+          url = 'https://gemini.google.com/app';
+          break;
+        case 'perplexity':
+          if (enc.length <= URL_LIMIT) {
+            url = 'https://www.perplexity.ai/?q=' + enc;
+            prefillSupported = true;
+          } else {
+            url = 'https://www.perplexity.ai/';
+          }
+          break;
+        default:
+          url = '/';
+      }
+
+      copyToClipboard(prompt).then(() => {
+        // Open in new tab
+        window.open(url, '_blank', 'noopener,noreferrer');
+        // Show contextual toast
+        const cmdKey = isMac() ? '⌘' : 'Ctrl';
+        if (prefillSupported) {
+          showToast(`<strong>Промпт подставлен в URL и скопирован в буфер</strong>
+            <span>Если поле инпута пустое — нажмите <kbd>${cmdKey}</kbd>+<kbd>V</kbd>. Затем <kbd>Enter</kbd>.</span>`);
+        } else {
+          showToast(`<strong>Промпт скопирован в буфер</strong>
+            <span>В открывшейся вкладке нажмите <kbd>${cmdKey}</kbd>+<kbd>V</kbd> и затем <kbd>Enter</kbd></span>`);
+        }
+      }).catch(() => {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        showToast(`<strong>Открыто в новой вкладке</strong>
+          <span>Промпт нужно скопировать вручную — выделите текст и нажмите ${isMac() ? '⌘' : 'Ctrl'}+C</span>`);
+      });
+    }
+
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && isOpen) close(); });
 
-    return { toggle, open, close, copy };
+    return { toggle, open, close, copy, sendTo };
   })();
 
 })();

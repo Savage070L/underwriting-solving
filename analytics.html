@@ -518,10 +518,12 @@
         <button class="ai-btn ai-btn--primary" id="ai-copy-btn" onclick="AIConsultant.copy()">
           <span class="ai-btn-icon">📋</span> Скопировать промпт
         </button>
-        <a class="ai-btn ai-btn--secondary" href="https://chat.openai.com/" target="_blank" rel="noopener">→ ChatGPT</a>
-        <a class="ai-btn ai-btn--secondary" href="https://claude.ai/new" target="_blank" rel="noopener">→ Claude</a>
-        <a class="ai-btn ai-btn--secondary" href="https://gemini.google.com/" target="_blank" rel="noopener">→ Gemini</a>
+        <button class="ai-btn ai-btn--secondary" onclick="AIConsultant.sendTo('chatgpt')">→ ChatGPT</button>
+        <button class="ai-btn ai-btn--secondary" onclick="AIConsultant.sendTo('claude')">→ Claude</button>
+        <button class="ai-btn ai-btn--secondary" onclick="AIConsultant.sendTo('gemini')">→ Gemini</button>
+        <button class="ai-btn ai-btn--secondary" onclick="AIConsultant.sendTo('perplexity')">→ Perplexity</button>
       </div>
+      <div class="ai-toast" id="ai-toast"></div>
       <textarea class="ai-prompt-text" id="ai-prompt-text" readonly></textarea>
       <div class="ai-panel-foot">
         <span id="ai-prompt-stats">—</span>
