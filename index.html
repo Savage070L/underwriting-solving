@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Генератор АР и Заключений</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Генератор андеррайтинговых документов</h1>
+      <p>Standard Life — все данные обрабатываются локально</p>
+    </header>
+
+    <!-- Reference files (uploaded once, cached) -->
+    <div class="section">
+      <div class="section-title">
+        Справочники
+        <span class="badge" id="ref-badge">0/4 загружено</span>
+        <button class="btn-clear" onclick="App.clearCache()">Очистить кэш</button>
+      </div>
+      <div class="upload-grid">
+        <div class="upload-zone" id="zone-popravka" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">📊</div>
+          <div class="uz-label">Поправочные коэффициенты</div>
+          <div class="uz-status" id="status-popravka">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('popravka', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-normativ" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">📈</div>
+          <div class="uz-label">Норматив</div>
+          <div class="uz-status" id="status-normativ">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('normativ', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-ku" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">📉</div>
+          <div class="uz-label">КУ по классам</div>
+          <div class="uz-status" id="status-ku">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('ku', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-calculator" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">🔢</div>
+          <div class="uz-label">Калькулятор рентабельности</div>
+          <div class="uz-status" id="status-calculator">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('calculator', this.files[0])">
+        </div>
+      </div>
+    </div>
+
+    <!-- Per-case files -->
+    <div class="section">
+      <div class="section-title">Файлы по кейсу</div>
+      <div class="upload-grid-main">
+        <div class="upload-zone-main" id="zone-zayavka" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">📋</div>
+          <div class="uz-label">Заявка на андеррайтинг</div>
+          <div class="uz-status" id="status-zayavka">Загрузите .xlsm файл</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadZayavka(this.files[0])">
+        </div>
+        <div class="upload-zone-main" id="zone-claims" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">📑</div>
+          <div class="uz-label">История убытков</div>
+          <div class="uz-status" id="status-claims">Загрузите .xls файл</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadClaims(this.files[0])">
+        </div>
+      </div>
+
+      <!-- Preview panel -->
+      <div class="preview-panel" id="preview-panel">
+        <div class="preview-grid" id="preview-grid"></div>
+      </div>
+
+      <!-- Analytics dashboard button -->
+      <div class="analytics-cta" id="analytics-cta">
+        <button class="btn-analytics" onclick="App.openAnalytics()">
+          <span class="ba-icon">📊</span>
+          <span class="ba-label">Открыть аналитический дашборд</span>
+          <span class="ba-hint">по истории убытков</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Form fields (only 4 manual inputs) -->
+    <div class="section">
+      <div class="section-title">Параметры документа</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="docNumber">Номер АР / Заключения</label>
+          <input type="text" id="docNumber" placeholder="Например: 13">
+        </div>
+        <div class="checkbox-group form-group">
+          <input type="checkbox" id="nonResident">
+          <label for="nonResident">Нерезидент</label>
+        </div>
+        <div class="form-group">
+          <label for="activityType">Вид деятельности (для калькулятора рисков)</label>
+          <select id="activityType">
+            <option value="">— Загрузите калькулятор —</option>
+          </select>
+        </div>
+        <div class="form-group full-width">
+          <label for="verdict">
+            Решение по риску
+            <span class="verdict-hint" id="verdict-hint"></span>
+          </label>
+          <select id="verdict" onchange="App.onVerdictChange()">
+            <option value="auto">— Авто (по коэффициенту) —</option>
+            <option value="accept_standard">Принятие со стандартным коэффициентом</option>
+            <option value="accept_adjusted">Принятие с повышенным/пониженным коэффициентом</option>
+            <option value="reject">Отклонение в соответствии со степенью риска</option>
+            <option value="defer">Отложение страхования на определенный срок</option>
+          </select>
+        </div>
+        <div class="form-group full-width">
+          <label for="riskText">Описание / анализ рисков (свободный текст)</label>
+          <textarea id="riskText" placeholder="Опишите основную деятельность страхователя, условия работы, особенности..."></textarea>
+        </div>
+      </div>
+
+      <!-- Contract dates (shown only if empty in Excel) -->
+      <div class="dates-row" id="dates-row">
+        <div class="form-group">
+          <label for="periodFrom">Дата начала договора</label>
+          <input type="date" id="periodFrom">
+        </div>
+        <div class="form-group">
+          <label for="periodTo">Дата окончания договора</label>
+          <input type="date" id="periodTo">
+        </div>
+      </div>
+
+      <!-- BIN lookup status (auto, no manual input) -->
+      <div class="bin-status" id="bin-status"></div>
+    </div>
+
+    <!-- Generate buttons -->
+    <div class="section">
+      <div class="section-title">Генерация документов</div>
+      <div class="btn-row">
+        <button class="btn-generate btn-ar" id="btnAR" onclick="App.generateAR()" disabled>
+          Сформировать АР
+        </button>
+        <button class="btn-generate btn-zakl" id="btnZakl" onclick="App.generateZakl()" disabled>
+          Сформировать Заключение
+        </button>
+        <button class="btn-generate btn-protocol" id="btnProtocol" onclick="App.generateProtocol()" disabled>
+          Сформировать Протокол
+        </button>
+      </div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <script src="js/lib/xlsx.full.min.js"></script>
+  <script src="js/lib/docx.min.js"></script>
+  <script src="js/lib/FileSaver.min.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/excel-reader.js"></script>
+  <script src="js/ar-generator.js"></script>
+  <script src="js/zakl-generator.js"></script>
+  <script src="js/protocol-generator.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

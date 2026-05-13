@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аналитика убытков — Standard Life</title>
+  <link rel="stylesheet" href="css/analytics.css">
+</head>
+<body>
+  <div class="dash-empty" id="dash-empty" style="display:none">
+    <div class="empty-card">
+      <div class="empty-icon">📊</div>
+      <h2>Данные не загружены</h2>
+      <p>Откройте главную страницу, загрузите справочники, заявку и историю убытков, затем нажмите «Открыть аналитический дашборд».</p>
+      <a href="index.html" class="empty-btn">← Перейти к форме</a>
+    </div>
+  </div>
+
+  <div class="dash" id="dash" style="display:none">
+    <!-- HERO BANNER -->
+    <header class="hero">
+      <div class="hero-bg"></div>
+      <div class="hero-inner">
+        <div class="hero-top">
+          <a href="index.html" class="back-link">← Назад к форме</a>
+          <div class="hero-brand">
+            <div class="brand-mark">SL</div>
+            <span>Standard Life · Андеррайтинговый отчёт</span>
+          </div>
+        </div>
+        <div class="hero-grid">
+          <div class="hero-main">
+            <div class="hero-tag" id="hero-tag">Анализ риска</div>
+            <h1 id="company-name">—</h1>
+            <div class="hero-meta" id="company-meta"></div>
+          </div>
+          <div class="hero-side">
+            <div class="hero-side-block">
+              <span class="hsl-label">Период анализа</span>
+              <span class="hsl-value" id="period-value">—</span>
+            </div>
+            <div class="hero-side-block">
+              <span class="hsl-label">Сформировано</span>
+              <span class="hsl-value" id="generated-at">—</span>
+            </div>
+          </div>
+        </div>
+        <!-- Verdict gauge -->
+        <div class="hero-verdict" id="hero-verdict"></div>
+      </div>
+    </header>
+
+    <!-- KPI strip -->
+    <section class="kpi-row" id="kpi-row"></section>
+
+    <!-- Risk Score banner -->
+    <section class="row-1">
+      <div class="card card-score" id="card-score">
+        <div class="card-head">
+          <h2><span class="card-icon">🎯</span> Композитный Risk Score</h2>
+          <div class="card-sub" id="score-sub">Интегральная оценка качества риска по 5 параметрам</div>
+        </div>
+        <div class="card-body" id="score-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: LOSS EXPERIENCE -->
+    <div class="section-head">
+      <div class="sh-num">1</div>
+      <div class="sh-text">
+        <h3>Опыт убыточности</h3>
+        <p>Объёмы, динамика и сезонность страховых случаев за 3-летний период</p>
+      </div>
+    </div>
+
+    <section class="row-2">
+      <div class="card card-feature" id="card-dynamic">
+        <div class="card-head">
+          <h2><span class="card-icon">📈</span> Динамика по годам</h2>
+          <div class="card-sub" id="dynamic-sub"></div>
+        </div>
+        <div class="card-body" id="dynamic-body"></div>
+      </div>
+      <div class="card" id="card-severity">
+        <div class="card-head">
+          <h2><span class="card-icon">⚖️</span> Структура по тяжести</h2>
+          <div class="card-sub">Признанные страховыми за 3 года</div>
+        </div>
+        <div class="card-body" id="severity-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-heatmap">
+        <div class="card-head">
+          <h2><span class="card-icon">🗺️</span> Тепловая карта: год × месяц</h2>
+          <div class="card-sub">Интенсивность страховых случаев по месяцам — чем темнее, тем больше НС</div>
+        </div>
+        <div class="card-body" id="heatmap-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-monthly">
+        <div class="card-head">
+          <h2><span class="card-icon">📊</span> Помесячный тренд (24 месяца)</h2>
+          <div class="card-sub" id="monthly-sub"></div>
+        </div>
+        <div class="card-body" id="monthly-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-quarter">
+        <div class="card-head">
+          <h2><span class="card-icon">🗓️</span> Сезонность по кварталам</h2>
+          <div class="card-sub">За 3 года</div>
+        </div>
+        <div class="card-body" id="quarter-body"></div>
+      </div>
+      <div class="card" id="card-annuity">
+        <div class="card-head">
+          <h2><span class="card-icon">🔄</span> Аннуитетная нагрузка</h2>
+          <div class="card-sub">Число выплат на одно дело</div>
+        </div>
+        <div class="card-body" id="annuity-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: FINANCIAL DEEP DIVE -->
+    <div class="section-head">
+      <div class="sh-num">2</div>
+      <div class="sh-text">
+        <h3>Финансовая глубина</h3>
+        <p>Распределение выплат, крупнейшие кейсы и смертельные случаи</p>
+      </div>
+    </div>
+
+    <section class="row-1">
+      <div class="card" id="card-finance">
+        <div class="card-head">
+          <h2><span class="card-icon">💰</span> Финансовый профиль выплат</h2>
+          <div class="card-sub">Распределение размера выплаты на одно дело</div>
+        </div>
+        <div class="card-body" id="finance-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-top">
+        <div class="card-head">
+          <h2><span class="card-icon">🏆</span> Топ-10 крупнейших выплат</h2>
+          <div class="card-sub">За 3 года</div>
+        </div>
+        <div class="card-body" id="top-body"></div>
+      </div>
+      <div class="card" id="card-deaths">
+        <div class="card-head">
+          <h2><span class="card-icon">⚠️</span> Смертельные случаи</h2>
+          <div class="card-sub" id="deaths-sub"></div>
+        </div>
+        <div class="card-body" id="deaths-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-top30">
+        <div class="card-head">
+          <h2><span class="card-icon">📋</span> Реестр топ-30 крупнейших дел</h2>
+          <div class="card-sub">Детальный список с категорией и страховщиком</div>
+        </div>
+        <div class="card-body" id="top30-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-freqsev">
+        <div class="card-head">
+          <h2><span class="card-icon">🔬</span> Декомпозиция частоты × серьёзности</h2>
+          <div class="card-sub">Актуарное разложение чистой премии</div>
+        </div>
+        <div class="card-body" id="freqsev-body"></div>
+      </div>
+      <div class="card" id="card-var">
+        <div class="card-head">
+          <h2><span class="card-icon">📊</span> VaR / Экстремальные потери</h2>
+          <div class="card-sub">Распределение потенциальных крупных выплат</div>
+        </div>
+        <div class="card-body" id="var-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-sevyear">
+        <div class="card-head">
+          <h2><span class="card-icon">📐</span> Pivot: тяжесть × год</h2>
+          <div class="card-sub">Кросс-таблица числа дел и сумм выплат по категориям и годам</div>
+        </div>
+        <div class="card-body" id="sevyear-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: INSURERS & OPERATIONS -->
+    <div class="section-head">
+      <div class="sh-num">3</div>
+      <div class="sh-text">
+        <h3>Страховщики и операционные метрики</h3>
+        <p>Распределение портфеля, эффективность урегулирования</p>
+      </div>
+    </div>
+
+    <section class="row-2">
+      <div class="card" id="card-statuses">
+        <div class="card-head">
+          <h2><span class="card-icon">🗂️</span> Распределение статусов рассмотрения</h2>
+          <div class="card-sub">Все встретившиеся значения поля «Результат страхового случая»</div>
+        </div>
+        <div class="card-body" id="statuses-body"></div>
+      </div>
+      <div class="card" id="card-insbubble">
+        <div class="card-head">
+          <h2><span class="card-icon">⚪</span> Bubble-сравнение страховщиков</h2>
+          <div class="card-sub">Размер пузыря = совокупная сумма выплат</div>
+        </div>
+        <div class="card-body" id="insbubble-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-insyear">
+        <div class="card-head">
+          <h2><span class="card-icon">📊</span> Эволюция страховщиков по годам</h2>
+          <div class="card-sub">Кто доминировал в каком году</div>
+        </div>
+        <div class="card-body" id="insyear-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-insurers">
+        <div class="card-head">
+          <h2><span class="card-icon">🏢</span> Сравнение страховщиков</h2>
+          <div class="card-sub" id="insurers-sub"></div>
+        </div>
+        <div class="card-body" id="insurers-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-settlement">
+        <div class="card-head">
+          <h2><span class="card-icon">⏱️</span> Скорость урегулирования</h2>
+          <div class="card-sub" id="settlement-sub"></div>
+        </div>
+        <div class="card-body" id="settlement-body"></div>
+      </div>
+      <div class="card" id="card-types">
+        <div class="card-head">
+          <h2><span class="card-icon">📋</span> Типы риска</h2>
+          <div class="card-sub">Распределение по полю «Тип риска»</div>
+        </div>
+        <div class="card-body" id="types-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: BENCHMARKING -->
+    <div class="section-head">
+      <div class="sh-num">4</div>
+      <div class="sh-text">
+        <h3>Сравнение с нормами и портфелем</h3>
+        <p>Отраслевая норма по ОКЭД, портфельные показатели Компании</p>
+      </div>
+    </div>
+
+    <section class="row-2">
+      <div class="card" id="card-risk-profile">
+        <div class="card-head">
+          <h2><span class="card-icon">🎯</span> Профиль риска</h2>
+          <div class="card-sub" id="profile-sub"></div>
+        </div>
+        <div class="card-body" id="profile-body"></div>
+      </div>
+      <div class="card" id="card-tariff">
+        <div class="card-head">
+          <h2><span class="card-icon">🧮</span> Структура тарифа</h2>
+          <div class="card-sub">Расчёт страховой премии</div>
+        </div>
+        <div class="card-body" id="tariff-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-norms">
+        <div class="card-head">
+          <h2><span class="card-icon">📊</span> Сравнение с отраслевыми нормами</h2>
+          <div class="card-sub" id="norms-sub"></div>
+        </div>
+        <div class="card-body" id="norms-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-funnel">
+        <div class="card-head">
+          <h2><span class="card-icon">🔻</span> Воронка признания страховыми</h2>
+          <div class="card-sub">Путь дела от заявления до выплаты</div>
+        </div>
+        <div class="card-body" id="funnel-body"></div>
+      </div>
+      <div class="card" id="card-pareto">
+        <div class="card-head">
+          <h2><span class="card-icon">📉</span> Парето-распределение выплат</h2>
+          <div class="card-sub">Кумулятивная доля по дел</div>
+        </div>
+        <div class="card-body" id="pareto-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-premdecomp">
+        <div class="card-head">
+          <h2><span class="card-icon">🧱</span> Разложение премии: что покрывает / что не покрывает</h2>
+          <div class="card-sub">Как соотносятся премия и ожидаемые компоненты убытка</div>
+        </div>
+        <div class="card-body" id="premdecomp-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-concentration">
+        <div class="card-head">
+          <h2><span class="card-icon">🎚️</span> Концентрация и качество портфеля</h2>
+          <div class="card-sub">Индексы концентрации, хвостовая часть, катастрофические события</div>
+        </div>
+        <div class="card-body" id="concentration-body"></div>
+      </div>
+      <div class="card" id="card-percapita">
+        <div class="card-head">
+          <h2><span class="card-icon">👷</span> Экономика на одного работника</h2>
+          <div class="card-sub">Удельная нагрузка и достаточность премии</div>
+        </div>
+        <div class="card-body" id="percapita-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: ACTUARIAL EXPERTISE -->
+    <div class="section-head">
+      <div class="sh-num">5</div>
+      <div class="sh-text">
+        <h3>Актуарная экспертиза</h3>
+        <p>Burning Cost, Pure Premium Rate, Combined Ratio, PML и оценка по перестрахованию</p>
+      </div>
+    </div>
+
+    <section class="row-1">
+      <div class="card" id="card-actuarial">
+        <div class="card-head">
+          <h2><span class="card-icon">🧪</span> Ключевые актуарные показатели</h2>
+          <div class="card-sub">Burning Cost, Pure Premium, Combined Ratio, PML и Solvency Impact</div>
+        </div>
+        <div class="card-body" id="actuarial-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-poisson">
+        <div class="card-head">
+          <h2><span class="card-icon">🎲</span> Распределение Пуассона</h2>
+          <div class="card-sub">Вероятность N страховых случаев в течение года</div>
+        </div>
+        <div class="card-body" id="poisson-body"></div>
+      </div>
+      <div class="card" id="card-trend">
+        <div class="card-head">
+          <h2><span class="card-icon">📈</span> Тренд и прогноз</h2>
+          <div class="card-sub">Линейная регрессия числа НС с проекцией</div>
+        </div>
+        <div class="card-body" id="trend-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-premladder">
+        <div class="card-head">
+          <h2><span class="card-icon">🪜</span> Декомпозиция технической премии</h2>
+          <div class="card-sub">Pure Premium → Risk Loading → Expense Loading → Profit Margin = Technical Premium</div>
+        </div>
+        <div class="card-body" id="premladder-body"></div>
+      </div>
+    </section>
+
+    <section class="row-2">
+      <div class="card" id="card-tailrisk">
+        <div class="card-head">
+          <h2><span class="card-icon">🌊</span> Хвостовой риск (Tail Risk)</h2>
+          <div class="card-sub">TVaR / CVaR, 1-в-100, 1-в-250 лет, максимально вероятный убыток</div>
+        </div>
+        <div class="card-body" id="tailrisk-body"></div>
+      </div>
+      <div class="card" id="card-capital">
+        <div class="card-head">
+          <h2><span class="card-icon">💎</span> Экономический капитал и RAROC</h2>
+          <div class="card-sub">Капитал на риск и риск-скорректированная доходность</div>
+        </div>
+        <div class="card-body" id="capital-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-volatility">
+        <div class="card-head">
+          <h2><span class="card-icon">📡</span> Волатильность и стабильность</h2>
+          <div class="card-sub">Коэффициенты вариации частоты, серьёзности и совокупных убытков</div>
+        </div>
+        <div class="card-body" id="volatility-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-reinsurance">
+        <div class="card-head">
+          <h2><span class="card-icon">🛡️</span> Рекомендация по перестрахованию</h2>
+          <div class="card-sub">Уровень собственного удержания и параметры передачи</div>
+        </div>
+        <div class="card-body" id="reinsurance-body"></div>
+      </div>
+    </section>
+
+    <!-- Section header: FORECAST & VERDICT -->
+    <div class="section-head section-head--accent">
+      <div class="sh-num sh-num--accent">6</div>
+      <div class="sh-text">
+        <h3>Прогноз и рекомендация</h3>
+        <p>Ожидаемая убыточность по новому договору, сценарии и итоговый вердикт</p>
+      </div>
+    </div>
+
+    <section class="row-1">
+      <div class="card card-accent" id="card-forecast">
+        <div class="card-head">
+          <h2><span class="card-icon">🔮</span> Прогноз по новому договору</h2>
+          <div class="card-sub" id="forecast-sub"></div>
+        </div>
+        <div class="card-body" id="forecast-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-sensitivity">
+        <div class="card-head">
+          <h2><span class="card-icon">📐</span> Анализ чувствительности</h2>
+          <div class="card-sub">При каких условиях договор перестаёт быть убыточным</div>
+        </div>
+        <div class="card-body" id="sensitivity-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-required">
+        <div class="card-head">
+          <h2><span class="card-icon">⚖️</span> Требуемая премия при различных целевых КУ</h2>
+          <div class="card-sub">Сколько должна стоить премия, чтобы договор был финансово устойчив</div>
+        </div>
+        <div class="card-body" id="required-body"></div>
+      </div>
+    </section>
+
+    <section class="row-1">
+      <div class="card" id="card-stress">
+        <div class="card-head">
+          <h2><span class="card-icon">🌪️</span> Стресс-тесты</h2>
+          <div class="card-sub">Что произойдёт с убыточностью договора при отклонении от базового сценария</div>
+        </div>
+        <div class="card-body" id="stress-body"></div>
+      </div>
+    </section>
+
+    <!-- Glossary now appears as inline tooltips on each card. Bottom block hidden. -->
+    <div class="section-head" style="display:none">
+      <div class="sh-num">6</div>
+      <div class="sh-text">
+        <h3>Методология и определения</h3>
+        <p>Формулы расчёта и значения используемых терминов</p>
+      </div>
+    </div>
+    <section class="row-1" style="display:none">
+      <div class="card" id="card-glossary">
+        <div class="card-head">
+          <h2><span class="card-icon">📚</span> Глоссарий и формулы</h2>
+          <div class="card-sub">Все ключевые показатели — определения и методика расчёта</div>
+        </div>
+        <div class="card-body" id="glossary-body"></div>
+      </div>
+    </section>
+
+    <footer class="dash-footer">
+      <span>Standard Life · Аналитика убытков</span>
+      <span class="dot">·</span>
+      <span>Все вычисления выполнены локально в браузере</span>
+      <span class="dot">·</span>
+      <span id="footer-generated"></span>
+    </footer>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/analytics.js"></script>
+</body>
+</html>
