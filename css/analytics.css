@@ -281,8 +281,6 @@ body {
   max-width: 1320px;
   margin: 0 auto 28px;
   padding: 0 40px;
-  position: relative;
-  z-index: 2;
 }
 .kpi {
   background: var(--card);
