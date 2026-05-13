@@ -2716,28 +2716,15 @@
       const sev = A.bySeverity || {};
       const conc = A.concentration || {};
       const fs = A.freqSeverity || {};
+      const settl = A.settlement || {};
+      const lag = A.reportingLag || {};
       const premium = z.premiumWithCoeff || z.premiumBase || 0;
       const sumInsured = z.insuranceSum || 0;
-      const expectedLoss = A.avgSumPerYear || 0;
-      const forecastLR = premium > 0 ? 100 * expectedLoss / premium : null;
-      const burningCost = sumInsured > 0 ? (expectedLoss / sumInsured) * 100 : 0;
       const lambda = A.avgFreq || 0;
       const mu = A.finance?.avg || 0;
       const cv = fs.cv || 1;
-      const sigmaS = Math.sqrt(lambda * mu * mu * (cv * cv + 1));
-      const ES = lambda * mu;
-      const PML99 = ES + 2.326 * sigmaS;
-      const PML995 = ES + 2.576 * sigmaS;
-      const TVaR99 = ES + 2.665 * sigmaS;
-      const EC = 2.576 * sigmaS;
-      const expenses = premium * 0.25;
-      const uwProfit = premium - ES - expenses;
-      const raroc = EC > 0 ? (uwProfit / EC) * 100 : null;
       const portfolioLR = snap.ku ? snap.ku.lossRatioWith * 100 : null;
       const assets = snap.normativ?.fullAssetsTenge || 0;
-      const solvImpact = assets > 0 ? (PML99 / assets) * 100 : null;
-      const company = (typeof Utils !== 'undefined' && Utils.formatCompanyName)
-        ? Utils.formatCompanyName(z.insurerName) : (z.insurerName || '—');
 
       const fmtT = (n) => n != null ? Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' ₸' : '—';
       const fmtT_M = (n) => {
@@ -2756,178 +2743,239 @@
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
       };
 
-      const insurerLines = (A.byInsurer || []).slice(0, 5).map(i =>
-        `  • ${i.name}: ${num(i.count)} дел, ${fmtT_M(i.sum)} выплат, ср. выплата ${fmtT_M(i.avgPayment)}`
+      const insurerLines = (A.byInsurer || []).slice(0, 5).map((i, idx) =>
+        `  • Страховщик #${idx + 1}: ${num(i.count)} дел, ${fmtT_M(i.sum)} выплат, ср. выплата ${fmtT_M(i.avgPayment)}`
       ).join('\n');
       const yearLines = (A.byYear || []).map(y =>
-        `  • ${y.year}: ${num(y.cases)} НС, выплат ${fmtT_M(y.sum)}, смертельных ${num(y.death)}`
+        `  • ${y.year}: ${num(y.cases)} признанных НС, ${num(y.paid)} с выплатой, выплат ${fmtT_M(y.sum)}, смертельных ${num(y.death)}, УПТ≥30% ${num(y.uptHigh)}`
+      ).join('\n');
+      const quarterLines = (A.byQuarter || []).map(q =>
+        `  • ${q.label}: ${num(q.cases)} НС, ${fmtT_M(q.sum)}`
       ).join('\n');
 
       const sevDeath = sev.death?.count || 0;
-      const sevUptHigh = (sev.upt90?.count || 0) + (sev.upt60?.count || 0) + (sev.upt30?.count || 0);
+      const sevDeathSum = sev.death?.sum || 0;
+      const sevUpt90 = sev.upt90?.count || 0;
+      const sevUpt60 = sev.upt60?.count || 0;
+      const sevUpt30 = sev.upt30?.count || 0;
+      const sevUptHigh = sevUpt90 + sevUpt60 + sevUpt30;
+      const sevUptHighSum = (sev.upt90?.sum || 0) + (sev.upt60?.sum || 0) + (sev.upt30?.sum || 0);
       const sevEarn = sev.earnLoss?.count || 0;
+      const sevEarnSum = sev.earnLoss?.sum || 0;
       const sevOther = sev.other?.count || 0;
-      const deathPct = A.recognition.recognized > 0 ? 100 * sevDeath / A.recognition.recognized : 0;
-      const breakEven = expectedLoss;
-      const ratioForKU70 = (breakEven / 0.7) / Math.max(premium, 1);
-      const normFreq = snap.activity ? (snap.activity.deathRate + snap.activity.injuryRate) : null;
-      const normDeath = snap.activity ? snap.activity.deathRate : null;
-      const factFreq = z.workers > 0 ? lambda * 1000 / z.workers : null;
-      const factDeath = z.workers > 0 ? (sevDeath / 3) * 1000 / z.workers : null;
-      const ratioFreq = normFreq && factFreq ? factFreq / normFreq : null;
-      const ratioDeath = normDeath && factDeath ? factDeath / normDeath : null;
-
-      const verdictMap = {
-        accept_standard: 'Принятие со стандартным коэффициентом',
-        accept_adjusted: 'Принятие с повышенным/пониженным коэффициентом',
-        reject: 'Отклонение в соответствии со степенью риска',
-        defer: 'Отложение страхования на определённый срок',
-      };
-      const verdictText = (snap.verdict && snap.verdict !== 'auto')
-        ? verdictMap[snap.verdict] : 'не зафиксирован (вычисляется автоматически по коэффициенту)';
+      const sevOtherSum = sev.other?.sum || 0;
 
       const L = [];
-      L.push('Ты опытный андеррайтер страховой компании в Казахстане. Дай профессиональную оценку: стоит ли заключать договор обязательного страхования работников от несчастных случаев (ОСНС) на текущих условиях.');
+      L.push('Ты опытный независимый андеррайтер обязательного страхования работника от несчастных случаев (ОСНС) в Казахстане.');
       L.push('');
-      L.push('Ниже — полный аналитический отчёт по потенциальному договору.');
+      L.push('Применимое законодательство:');
+      L.push('• Закон РК «Об обязательном страховании работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей» от 7 февраля 2005 года № 30-III');
+      L.push('• Социальный кодекс РК (в части статьи 195-1 и соответствующих рисков)');
+      L.push('• Нормативные правовые акты Агентства РК по регулированию и развитию финансового рынка (АРРФР)');
+      L.push('• Стандарты Solvency II как методологическая база для актуарных расчётов');
+      L.push('');
+      L.push('Я предоставлю обезличенные данные. Твоя задача:');
+      L.push('1. Самостоятельно рассчитать ключевые актуарные показатели (Burning Cost, Pure Premium, КУ, PML, Combined Ratio, RAROC, Economic Capital).');
+      L.push('2. Дать независимое заключение, опирающееся на цифры и НПА РК, а не на готовые «выводы».');
+      L.push('3. Обосновать каждую рекомендацию конкретной формулой, ссылкой на отраслевую норму или нормативно-правовым актом.');
+      L.push('4. Сохранять нейтральность: не пытаться оправдать или забраковать договор заранее.');
+      L.push('5. Если данных недостаточно или есть логические нестыковки — указать прямо.');
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  1. КЛИЕНТ');
+      L.push('  1. ПРОФИЛЬ РИСКА');
       L.push('═════════════════════════════════════════');
-      L.push(`• Страхователь: ${company}`);
-      if (z.bin) L.push(`• БИН/ИИН: ${z.bin}`);
       if (z.oked) L.push(`• ОКЭД: ${z.oked}`);
       if (z.activity) L.push(`• Вид деятельности: ${z.activity}`);
       if (z.riskClass) L.push(`• Класс профессионального риска: ${z.riskClass} (из 25)`);
       if (z.workers) L.push(`• Численность застрахованных: ${num(z.workers)} чел.`);
       if (z.region) L.push(`• Регион / филиал: ${z.region}`);
       if (z.govParticipation) L.push(`• Государственное участие: ${z.govParticipation}`);
-      if (z.legalAddress) L.push(`• Юр. адрес: ${z.legalAddress}`);
 
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  2. УСЛОВИЯ ДОГОВОРА');
+      L.push('  2. УСЛОВИЯ РАССМАТРИВАЕМОГО ДОГОВОРА');
       L.push('═════════════════════════════════════════');
-      L.push(`• Страховая сумма: ${fmtT(sumInsured)}`);
-      if (z.tariff != null) L.push(`• Базовый тариф: ${pct(z.tariff * 100, 3)}`);
-      if (z.coeff != null) L.push(`• Поправочный коэффициент: ${z.coeff}`);
-      if (z.coeffDown) L.push(`• Понижающий коэффициент: ${pct(z.coeffDown * 100, 0)}`);
-      L.push(`• Премия по договору: ${fmtT(premium)}`);
-      if (z.periodFrom && z.periodTo) L.push(`• Период страхования: ${date(z.periodFrom)} – ${date(z.periodTo)}`);
+      L.push(`• Страховая сумма (S.I.): ${fmtT(sumInsured)}`);
+      if (z.tariff != null) L.push(`• Базовый тариф по ОКЭД: ${pct(z.tariff * 100, 3)}`);
+      if (z.coeff != null) L.push(`• Поправочный коэффициент (по матрице «работники × НС»): ${z.coeff}`);
+      if (z.coeffDown != null) L.push(`• Понижающий коэффициент: ${pct((z.coeffDown || 0) * 100, 0)}`);
+      L.push(`• Премия по договору (P): ${fmtT(premium)}`);
+      if (z.periodFrom && z.periodTo) L.push(`• Период страхования: ${date(z.periodFrom)} – ${date(z.periodTo)} (12 месяцев)`);
       if (z.paymentOrder) L.push(`• Порядок оплаты: ${z.paymentOrder}`);
 
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  3. ИСТОРИЯ УБЫТКОВ (3 года)');
+      L.push('  3. СТАТИСТИКА УБЫТКОВ ЗА 3 ГОДА (СЫРЫЕ ДАННЫЕ)');
       L.push('═════════════════════════════════════════');
       L.push(`Период анализа: ${date(A.cutoffDate)} – ${date(A.reportDate)}`);
       L.push('');
-      L.push('Объёмы:');
+      L.push('A. ОБЪЁМЫ:');
       L.push(`  • Заявленных страховых случаев: ${num(A.recognition.filed)}`);
-      L.push(`  • Признано страховыми: ${num(A.recognition.recognized)} (${pct(100 * A.recognition.recognized / Math.max(A.recognition.filed, 1), 1)})`);
-      L.push(`  • С произведённой выплатой: ${num(A.recognition.paid)}`);
+      L.push(`  • Признано страховыми: ${num(A.recognition.recognized)}`);
       L.push(`  • Отказов (недоказанность): ${num(A.recognition.rejected)}`);
       L.push(`  • На рассмотрении: ${num(A.recognition.pending)}`);
-      L.push(`  • РЗНУ на отчётную дату: ${num(A.recognition.rznu)} ${A.recognition.rznu === 0 ? '(резервов нет)' : '(есть незакрытые)'}`);
+      L.push(`  • С произведённой выплатой: ${num(A.recognition.paid)}`);
+      L.push(`  • РЗНУ на отчётную дату: ${num(A.recognition.rznu)}`);
+      L.push(`  • За последние 12 мес.: ${num(A.last12?.cases)} НС, ${fmtT_M(A.last12?.sum)}`);
+
       L.push('');
-      L.push('Финансовые показатели:');
-      L.push(`  • Совокупная сумма выплат: ${fmtT(A.sumTotal3y)}`);
-      L.push(`  • Среднегодовая сумма: ${fmtT(A.avgSumPerYear)}`);
-      L.push(`  • Среднегодовая частота: ${num(lambda)} НС/год`);
-      L.push(`  • Средняя выплата на дело: ${fmtT(mu)}`);
+      L.push('B. ФИНАНСОВЫЕ ВЫПЛАТЫ:');
+      L.push(`  • Совокупная сумма выплат за 3 года: ${fmtT(A.sumTotal3y)}`);
+      L.push(`  • Среднегодовая сумма (E[S] годовая): ${fmtT(A.avgSumPerYear)}`);
+      L.push(`  • Среднегодовая частота (λ): ${num(lambda)} НС/год`);
+      L.push(`  • Средняя выплата на дело (μ): ${fmtT(mu)}`);
       L.push(`  • Медиана выплаты: ${fmtT(A.finance.median)}`);
-      L.push(`  • P90: ${fmtT(A.finance.p90)} · P99: ${fmtT(A.finance.p99)}`);
-      L.push(`  • Максимальная выплата: ${fmtT(A.finance.max)}`);
+      L.push(`  • Минимум / Максимум: ${fmtT(A.finance.min)} / ${fmtT(A.finance.max)}`);
+      L.push(`  • Перцентили: P25 ${fmtT(A.finance.p25)} · P75 ${fmtT(A.finance.p75)} · P90 ${fmtT(A.finance.p90)} · P99 ${fmtT(A.finance.p99)}`);
+      L.push(`  • Коэффициент вариации выплат (CV_severity): ${cv.toFixed(2).replace('.', ',')}`);
+
       L.push('');
-      L.push('Структура по тяжести:');
-      L.push(`  • Смертельные случаи: ${num(sevDeath)} (${pct(deathPct)})`);
-      L.push(`  • УПТ ≥ 30 %: ${num(sevUptHigh)}`);
-      L.push(`  • Утрата заработка > 1 года (аннуитеты): ${num(sevEarn)}`);
-      L.push(`  • Иное / не классифицировано: ${num(sevOther)}`);
+      L.push('C. СТРУКТУРА ПО ТЯЖЕСТИ (категориальная):');
+      L.push(`  • Смерть: ${num(sevDeath)} случаев, сумма ${fmtT_M(sevDeathSum)}`);
+      L.push(`  • УПТ 90–100 %: ${num(sevUpt90)}`);
+      L.push(`  • УПТ 60–89 %: ${num(sevUpt60)}`);
+      L.push(`  • УПТ 30–59 %: ${num(sevUpt30)}`);
+      L.push(`  • УПТ ≥ 30 % суммарно: ${num(sevUptHigh)} случаев, сумма ${fmtT_M(sevUptHighSum)}`);
+      L.push(`  • Утрата заработка > 1 года (аннуитеты): ${num(sevEarn)}, сумма ${fmtT_M(sevEarnSum)}`);
+      L.push(`  • Иное / неклассифицированное: ${num(sevOther)}, сумма ${fmtT_M(sevOtherSum)}`);
+
       L.push('');
-      L.push('По годам:');
+      L.push('D. ДИНАМИКА ПО ГОДАМ:');
       L.push(yearLines || '  • (нет данных)');
 
-      if ((A.byInsurer || []).length > 0) {
-        const concName = conc.hhiBand === 'low' ? 'фрагментированный'
-          : conc.hhiBand === 'moderate' ? 'умеренная'
-          : conc.hhiBand === 'high' ? 'высокая' : 'крайне высокая';
+      if (A.byQuarter && A.byQuarter.some(q => q.cases > 0)) {
         L.push('');
-        L.push(`Страховщики (концентрация HHI = ${num(conc.hhi)}, ${concName}):`);
+        L.push('E. СЕЗОННОСТЬ (по кварталам за 3 года):');
+        L.push(quarterLines);
+      }
+
+      if ((A.byInsurer || []).length > 0) {
+        const concName = conc.hhiBand === 'low' ? 'фрагментированный портфель'
+          : conc.hhiBand === 'moderate' ? 'умеренная концентрация'
+          : conc.hhiBand === 'high' ? 'высокая концентрация'
+          : 'крайне высокая концентрация';
+        L.push('');
+        L.push('F. РАСПРЕДЕЛЕНИЕ ПО СТРАХОВЩИКАМ (обезличено):');
+        L.push(`  Индекс Herfindahl-Hirschman HHI = ${num(conc.hhi)} (${concName})`);
         L.push(insurerLines);
       }
 
       L.push('');
-      L.push('═════════════════════════════════════════');
-      L.push('  4. СРАВНЕНИЕ С ОТРАСЛЕВЫМИ НОРМАМИ');
-      L.push('═════════════════════════════════════════');
-      if (snap.activity) {
-        L.push(`Норматив по ОКЭД ${z.oked || ''}:`);
-        L.push(`  • Фактическая частота НС: ${factFreq ? factFreq.toFixed(2).replace('.', ',') : '—'} / 1000 чел./год`);
-        L.push(`  • Норма ОКЭД (частота): ${normFreq ? normFreq.toFixed(3).replace('.', ',') : '—'} / 1000 чел./год`);
-        L.push(`  • Отклонение по частоте: ${ratioFreq ? '× ' + (ratioFreq >= 100 ? ratioFreq.toFixed(0) : ratioFreq.toFixed(1).replace('.', ',')) : '—'}`);
-        L.push(`  • Фактическая смертность: ${factDeath ? factDeath.toFixed(2).replace('.', ',') : '—'} / 1000 чел./год`);
-        L.push(`  • Норма смертности: ${normDeath ? normDeath.toFixed(3).replace('.', ',') : '—'} / 1000 чел./год`);
-        L.push(`  • Отклонение по смертности: ${ratioDeath ? '× ' + (ratioDeath >= 100 ? ratioDeath.toFixed(0) : ratioDeath.toFixed(1).replace('.', ',')) : '—'}`);
-      } else {
-        L.push('(Калькулятор отраслевых норм не загружен — нет данных для сравнения с ОКЭД.)');
+      L.push('G. ОПЕРАЦИОННЫЕ ХАРАКТЕРИСТИКИ:');
+      if (settl.count) {
+        L.push(`  • Время урегулирования (СК → первая выплата): среднее ${num(settl.avg)} дней, медиана ${num(settl.median)} дней, максимум ${num(settl.max)} дней`);
+        L.push(`  • Распределение: до 30 дн. ${num(settl.buckets?.to30)}, 31–90 ${num(settl.buckets?.to90)}, 91–180 ${num(settl.buckets?.to180)}, 181–365 ${num(settl.buckets?.to365)}, >365 ${num(settl.buckets?.over365)}`);
+      }
+      if (lag.count) {
+        L.push(`  • Лаг заявления (СК → ввод в систему): среднее ${num(lag.avg)} дн., медиана ${num(lag.median)} дн., макс ${num(lag.max)} дн.`);
+      }
+      if (A.annuity) {
+        L.push(`  • Аннуитетная нагрузка: ${num(A.annuity.withMultiple)} дел с >1 выплат`);
       }
 
       L.push('');
-      L.push('═════════════════════════════════════════');
-      L.push('  5. АКТУАРНЫЕ ПОКАЗАТЕЛИ');
-      L.push('═════════════════════════════════════════');
-      L.push(`• Burning Cost (выплаты / страх. сумма): ${pct(burningCost, 2)}`);
-      L.push(`• Pure Premium Rate: ${pct(burningCost, 2)} (текущий тариф ${pct((z.tariff || 0) * 100, 2)})`);
-      L.push(`• Прогнозный КУ (Loss Ratio): ${pct(forecastLR, 1)}`);
-      if (portfolioLR != null) L.push(`• Портфельный КУ компании: ${pct(portfolioLR, 2)}`);
-      L.push(`• Combined Ratio (LR + 25 % расходы): ${pct((forecastLR || 0) + 25, 1)}`);
-      L.push(`• Андеррайтинговая прибыль/убыток: ${fmtT_M(uwProfit)}/год`);
-      L.push(`• Coefficient of Variation выплат (CV): ${cv.toFixed(2).replace('.', ',')}`);
-      L.push('');
-      L.push('Хвостовой риск:');
-      L.push(`  • PML 99 % (Compound Poisson): ${fmtT(PML99)}`);
-      L.push(`  • TVaR / CVaR 99 % (Expected Shortfall): ${fmtT(TVaR99)}`);
-      L.push(`  • 1-в-100 лет (Solvency II): ${fmtT(PML99)}`);
-      L.push(`  • 1-в-250 лет (катастрофический): ${fmtT(PML995)}`);
-      L.push('');
-      L.push('Капитал и доходность:');
-      L.push(`  • Economic Capital (99,5 %): ${fmtT(EC)}`);
-      if (solvImpact != null) L.push(`  • Solvency Impact (PML / Активы Компании): ${pct(solvImpact, 2)}`);
-      L.push(`  • RAROC (риск-скорректированная доходность): ${raroc != null ? pct(raroc, 1) : '—'}`);
+      L.push('H. КОНЦЕНТРАЦИЯ И ХВОСТОВОЙ РИСК:');
+      L.push(`  • Tail concentration (топ 10 % дел по сумме): ${pct(conc.tailConcentration, 1)} от совокупных выплат`);
+      L.push(`  • Катастрофические события (выплата ≥ 50 М ₸): ${num(conc.catastrophicCount)} дел, ${fmtT_M(conc.catastrophicSum)}`);
+      L.push(`  • Максимальный период без смертельных случаев: ${num(conc.longestNoDeathStreak)} дней`);
 
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  6. ПРОГНОЗ');
+      L.push('  4. ОТРАСЛЕВОЙ И ПОРТФЕЛЬНЫЙ КОНТЕКСТ');
       L.push('═════════════════════════════════════════');
-      L.push(`• Ожидаемое число НС на год: ${num(lambda)}`);
-      L.push(`• Ожидаемая сумма выплат: ${fmtT(expectedLoss)}/год`);
-      L.push(`• Прогнозный КУ: ${pct(forecastLR)}`);
-      L.push(`• Точка безубыточности (премия = выплаты): ${fmtT(breakEven)}/год`);
-      L.push(`• Требуемая премия при КУ 70 % (целевой): ${fmtT(breakEven / 0.7)}`);
-      if (ratioForKU70 > 1) L.push(`  → текущая премия меньше требуемой в ${ratioForKU70.toFixed(1).replace('.', ',')} раз`);
+      if (snap.activity) {
+        L.push(`Норма по ОКЭД ${z.oked || ''} (из калькулятора рентабельности):`);
+        L.push(`  • Коэффициент смертельных НС: ${snap.activity.deathRate?.toFixed(3).replace('.', ',') || '—'} на 1000 чел./год`);
+        L.push(`  • Коэффициент травматизма: ${snap.activity.injuryRate?.toFixed(3).replace('.', ',') || '—'} на 1000 чел./год`);
+        L.push(`  • Суммарная норма: ${((snap.activity.deathRate || 0) + (snap.activity.injuryRate || 0)).toFixed(3).replace('.', ',')} НС на 1000 чел./год`);
+      } else {
+        L.push('(Отраслевые нормы по ОКЭД не предоставлены — используй стандартные среднеотраслевые ставки для ОСНС в РК.)');
+      }
+      L.push('');
+      L.push('Портфельные показатели страховой компании:');
+      if (portfolioLR != null) L.push(`  • Коэффициент убыточности портфеля ОСНС: ${pct(portfolioLR, 2)} (с учётом доли перестраховщика)`);
+      if (assets) L.push(`  • Активы Компании в страховых резервах: ${fmtT(assets)}`);
+      L.push('  • Целевой уровень КУ Компании: ≤ 70 %');
+      L.push('  • Регуляторный лимит Андеррайтингового Совета: страховая сумма ≤ 3 млрд ₸');
+      L.push('  • Свыше 3 млрд ₸ — требуется одобрение Правления');
 
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  7. ТЕКУЩЕЕ РЕШЕНИЕ АНДЕРРАЙТЕРА');
+      L.push('  ЗАДАНИЕ');
       L.push('═════════════════════════════════════════');
-      L.push(`Зафиксированный статус: ${verdictText}`);
-
+      L.push('');
+      L.push('ШАГ 1. САМОСТОЯТЕЛЬНЫЙ РАСЧЁТ КЛЮЧЕВЫХ МЕТРИК');
+      L.push('Рассчитай и приведи численно (с формулами и подстановкой):');
+      L.push('  a) Burning Cost = совокупные выплаты за 3 года ÷ 3 ÷ страховая сумма');
+      L.push('  b) Pure Premium Rate = E[S]/год ÷ страховая сумма');
+      L.push('  c) Прогнозный коэффициент убыточности (Loss Ratio) = E[S]/год ÷ Премия');
+      L.push('  d) Combined Ratio = LR + 25 % (типовой Expense Ratio для ОСНС в РК)');
+      L.push('  e) Compound Poisson моменты: E[S] = λ × μ, σ²[S] = λ × μ² × (CV² + 1)');
+      L.push('  f) PML 99 % = E[S] + 2,326 × σ[S]');
+      L.push('  g) TVaR 99 % (Expected Shortfall) = E[S] + 2,665 × σ[S]');
+      L.push('  h) Economic Capital (Solvency II 99,5 %) = 2,576 × σ[S]');
+      L.push('  i) RAROC = (Премия − E[S] − Расходы 25 %) ÷ EC');
+      L.push('  j) Solvency Impact = PML 99 % ÷ Активы Компании');
+      L.push('  k) Adverse Selection Index = Фактическая частота ÷ Норма ОКЭД (кратность)');
+      L.push('  l) Sufficiency Ratio = Текущая премия ÷ (E[S]/0,7) для целевого КУ 70 %');
+      L.push('');
+      L.push('ШАГ 2. СОПОСТАВЛЕНИЕ С НОРМАМИ');
+      L.push('  • Сравни рассчитанные показатели с нормами по ОКЭД и портфельными значениями.');
+      L.push('  • Оцени отклонение по 4-балльной шкале:');
+      L.push('    — норма (×1–×1,5)');
+      L.push('    — умеренное (×1,5–×3)');
+      L.push('    — повышенное (×3–×10)');
+      L.push('    — критическое (×10+)');
+      L.push('');
+      L.push('ШАГ 3. ПРОВЕРКА СООТВЕТСТВИЯ ЗАКОНОДАТЕЛЬСТВУ');
+      L.push('Оцени, соответствует ли договор требованиям:');
+      L.push('  • Закон РК № 30-III от 07.02.2005 — корректность тарифной классификации по ОКЭД, расчёта страховой суммы (минимум 10 МЗП на работника при УПТ), порядка определения страховой премии');
+      L.push('  • Социальный кодекс РК — покрытие рисков по ст. 195-1 (расширенные риски)');
+      L.push('  • НПА АРРФР — лимиты собственного удержания, требования к перестрахованию, нормативы достаточности маржи платёжеспособности');
+      L.push('  • Регуляторный лимит АС (3 млрд ₸) — кто компетентен принять решение');
+      L.push('');
+      L.push('ШАГ 4. НЕЗАВИСИМОЕ ЗАКЛЮЧЕНИЕ');
+      L.push('  • Дай свой композитный риск-скор от 0 до 100 (твоя методика, описать веса)');
+      L.push('  • Выбери ОДИН из 4 вердиктов и обоснуй:');
+      L.push('    1) Принятие со стандартным тарифом');
+      L.push('    2) Принятие с повышающим коэффициентом (указать кратность × N)');
+      L.push('    3) Отклонение по степени риска (привести 3 главных причины)');
+      L.push('    4) Отложение (указать какие данные нужны)');
+      L.push('  • Все рекомендации обоснуй: цифры → метод → закон');
+      L.push('');
+      L.push('ШАГ 5. ПЛАН ПЕРЕСТРАХОВАНИЯ (если принимаешь риск)');
+      L.push('  • Тип передачи: Quota Share / Surplus Treaty / Per-Risk XOL / Cat XOL / комбинация');
+      L.push('  • Конкретные лимиты в тенге (точка прикрепления, лимит цессии)');
+      L.push('  • Процент собственного удержания');
+      L.push('  • Обоснование выбора по Solvency Impact и регуляторным требованиям АРРФР');
+      L.push('  • Учти возможность передачи в обязательный пул через АО «Государственная страховая корпорация по перестрахованию»');
+      L.push('');
+      L.push('ШАГ 6. ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ');
+      L.push('Какие документы и данные стоит запросить у страхователя перед окончательным решением:');
+      L.push('  • Документы по охране труда (СОУТ, инструктажи, средства защиты)');
+      L.push('  • Статистика травматизма по подразделениям и категориям работников');
+      L.push('  • План мероприятий по снижению травматизма');
+      L.push('  • Информация о субподрядных организациях');
+      L.push('  • Программа добровольного медицинского страхования (как индикатор отношения к безопасности)');
+      L.push('  • Что ещё? — добавь от себя');
+      L.push('');
+      L.push('ШАГ 7. УСЛОВИЯ МИНИМАЛЬНОГО ПРИНЯТИЯ');
+      L.push('Если изменения нужны — какая МИНИМАЛЬНАЯ корректировка делает риск приемлемым:');
+      L.push('  • Премия — на сколько увеличить?');
+      L.push('  • Страховая сумма — на сколько уменьшить?');
+      L.push('  • Перестрахование — какая доля цессии минимальна?');
+      L.push('  • Понижающий/поправочный коэффициент — пересмотреть?');
+      L.push('Приоритизируй меры по эффективности и реализуемости.');
       L.push('');
       L.push('═════════════════════════════════════════');
-      L.push('  ВОПРОСЫ К ТЕБЕ');
+      L.push('  ТРЕБОВАНИЯ К ОТВЕТУ');
       L.push('═════════════════════════════════════════');
-      L.push('1. Стоит ли заключать договор на текущих условиях? Если да — на каких корректировках?');
-      L.push('2. Какие риски ты видишь как критические, а какие — приемлемые?');
-      L.push('3. Если отказать — приведи 3 главных причины.');
-      L.push('4. Если принимать — какую структуру перестрахования рекомендуешь');
-      L.push('   (Quota Share / Surplus / Per-Risk XOL / Cat XOL — с конкретными лимитами в тенге)?');
-      L.push('5. На сколько раз нужно увеличить премию для финансовой устойчивости (целевой КУ 70 %)?');
-      L.push('6. Какие дополнительные данные стоит запросить у страхователя перед окончательным решением');
-      L.push('   (мероприятия по охране труда, статистика по подразделениям, и т.п.)?');
-      L.push('7. Дай свой композитный риск-скор от 0 до 100 (как у меня) и сравни с моим.');
-      L.push('');
-      L.push('Отвечай как опытный коллега, дай конкретные цифры и формулировки. Если видишь моменты, которые я мог упустить — обязательно укажи.');
+      L.push('• Каждая цифра должна быть рассчитана из приведённых выше данных и показана как формула + подстановка.');
+      L.push('• Каждая рекомендация обоснована: «согласно X (закон/норма/расчёт) → следует Y».');
+      L.push('• Нейтральность: не оправдывай и не браковай заранее. Опирайся только на цифры и НПА.');
+      L.push('• Если в данных есть логические нестыковки или подозрительные значения — укажи прямо.');
+      L.push('• Если данных недостаточно для уверенного вывода — скажи какие нужны.');
+      L.push('• Формат ответа: структурированный (по шагам 1–7), с числами в виде «формула → подстановка → результат».');
 
       return L.join('\n');
     }
