@@ -13,6 +13,16 @@
   if (!snap || !snap.analytics) { emptyEl.style.display = 'flex'; return; }
   dashEl.style.display = 'block';
 
+  // If embedded in iframe (#inline=1 or ?inline=1), hide redundant "back to form" link
+  const qsInline = new URLSearchParams(window.location.search).get('inline') === '1';
+  const hashInline = window.location.hash.includes('inline=1');
+  const isInline = qsInline || hashInline;
+  if (isInline) {
+    document.body.classList.add('is-inline');
+    const back = document.querySelector('.back-link');
+    if (back) back.style.display = 'none';
+  }
+
   const a = snap.analytics;
   const z = snap.zayavka || {};
   const NBSP = ' ';

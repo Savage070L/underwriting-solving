@@ -178,7 +178,8 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // Voting results
+    // Voting results — empty checkboxes since we don't know the actual votes in advance
+    const CHECKBOX = '☐'; // ☐ unchecked
     paragraphs.push(new Paragraph({
       children: [trB('Результаты голосования:')],
       alignment: AlignmentType.JUSTIFIED,
@@ -189,7 +190,7 @@ const ProtocolGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`${chair[1].padEnd(20)} - «За»`)],
+      children: [tr(`${chair[1]}     ${CHECKBOX} «За»     ${CHECKBOX} «Против»`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -200,24 +201,24 @@ const ProtocolGenerator = {
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
-        children: [tr(`${name.padEnd(20)} - «За»`)],
+        children: [tr(`${name}     ${CHECKBOX} «За»     ${CHECKBOX} «Против»`)],
         alignment: AlignmentType.JUSTIFIED,
       }));
     }
 
     paragraphs.push(emptyP());
 
-    // Totals
+    // Totals — leave numbers blank, to be filled in by hand
     paragraphs.push(new Paragraph({
       children: [trB('Всего голосов:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`«За»           - ${members.length}`)],
+      children: [tr(`«За»           - ____ из ${members.length}`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr('«Против»  - 0')],
+      children: [tr(`«Против»  - ____ из ${members.length}`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 

@@ -19,6 +19,7 @@ const App = {
   // ===== INITIALIZATION =====
   init() {
     App.restoreCache();
+    App._restoreCase();
     App.restoreVerdict();
     App.updateButtons();
   },
@@ -106,6 +107,79 @@ const App = {
     }
   },
 
+  // ===== CASE-FILE PERSISTENCE =====
+  // Save parsed case data so navigation (e.g. "Назад к форме" from analytics) doesn't lose state.
+  _persistCase() {
+    try {
+      const payload = {
+        zayavka: App.zayavka ? App._zayavkaToJson(App.zayavka) : null,
+        claims: App.claims || null,
+        binData: App.binData || null,
+        fileNames: {
+          zayavka: document.getElementById('status-zayavka')?.textContent || '',
+          claims: document.getElementById('status-claims')?.textContent || '',
+        },
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem('case_state', JSON.stringify(payload));
+    } catch (e) { console.warn('Persist case failed:', e); }
+  },
+  _zayavkaToJson(z) {
+    return {
+      ...z,
+      docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
+      periodFrom: z.periodFrom ? new Date(z.periodFrom).toISOString() : null,
+      periodTo: z.periodTo ? new Date(z.periodTo).toISOString() : null,
+    };
+  },
+  _restoreCase() {
+    const raw = localStorage.getItem('case_state');
+    if (!raw) return;
+    try {
+      const p = JSON.parse(raw);
+      if (p.zayavka) {
+        App.zayavka = {
+          ...p.zayavka,
+          docDate: p.zayavka.docDate ? new Date(p.zayavka.docDate) : null,
+          periodFrom: p.zayavka.periodFrom ? new Date(p.zayavka.periodFrom) : null,
+          periodTo: p.zayavka.periodTo ? new Date(p.zayavka.periodTo) : null,
+        };
+        const zoneZ = document.getElementById('zone-zayavka');
+        if (zoneZ) zoneZ.classList.add('loaded');
+        const statusZ = document.getElementById('status-zayavka');
+        if (statusZ && p.fileNames?.zayavka) statusZ.textContent = p.fileNames.zayavka + ' (из кэша)';
+      }
+      if (p.claims) {
+        App.claims = p.claims;
+        const zoneC = document.getElementById('zone-claims');
+        if (zoneC) zoneC.classList.add('loaded');
+        const statusC = document.getElementById('status-claims');
+        if (statusC && p.fileNames?.claims) statusC.textContent = p.fileNames.claims + ' (из кэша)';
+        document.getElementById('analytics-cta')?.classList.add('visible');
+      }
+      if (p.binData) App.binData = p.binData;
+      if (App.zayavka) App.showPreview();
+    } catch (e) { console.warn('Restore case failed:', e); }
+  },
+  clearCaseCache() {
+    localStorage.removeItem('case_state');
+    App.zayavka = null;
+    App.claims = null;
+    App.binData = { legalAddress: null, govParticipation: null };
+    const zZ = document.getElementById('zone-zayavka');
+    const zC = document.getElementById('zone-claims');
+    if (zZ) zZ.classList.remove('loaded');
+    if (zC) zC.classList.remove('loaded');
+    document.getElementById('status-zayavka').textContent = 'Загрузите .xlsm файл';
+    document.getElementById('status-claims').textContent = 'Загрузите .xls файл';
+    document.getElementById('analytics-cta')?.classList.remove('visible');
+    document.getElementById('analytics-inline')?.classList.remove('is-open');
+    document.getElementById('preview-panel')?.classList.remove('visible');
+    document.getElementById('bin-status').innerHTML = '';
+    App.updateButtons();
+    App.showMsg('Файлы кейса очищены.', 'success');
+  },
+
   // ===== ZAYAVKA LOADING =====
   async loadZayavka(file) {
     if (!file) return;
@@ -140,6 +214,7 @@ const App = {
       zone.classList.add('loaded');
       document.getElementById('status-zayavka').textContent = `${file.name}`;
 
+      App._persistCase();
       App.updateButtons();
     } catch (e) {
       console.error('Error loading zayavka:', e);
@@ -161,6 +236,7 @@ const App = {
 
       document.getElementById('analytics-cta').classList.add('visible');
 
+      App._persistCase();
       App.updateButtons();
     } catch (e) {
       console.error('Error loading claims:', e);
@@ -312,6 +388,76 @@ const App = {
     window.open('analytics.html', '_blank');
   },
 
+  // ===== TOGGLE INLINE ANALYTICS (under "Файлы по кейсу") =====
+  toggleInlineAnalytics() {
+    if (!App.claims || !App.claims.analytics) {
+      App.showMsg('Сначала загрузите историю убытков.', 'error');
+      return;
+    }
+    const container = document.getElementById('analytics-inline');
+    const hint = document.getElementById('inline-hint');
+    const iframe = document.getElementById('analytics-iframe');
+    if (container.classList.contains('is-open')) {
+      container.classList.remove('is-open');
+      hint.textContent = '↓ развернуть';
+      return;
+    }
+    // Build/refresh snapshot before opening (same as openAnalytics)
+    const z = App.zayavka || {};
+    const snapshot = {
+      generatedAt: new Date().toISOString(),
+      zayavka: {
+        insurerName: z.insurerName || '',
+        bin: z.bin || '',
+        workers: z.workers || 0,
+        riskClass: z.riskClass || '',
+        oked: z.oked || '',
+        activity: z.activity || '',
+        region: z.region || '',
+        insuranceSum: z.insuranceSum || 0,
+        premiumBase: z.premiumBase || 0,
+        premiumWithCoeff: z.premiumWithCoeff || 0,
+        periodFrom: z.periodFrom ? new Date(z.periodFrom).toISOString() : null,
+        periodTo: z.periodTo ? new Date(z.periodTo).toISOString() : null,
+        coeff: z.coeff || null,
+        coeffDown: z.coeffDown || 0,
+        paymentOrder: z.paymentOrder || '',
+        docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
+        govParticipation: App.binData.govParticipation || z.govParticipation || '',
+        legalAddress: App.binData.legalAddress || '',
+        tariff: z.tariff || null,
+      },
+      verdict: document.getElementById('verdict') ? document.getElementById('verdict').value : 'auto',
+      popravka: App.refData.popravka ? {
+        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(z.riskClass) : null,
+        allTariffs: App.refData.popravka.riskRates ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate })) : [],
+      } : null,
+      analytics: App.claims.analytics,
+      normativ: App.refData.normativ ? {
+        date: App.refData.normativ.date,
+        fullAssetsTenge: App.refData.normativ.fullAssetsTenge,
+        fullAssets: App.refData.normativ.fullAssets,
+        portfolioShare: App.refData.normativ.portfolioShare,
+      } : null,
+      ku: App.refData.ku ? {
+        lossRatioWith: App.refData.ku.lossRatioWith,
+        lossRatioWithout: App.refData.ku.lossRatioWithout,
+      } : null,
+      activity: (() => {
+        const idx = document.getElementById('activityType').value;
+        if (idx !== '' && App.refData.calculator) {
+          return App.refData.calculator[parseInt(idx)] || null;
+        }
+        return null;
+      })(),
+    };
+    localStorage.setItem('analytics_snapshot', JSON.stringify(snapshot));
+    iframe.src = 'analytics.html#inline=1&t=' + Date.now(); // force reload via hash
+    container.classList.add('is-open');
+    hint.textContent = '↑ свернуть';
+    setTimeout(() => container.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  },
+
   // ===== GENERATE AR =====
   async generateAR() {
     try {
@@ -399,8 +545,9 @@ const App = {
       selectedActivity = App.refData.calculator[parseInt(actIdx)];
     }
 
-    // Document date = contract start date (E21), not F3
-    const docDate = periodFrom || z.docDate;
+    // Document date = date of zayavka submission (F3 in Excel) — per AR template,
+    // this is the date when the application was filed, NOT the contract start date.
+    const docDate = z.docDate || periodFrom;
 
     // If there were any claims (НС > 0), discount does not apply
     const claimsCount = App.claims ? App.claims.totalClaims : 0;

@@ -123,7 +123,7 @@ const ARGenerator = {
       ['6. Вид экономической деятельности', data.activity || '-'],
       ['7. Причина вынесения на рассмотрение/\n№ и дата рекомендации\nДепартамента андеррайтинга и перестрахования', reasonText],
       ['8. Класс профессионального риска', String(data.riskClass || '-')],
-      ['9. Статистика убытков за последние 3-х лет', data.claimsSummary || 'НС не было'],
+      ['9. Статистика убытков за последние 3-х лет', (data.claims && data.claims.detailedSummary && data.claims.detailedSummary !== 'НС не было') ? data.claims.detailedSummary : (data.claimsSummary || 'НС не было')],
     ];
 
     // Row 10: merged header "УСЛОВИЯ СТРАХОВАНИЯ"
@@ -137,7 +137,7 @@ const ARGenerator = {
       ['14. Повышающий/понижающий коэффициент', Utils.fmtCoeff(coeffEffective)],
       ['15. Общая страховая премия:', Utils.fmtMoney(data.premiumBase)],
       ['16. Страховая премия с поправочным (понижающим) коэффициентом:', premiumWithCoeffText],
-      ['17. Порядок и сроки уплаты страховой премии', `Единовременно    В рассрочку: ${data.paymentOrder === 'Единовременно' ? '' : data.paymentOrder || ''}`],
+      ['17. Порядок и сроки уплаты страховой премии', data.paymentOrder || '-'],
       ['18. Размер вознаграждения страхового агента', '-'],
       ['19. Ф.И.О.агента /\nнаименование страхового агентства', '-'],
       ['20. Страховые покрытия', Utils.COVERAGE_TEXT],
@@ -148,11 +148,16 @@ const ARGenerator = {
 
     // Row 25: merged header "УСЛОВИЯ ПЕРЕСТРАХОВАНИЯ"
 
+    // Table column widths — must fit page (A4 11906 − 2×1134 margins = 9638 twips available)
+    const COL_LEFT = 3720;
+    const COL_RIGHT = 5918;
+    const COL_TOTAL = COL_LEFT + COL_RIGHT;
+
     // Build regular rows
     const makeRow = (left, right) => new TableRow({
       children: [
-        tc(cp(left), { width: { size: 3964, type: WidthType.DXA }, borders: tableBorders }),
-        tc(cp(right), { width: { size: 6296, type: WidthType.DXA }, borders: tableBorders }),
+        tc(cp(left), { width: { size: COL_LEFT, type: WidthType.DXA }, borders: tableBorders }),
+        tc(cp(right), { width: { size: COL_RIGHT, type: WidthType.DXA }, borders: tableBorders }),
       ],
     });
 
@@ -162,7 +167,7 @@ const ARGenerator = {
         new TableCell({
           children: [cpBold(text)],
           columnSpan: 2,
-          width: { size: 10260, type: WidthType.DXA },
+          width: { size: COL_TOTAL, type: WidthType.DXA },
           borders: tableBorders,
         }),
       ],
@@ -186,8 +191,9 @@ const ARGenerator = {
 
     const mainTable = new Table({
       rows: tableRows,
-      width: { size: 10260, type: WidthType.DXA },
+      width: { size: COL_TOTAL, type: WidthType.DXA },
       layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
     });
 
     // Build signature block paragraphs
@@ -281,11 +287,12 @@ const ARGenerator = {
       sections: [{
         properties: {
           page: {
+            // A4 page is 11906 × 16838 twips. Symmetric margins to keep table centered.
             margin: {
-              top: 504,    // ~0.35 inch in twentieths of a point
-              bottom: 710,
-              left: 1701,
-              right: 850,
+              top: 720,    // 0.5 inch
+              bottom: 720,
+              left: 1134,  // ~2 cm
+              right: 1134, // ~2 cm
             },
           },
         },

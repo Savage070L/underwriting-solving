@@ -51,6 +51,10 @@ body {
   margin: 0 auto;
   padding: 24px 0 64px;
 }
+body.is-inline .dash { padding-top: 12px; padding-bottom: 32px; }
+body.is-inline .hero-top { display: none; }
+body.is-inline .hero { padding-top: 0; }
+body.is-inline .ai-fab { bottom: 20px; right: 20px; }
 
 /* ===== HERO ===== */
 .hero {

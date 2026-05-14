@@ -50,7 +50,10 @@
 
     <!-- Per-case files -->
     <div class="section">
-      <div class="section-title">Файлы по кейсу</div>
+      <div class="section-title">
+        Файлы по кейсу
+        <button class="btn-clear" onclick="App.clearCaseCache()">Очистить кейс</button>
+      </div>
       <div class="upload-grid-main">
         <div class="upload-zone-main" id="zone-zayavka" onclick="this.querySelector('input').click()">
           <div class="uz-icon">📋</div>
@@ -71,13 +74,25 @@
         <div class="preview-grid" id="preview-grid"></div>
       </div>
 
-      <!-- Analytics dashboard button -->
+      <!-- Analytics dashboard button — opens in new tab -->
       <div class="analytics-cta" id="analytics-cta">
-        <button class="btn-analytics" onclick="App.openAnalytics()">
-          <span class="ba-icon">📊</span>
-          <span class="ba-label">Открыть аналитический дашборд</span>
-          <span class="ba-hint">по истории убытков</span>
-        </button>
+        <div class="analytics-cta-row">
+          <button class="btn-analytics btn-analytics--inline" onclick="App.toggleInlineAnalytics()">
+            <span class="ba-icon">📊</span>
+            <span class="ba-label">Аналитика прямо здесь</span>
+            <span class="ba-hint" id="inline-hint">↓ развернуть</span>
+          </button>
+          <button class="btn-analytics" onclick="App.openAnalytics()">
+            <span class="ba-icon">↗</span>
+            <span class="ba-label">Открыть на отдельной странице</span>
+            <span class="ba-hint">в новой вкладке</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Inline analytics container (collapsible) -->
+      <div class="analytics-inline" id="analytics-inline">
+        <iframe class="analytics-iframe" id="analytics-iframe" title="Аналитика убытков"></iframe>
       </div>
     </div>
 
