@@ -141,7 +141,7 @@ const ARGenerator = {
       ['18. Размер вознаграждения страхового агента', '-'],
       ['19. Ф.И.О.агента /\nнаименование страхового агентства', '-'],
       ['20. Страховые покрытия', Utils.COVERAGE_TEXT],
-      ['21. Условия страхования (типовой договор без изменений или с изменениями)', 'Укажите:\n   Типовой договор                Измененный договор'],
+      ['21. Условия страхования (типовой договор без изменений или с изменениями)', 'Типовой договор'],
       ['22. Дополнительная информация (необходимая по данному виду страхования)', '-'],
       ['23. Организация с государственным участием', data.govParticipation || '-'],
     ];
@@ -196,54 +196,105 @@ const ARGenerator = {
       alignment: AlignmentType.CENTER,
     });
 
-    // Build signature block paragraphs
-    const signatureParagraphs = [];
+    // Build signature block — use invisible-border table with 3 columns
+    // (name / signature line / date) so everything aligns vertically across rows.
+    const noBorderStyle = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+    const noBorders = {
+      top: noBorderStyle, bottom: noBorderStyle,
+      left: noBorderStyle, right: noBorderStyle,
+    };
 
-    // Members header
-    signatureParagraphs.push(new Paragraph({
-      children: [tr(`Члены ${organNameHeader}: `, { bold: false })],
-      alignment: AlignmentType.JUSTIFIED,
-      spacing: { line: 360 },
-    }));
+    // Column widths sum to COL_TOTAL (≈ 9638)
+    const SIG_COL_NAME = 6038;
+    const SIG_COL_LINE = 2200;
+    const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE; // 1400
 
-    signatureParagraphs.push(new Paragraph({ children: [] }));
+    const sigRow = (nameText) => new TableRow({
+      children: [
+        new TableCell({
+          width: { size: SIG_COL_NAME, type: WidthType.DXA },
+          borders: noBorders,
+          children: [new Paragraph({
+            children: [tr(nameText, { bold: false })],
+            alignment: AlignmentType.LEFT,
+          })],
+        }),
+        new TableCell({
+          width: { size: SIG_COL_LINE, type: WidthType.DXA },
+          borders: noBorders,
+          children: [new Paragraph({
+            children: [tr('___________________', { bold: false })],
+            alignment: AlignmentType.CENTER,
+          })],
+        }),
+        new TableCell({
+          width: { size: SIG_COL_DATE, type: WidthType.DXA },
+          borders: noBorders,
+          children: [new Paragraph({
+            children: [tr(dateRu, { bold: false })],
+            alignment: AlignmentType.RIGHT,
+          })],
+        }),
+      ],
+    });
 
-    // Each member: name + signature + date on one line
+    const blankRow = () => new TableRow({
+      children: [
+        new TableCell({ width: { size: SIG_COL_NAME, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+        new TableCell({ width: { size: SIG_COL_LINE, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+        new TableCell({ width: { size: SIG_COL_DATE, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+      ],
+    });
+
+    const sigTableRows = [];
     for (const [role, name] of members) {
-      signatureParagraphs.push(new Paragraph({
-        children: [
-          tr(`${role} – ${name}`, { bold: false }),
-          tr('       ___________________       ', { bold: false }),
-          tr(dateRu, { bold: false }),
-        ],
-        alignment: AlignmentType.JUSTIFIED,
-        spacing: { line: 360 },
-      }));
-      signatureParagraphs.push(new Paragraph({ children: [] }));
+      sigTableRows.push(sigRow(`${role} – ${name}`));
+      sigTableRows.push(blankRow());
     }
 
-    // Secretary
-    signatureParagraphs.push(new Paragraph({
-      children: [tr(secretaryTitle, { bold: false })],
-      alignment: AlignmentType.JUSTIFIED,
-      spacing: { line: 360 },
-    }));
-    signatureParagraphs.push(new Paragraph({
-      children: [
-        tr(secretary, { bold: false }),
-        tr('                                                             ', { bold: false }),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-      spacing: { line: 360 },
-    }));
-    signatureParagraphs.push(new Paragraph({
-      children: [
-        tr('___________________                                        ', { bold: false }),
-        tr(dateRu, { bold: false }),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-      spacing: { line: 360 },
-    }));
+    const sigTable = new Table({
+      rows: sigTableRows,
+      width: { size: COL_TOTAL, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
+    });
+
+    // Secretary block as a separate small table (same column structure)
+    const secTableRows = [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: SIG_COL_NAME, type: WidthType.DXA },
+            borders: noBorders,
+            columnSpan: 3,
+            children: [new Paragraph({
+              children: [tr(secretaryTitle, { bold: false })],
+              alignment: AlignmentType.LEFT,
+            })],
+          }),
+        ],
+      }),
+      sigRow(secretary),
+    ];
+    const secTable = new Table({
+      rows: secTableRows,
+      width: { size: COL_TOTAL, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
+    });
+
+    // Group header + tables into "signatureBlock" array referenced below
+    const signatureParagraphs = [
+      new Paragraph({
+        children: [tr(`Члены ${organNameHeader}: `, { bold: false })],
+        alignment: AlignmentType.LEFT,
+        spacing: { line: 360 },
+      }),
+      new Paragraph({ children: [] }),
+      sigTable,
+      new Paragraph({ children: [] }),
+      secTable,
+    ];
 
     // Execution section — branches by verdict
     let executionLine;

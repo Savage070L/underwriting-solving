@@ -419,12 +419,19 @@ const ZaklGenerator = {
     paragraphs.push(emptyP(true));
     paragraphs.push(emptyP(true));
 
+    const { TabStopType, TabStopPosition } = docx;
     paragraphs.push(new Paragraph({
       children: [trB('Директор Департамента')],
     }));
 
+    // Use a right-aligned tab stop so signatory name sits on the same line
     paragraphs.push(new Paragraph({
-      children: [trB('андеррайтинга и перестрахования                                                           Джелкобаев Т.К.')],
+      tabStops: [{ type: TabStopType.RIGHT, position: 9000 }],
+      children: [
+        trB('андеррайтинга и перестрахования'),
+        trB('\t'),
+        trB('Джелкобаев Т.К.'),
+      ],
     }));
 
     // Trailing empty paragraphs
