@@ -14,6 +14,7 @@ const App = {
     ku: null,
     calculator: null, // array of activity objects
     classifier: null, // ОКЭД → класс риска + название деятельности
+    affiliated: null, // [{ id: '12-digit', name }, ...]
   },
   _rawNormativBuffer: null, // keep raw buffer for date-dependent lookup
 
@@ -102,6 +103,12 @@ const App = {
           App.refData.classifier = result;
           localStorage.setItem('ref_classifier', JSON.stringify(result));
           App.onOkedChange(); // re-lookup if ОКЭД already entered
+          break;
+        }
+        case 'affiliated': {
+          const result = ExcelReader.readAffiliatedList(buf);
+          App.refData.affiliated = result;
+          localStorage.setItem('ref_affiliated', JSON.stringify(result));
           break;
         }
       }
@@ -614,6 +621,15 @@ const App = {
       premiumWithCoeff = z.premiumBase;
     }
 
+    // Check if страхователь is affiliated (BIN/IIN match)
+    let isAffiliated = false;
+    let affiliatedEntry = null;
+    if (z.bin && App.refData.affiliated) {
+      const cleanBin = String(z.bin).trim().replace(/\s+/g, '');
+      affiliatedEntry = App.refData.affiliated.find(e => e.id === cleanBin) || null;
+      isAffiliated = !!affiliatedEntry;
+    }
+
     return {
       ...z,
       oked: effectiveOked || z.oked,
@@ -623,6 +639,8 @@ const App = {
       docNumber,
       legalAddress: App.binData.legalAddress || '-',
       nonResident: document.getElementById('nonResident').checked,
+      isAffiliated,
+      affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,
       periodFrom,
       periodTo,
       coeffDown: effectiveCoeffDown,
@@ -659,7 +677,8 @@ const App = {
     if (App.refData.ku) count++;
     if (App.refData.calculator) count++;
     if (App.refData.classifier) count++;
-    document.getElementById('ref-badge').textContent = `${count}/5 загружено`;
+    if (App.refData.affiliated) count++;
+    document.getElementById('ref-badge').textContent = `${count}/6 загружено`;
   },
 
   updateButtons() {
@@ -832,6 +851,13 @@ const App = {
         App.updateRefStatus('classifier', true, 'из кэша');
       }
 
+      // Affiliated persons list
+      const affiliatedStr = localStorage.getItem('ref_affiliated');
+      if (affiliatedStr) {
+        App.refData.affiliated = JSON.parse(affiliatedStr);
+        App.updateRefStatus('affiliated', true, 'из кэша');
+      }
+
       App.updateRefBadge();
     } catch (e) {
       console.error('Cache restore error:', e);
@@ -844,10 +870,11 @@ const App = {
     localStorage.removeItem('ref_ku');
     localStorage.removeItem('ref_calculator');
     localStorage.removeItem('ref_classifier');
+    localStorage.removeItem('ref_affiliated');
     localStorage.removeItem('manual_verdict');
-    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null };
+    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null };
     App._rawNormativBuffer = null;
-    ['popravka', 'normativ', 'ku', 'calculator', 'classifier'].forEach(t => App.updateRefStatus(t, false));
+    ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated'].forEach(t => App.updateRefStatus(t, false));
     App.updateRefBadge();
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';

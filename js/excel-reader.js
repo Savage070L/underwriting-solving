@@ -35,6 +35,36 @@ const ExcelReader = {
     return null;
   },
 
+  // ===== READ AFFILIATED PERSONS LIST =====
+  // Extracts ИИН/БИН (12-digit IDs) and names from the "Список афф. лиц" xlsx.
+  // Handles both individuals (col C: "DATE, ИИН") and legal entities (col C: "№ ... ; БИН ; ...").
+  // Returns array of unique entries: { id: '12-digit string', name: 'name from col B' }
+  readAffiliatedList(arrayBuffer) {
+    const wb = XLSX.read(arrayBuffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+    const seen = new Set();
+    const entries = [];
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length < 3) continue;
+      const name = row[1];
+      const cValue = row[2];
+      if (!name || !cValue) continue;
+      const nameStr = String(name).trim();
+      const cStr = String(cValue);
+      // Match 12-digit ID (ИИН/БИН) — works for both formats
+      const matches = cStr.match(/\b(\d{12})\b/g);
+      if (!matches) continue;
+      for (const id of matches) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        entries.push({ id, name: nameStr });
+      }
+    }
+    return entries;
+  },
+
   // ===== READ ОКЭД CLASSIFIER (with exceptions) =====
   // Returns array of entries: { cls, okedRaw, isPrefix, prefix, name, exceptions: [] }
   readOkedClassifier(arrayBuffer) {

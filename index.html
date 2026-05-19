@@ -17,7 +17,7 @@
     <div class="section">
       <div class="section-title">
         Справочники
-        <span class="badge" id="ref-badge">0/5 загружено</span>
+        <span class="badge" id="ref-badge">0/6 загружено</span>
         <button class="btn-clear" onclick="App.clearCache()">Очистить кэш</button>
       </div>
       <div class="upload-grid">
@@ -50,6 +50,12 @@
           <div class="uz-label">Классификатор ОКЭД</div>
           <div class="uz-status" id="status-classifier">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('classifier', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-affiliated" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">👥</div>
+          <div class="uz-label">Аффилированные лица</div>
+          <div class="uz-status" id="status-affiliated">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('affiliated', this.files[0])">
         </div>
       </div>
     </div>
