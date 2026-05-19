@@ -398,9 +398,13 @@ const App = {
         lossRatioWithout: App.refData.ku.lossRatioWithout,
       } : null,
       activity: (() => {
-        const idx = document.getElementById('activityType').value;
-        if (idx !== '' && App.refData.calculator) {
-          return App.refData.calculator[parseInt(idx)] || null;
+        // Resolve activity from ОКЭД (replaces removed activityType dropdown)
+        const effOked = resolved.oked;
+        if (effOked && App.refData.calculator) {
+          const cs = String(effOked);
+          return App.refData.calculator.find(a =>
+            a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
+          ) || null;
         }
         return null;
       })(),
@@ -467,9 +471,12 @@ const App = {
         lossRatioWithout: App.refData.ku.lossRatioWithout,
       } : null,
       activity: (() => {
-        const idx = document.getElementById('activityType').value;
-        if (idx !== '' && App.refData.calculator) {
-          return App.refData.calculator[parseInt(idx)] || null;
+        const effOked = resolved2.oked;
+        if (effOked && App.refData.calculator) {
+          const cs = String(effOked);
+          return App.refData.calculator.find(a =>
+            a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
+          ) || null;
         }
         return null;
       })(),
