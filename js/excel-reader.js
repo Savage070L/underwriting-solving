@@ -65,35 +65,89 @@ const ExcelReader = {
     return entries;
   },
 
-  // ===== READ ОКЭД CLASSIFIER (with exceptions) =====
-  // Returns array of entries: { cls, okedRaw, isPrefix, prefix, name, exceptions: [] }
+  // ===== READ ОКЭД CLASSIFIER =====
+  // Поддерживает два формата:
+  //   Legacy: колонки [Класс, ОКЭД, Деятельность, Исключения] — ОКЭД может быть
+  //           с «xxx»-префиксом, исключения через запятую.
+  //   Sheet "ОКЭДы — 2026" (Лист1): колонки [Код 1С, сравнение сайта, Сайт,
+  //           Класс риска, Тариф] — только точные ОКЭД, плюс тариф.
+  // Авто-детект по заголовку. Парсит "Лист1" если присутствует, иначе — первый лист.
+  // Возвращает: [{ cls, okedRaw, isPrefix, prefix, name, exceptions, tariff? }, ...]
   readOkedClassifier(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    // Лист1 в новом файле ОКЭДы — там как раз и лежит маппинг.
+    const ws = wb.Sheets['Лист1'] || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+
+    // Найти строку заголовка — проверяем первые 5 строк.
+    const lowerOf = (v) => String(v || '').toLowerCase().trim();
+    let headerIdx = -1;
+    let cols = null;
+    for (let i = 0; i < Math.min(data.length, 5); i++) {
+      const row = data[i] || [];
+      const lc = row.map(lowerOf);
+      // V2 — новый формат: «Код 1С» / «Сайт» / «Класс риска» / «Тариф»
+      const okedCol = lc.findIndex(s => s === 'код 1с' || (s.includes('код') && s.includes('1с')));
+      const nameColV2 = lc.findIndex(s => s === 'сайт' || s.includes('наименование') || s.includes('вид'));
+      const clsCol = lc.findIndex(s => s.includes('класс') && (s.includes('риск') || s === 'класс'));
+      const tariffCol = lc.findIndex(s => s.includes('тариф') || s.includes('ставк'));
+      if (okedCol >= 0 && clsCol >= 0) {
+        headerIdx = i;
+        cols = { format: 'v2', oked: okedCol, name: nameColV2 >= 0 ? nameColV2 : 2, cls: clsCol, tariff: tariffCol >= 0 ? tariffCol : null, exceptions: null };
+        break;
+      }
+      // Legacy: «Класс», «ОКЭД», «Наименование», «Исключения»
+      const clsLegacy = lc.findIndex(s => s === 'класс' || s.includes('класс риска'));
+      const okedLegacy = lc.findIndex(s => s === 'окэд' || s.includes('окэд'));
+      const nameLegacy = lc.findIndex(s => s.includes('наименование') || s.includes('деятельност') || s.includes('вид'));
+      const exclLegacy = lc.findIndex(s => s.includes('исключ'));
+      if (clsLegacy >= 0 && okedLegacy >= 0) {
+        headerIdx = i;
+        cols = { format: 'legacy', cls: clsLegacy, oked: okedLegacy, name: nameLegacy >= 0 ? nameLegacy : 2, exceptions: exclLegacy >= 0 ? exclLegacy : 3, tariff: null };
+        break;
+      }
+    }
+    if (headerIdx === -1) {
+      // Fallback на старое позиционное чтение (cls, oked, name, excl).
+      headerIdx = 0;
+      cols = { format: 'legacy', cls: 0, oked: 1, name: 2, exceptions: 3, tariff: null };
+    }
+
     const entries = [];
-    for (let i = 1; i < data.length; i++) {
+    for (let i = headerIdx + 1; i < data.length; i++) {
       const row = data[i];
       if (!row || row.length < 2) continue;
-      const cls = row[0];
-      const oked = row[1];
-      const name = row[2];
-      const exclStr = row[3];
+      const cls = row[cols.cls];
+      const oked = row[cols.oked];
+      const name = row[cols.name];
       if (cls == null || !oked) continue;
       const okedStr = String(oked).trim();
-      const exceptions = exclStr
-        ? String(exclStr).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+      // V2-формат не имеет «xxx»-префиксов и исключений.
+      const exceptionsRaw = cols.exceptions != null ? row[cols.exceptions] : null;
+      const exceptions = exceptionsRaw
+        ? String(exceptionsRaw).split(/[,;]/).map(s => s.trim()).filter(Boolean)
         : [];
-      const isPrefix = /x{2,}$/i.test(okedStr);
+      const isPrefix = cols.format === 'legacy' && /x{2,}$/i.test(okedStr);
       const prefix = isPrefix ? okedStr.replace(/x+$/i, '') : null;
-      entries.push({
+      const entry = {
         cls: parseInt(cls) || 0,
         okedRaw: okedStr,
         isPrefix,
         prefix,
         name: String(name || '').trim(),
         exceptions,
-      });
+      };
+      if (cols.tariff != null) {
+        let t = parseFloat(String(row[cols.tariff] || '').replace(',', '.'));
+        // В V2-файле тариф записан в процентах (например, 2.54 = 2,54%).
+        // Нормализуем в долю, как везде в коде (z.tariff, popravka.riskRates).
+        // Реальный диапазон тарифов в РК: 0,13–2,96%, т.е. как доля 0,0013–0,0296.
+        if (Number.isFinite(t)) {
+          if (t > 0.1) t = t / 100;
+          entry.tariff = t;
+        }
+      }
+      entries.push(entry);
     }
     return entries;
   },
