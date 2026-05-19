@@ -48,47 +48,35 @@ const ProtocolGenerator = {
     // Number
     const docNumber = data.docNumber || '13';
 
+    const { TabStopType } = docx;
     const paragraphs = [];
 
-    // P1: Title "П Р О Т О К О Л"
+    // P1: Title — "П Р О Т О К О Л NN" on one line
     paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: 'П Р О Т О К О Л', font: FONT, size: SIZE_TITLE, bold: true })],
+      children: [new TextRun({ text: `П Р О Т О К О Л ${docNumber}`, font: FONT, size: SIZE_TITLE, bold: true })],
+      alignment: AlignmentType.CENTER,
+    }));
+
+    // P2: subtitle lines
+    paragraphs.push(new Paragraph({
+      children: [trB(`заседания ${organName}`)],
+      alignment: AlignmentType.CENTER,
+    }));
+    paragraphs.push(new Paragraph({
+      children: [trB('АО «КСЖ «Standard Life»')],
       alignment: AlignmentType.CENTER,
     }));
 
     paragraphs.push(emptyP());
 
-    // P2: Number and meeting title
+    // P3: City (left) and date (right) on the same line via right-aligned tab stop
     paragraphs.push(new Paragraph({
+      tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
       children: [
-        trB(`№ ${docNumber}`),
+        trB('г. Алматы'),
+        tr('\t'),
+        trB(`от ${dateLine}`),
       ],
-      alignment: AlignmentType.CENTER,
-    }));
-
-    paragraphs.push(new Paragraph({
-      children: [
-        trB(`заседания ${organName}`),
-      ],
-      alignment: AlignmentType.CENTER,
-    }));
-
-    paragraphs.push(new Paragraph({
-      children: [
-        trB(`АО «КСЖ «Standard Life»`),
-      ],
-      alignment: AlignmentType.CENTER,
-    }));
-
-    paragraphs.push(emptyP());
-
-    // P3: City + date
-    paragraphs.push(new Paragraph({
-      children: [
-        tr('г. Алматы                                                                                                                         '),
-        tr(`от ${dateLine}`),
-      ],
-      alignment: AlignmentType.LEFT,
     }));
 
     paragraphs.push(emptyP());
@@ -281,10 +269,10 @@ const ProtocolGenerator = {
         properties: {
           page: {
             margin: {
-              top: 1440,
-              bottom: 1440,
-              left: 1800,
-              right: 1800,
+              top: 1134,   // 2 cm
+              bottom: 1134,
+              left: 1134,
+              right: 1134,
             },
           },
         },

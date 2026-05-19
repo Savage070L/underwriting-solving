@@ -426,7 +426,7 @@ const ZaklGenerator = {
 
     // Use a right-aligned tab stop so signatory name sits on the same line
     paragraphs.push(new Paragraph({
-      tabStops: [{ type: TabStopType.RIGHT, position: 9000 }],
+      tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
       children: [
         trB('андеррайтинга и перестрахования'),
         trB('\t'),
@@ -445,10 +445,10 @@ const ZaklGenerator = {
         properties: {
           page: {
             margin: {
-              top: 1440,   // 1 inch
-              bottom: 1440,
-              left: 1800,  // 1.25 inch
-              right: 1800,
+              top: 1134,   // 2 cm
+              bottom: 1134,
+              left: 1134,
+              right: 1134,
             },
           },
         },
