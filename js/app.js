@@ -226,6 +226,18 @@ const App = {
       // Refresh ОКЭД hint with the value loaded from zayavka
       App.onOkedChange();
 
+      // Sync payment order from zayavka D19 → form dropdown
+      const poSelect = document.getElementById('paymentOrder');
+      if (poSelect && App.zayavka.paymentOrder) {
+        const raw = String(App.zayavka.paymentOrder).trim();
+        if (/рассроч/i.test(raw)) {
+          poSelect.value = 'В рассрочку';
+        } else {
+          poSelect.value = 'Единовременно';
+        }
+        App.onPaymentChange();
+      }
+
       // Update upload status
       const zone = document.getElementById('zone-zayavka');
       zone.classList.add('loaded');
@@ -637,6 +649,19 @@ const App = {
       isAffiliated = !!affiliatedEntry;
     }
 
+    // Payment schedule (form takes priority over zayavka D19)
+    const formOrder = document.getElementById('paymentOrder')?.value || 'Единовременно';
+    const formFreq = document.getElementById('paymentFrequency')?.value || 'month';
+    let paymentOrderEff = formOrder;
+    let paymentFreqEff = null;
+    let paymentTranches = null;
+    let paymentScheduleText = paymentOrderEff;
+    if (paymentOrderEff === 'В рассрочку') {
+      paymentFreqEff = formFreq;
+      paymentTranches = Utils.calcPaymentTranches(formFreq, periodFrom, periodTo);
+      paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
+    }
+
     return {
       ...z,
       oked: effectiveOked || z.oked,
@@ -648,6 +673,10 @@ const App = {
       nonResident: document.getElementById('nonResident').checked,
       isAffiliated,
       affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,
+      paymentOrder: paymentOrderEff,
+      paymentFrequency: paymentFreqEff,
+      paymentTranches: paymentTranches ? paymentTranches.map(d => d.toISOString()) : null,
+      paymentScheduleText,
       periodFrom,
       periodTo,
       coeffDown: effectiveCoeffDown,
@@ -766,6 +795,30 @@ const App = {
       }
     }
     return { oked, riskClass, activity, source };
+  },
+
+  // ===== PAYMENT ORDER + FREQUENCY HANDLERS =====
+  onPaymentChange() {
+    const order = document.getElementById('paymentOrder')?.value || 'Единовременно';
+    const wrap = document.getElementById('payment-frequency-wrap');
+    const preview = document.getElementById('payment-preview');
+    if (!wrap) return;
+    if (order === 'В рассрочку') {
+      wrap.style.display = '';
+      const freq = document.getElementById('paymentFrequency')?.value || 'month';
+      const z = App.zayavka || {};
+      const tranches = Utils.calcPaymentTranches(freq, z.periodFrom, z.periodTo);
+      const list = Utils.formatPaymentSchedule(tranches, freq);
+      if (preview) {
+        const lines = list.split(';').map(s => s.trim()).filter(Boolean);
+        preview.innerHTML = lines.length <= 14
+          ? lines.map(l => `<div class="pp-line">${l}</div>`).join('')
+          : `<div class="pp-line">${list}</div>`;
+      }
+    } else {
+      wrap.style.display = 'none';
+      if (preview) preview.innerHTML = '';
+    }
   },
 
   // ===== ОКЭД INPUT HANDLER =====

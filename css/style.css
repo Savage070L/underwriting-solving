@@ -474,6 +474,29 @@ header p {
 .oked-source--prefix { background: #dbeafe; color: #1e40af; }
 .oked-warn { font-weight: 500; }
 
+/* Payment schedule preview */
+.payment-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-left: 3px solid #4361ee;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.payment-preview .pp-line {
+  color: #334155;
+  padding: 1px 0;
+}
+.payment-preview:empty {
+  display: none;
+}
+
 /* Dates row hidden by default */
 .dates-row {
   display: none;

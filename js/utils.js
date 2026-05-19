@@ -152,6 +152,76 @@ const Utils = {
   },
 
   // Parse Excel serial date number to JS Date
+  // ===== Payment installment schedule =====
+  // Returns array of Dates: 1st tranche = today+1, subsequent = +freq step,
+  // continues until contract endDate (inclusive) or until safety cap.
+  PAYMENT_FREQ_LABELS: {
+    year: 'раз в год',
+    halfYear: 'раз в полгода',
+    quarter: 'раз в квартал',
+    month: 'раз в месяц',
+    week: 'раз в неделю',
+    day: 'раз в день',
+  },
+  calcPaymentTranches(frequency, periodFrom, periodTo, refDate) {
+    const today = refDate ? new Date(refDate) : new Date();
+    today.setHours(0, 0, 0, 0);
+    const t1 = new Date(today);
+    t1.setDate(t1.getDate() + 1);
+
+    // Determine end date: contract end, or default to t1 + 12 months
+    let endDate = periodTo ? new Date(periodTo) : null;
+    if (!endDate || isNaN(endDate)) {
+      endDate = new Date(t1);
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    }
+    endDate.setHours(0, 0, 0, 0);
+
+    const advance = (d) => {
+      const n = new Date(d);
+      switch (frequency) {
+        case 'year':     n.setFullYear(n.getFullYear() + 1); break;
+        case 'halfYear': n.setMonth(n.getMonth() + 6); break;
+        case 'quarter':  n.setMonth(n.getMonth() + 3); break;
+        case 'month':    n.setMonth(n.getMonth() + 1); break;
+        case 'week':     n.setDate(n.getDate() + 7); break;
+        case 'day':      n.setDate(n.getDate() + 1); break;
+        default:         n.setMonth(n.getMonth() + 1);
+      }
+      return n;
+    };
+
+    const SAFETY_CAP = 400; // protect against accidentally infinite loops
+    const tranches = [t1];
+    let cur = t1;
+    while (tranches.length < SAFETY_CAP) {
+      const next = advance(cur);
+      if (next > endDate) break;
+      tranches.push(next);
+      cur = next;
+    }
+    return tranches;
+  },
+
+  // Format payment schedule for documents (compact for long lists)
+  formatPaymentSchedule(tranches, frequency) {
+    if (!tranches || !tranches.length) return '';
+    const fmt = (d) => {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}.${mm}.${d.getFullYear()}`;
+    };
+    const N = tranches.length;
+    const freqLabel = Utils.PAYMENT_FREQ_LABELS[frequency] || frequency;
+    // For ≤ 14 tranches list each; otherwise show first 3 + last + count
+    if (N <= 14) {
+      return tranches.map((d, i) => `${i + 1} транш — ${fmt(d)}`).join('; ');
+    }
+    const first = tranches.slice(0, 3).map((d, i) => `${i + 1} транш — ${fmt(d)}`);
+    const last = `${N} транш — ${fmt(tranches[N - 1])}`;
+    return `${first.join('; ')}; … ; ${last} (всего ${N} траншей, ${freqLabel})`;
+  },
+
   parseExcelDate(value) {
     if (value instanceof Date) return value;
     if (typeof value === 'string') {

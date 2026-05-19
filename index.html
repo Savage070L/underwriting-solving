@@ -128,6 +128,25 @@
           <input type="text" id="okedInput" placeholder="например: 07101" oninput="App.onOkedChange()">
           <div class="oked-lookup-result" id="oked-result"></div>
         </div>
+        <div class="form-group">
+          <label for="paymentOrder">Порядок уплаты страховой премии</label>
+          <select id="paymentOrder" onchange="App.onPaymentChange()">
+            <option value="Единовременно">Единовременно</option>
+            <option value="В рассрочку">В рассрочку</option>
+          </select>
+        </div>
+        <div class="form-group" id="payment-frequency-wrap" style="display:none">
+          <label for="paymentFrequency">Периодичность рассрочки</label>
+          <select id="paymentFrequency" onchange="App.onPaymentChange()">
+            <option value="month">Раз в месяц</option>
+            <option value="quarter">Раз в квартал</option>
+            <option value="halfYear">Раз в полгода</option>
+            <option value="year">Раз в год</option>
+            <option value="week">Раз в неделю</option>
+            <option value="day">Раз в день</option>
+          </select>
+          <div class="payment-preview" id="payment-preview"></div>
+        </div>
         <div class="form-group full-width">
           <label for="verdict">
             Решение по риску
