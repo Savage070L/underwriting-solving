@@ -288,7 +288,7 @@ const App = {
       ['Страхователь', Utils.formatCompanyName(z.insurerName)],
       ['БИН', z.bin],
       ['Регион', z.region],
-      ['Дата договора', z.periodFrom ? Utils.fmtDateShort(z.periodFrom) : (z.docDate ? Utils.fmtDateShort(z.docDate) : '-')],
+      ['Дата договора', z.docDate ? Utils.fmtDateShort(z.docDate) : (z.periodFrom ? Utils.fmtDateShort(z.periodFrom) : '-')],
       ['ОКЭД', resolved.oked || z.oked || '—'],
       ['Деятельность', resolved.activity || z.activity || '—'],
       ['Класс риска', resolved.riskClass || z.riskClass || '—'],
