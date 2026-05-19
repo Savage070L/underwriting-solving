@@ -163,19 +163,20 @@ const Utils = {
     week: 'раз в неделю',
     day: 'раз в день',
   },
+  // Fixed annual cycle: standard number of tranches per year regardless of contract duration.
+  PAYMENT_TRANCHE_COUNT: {
+    year: 1,
+    halfYear: 2,
+    quarter: 4,
+    month: 12,
+    week: 52,
+    day: 365,
+  },
   calcPaymentTranches(frequency, periodFrom, periodTo, refDate) {
     const today = refDate ? new Date(refDate) : new Date();
     today.setHours(0, 0, 0, 0);
     const t1 = new Date(today);
     t1.setDate(t1.getDate() + 1);
-
-    // Determine end date: contract end, or default to t1 + 12 months
-    let endDate = periodTo ? new Date(periodTo) : null;
-    if (!endDate || isNaN(endDate)) {
-      endDate = new Date(t1);
-      endDate.setFullYear(endDate.getFullYear() + 1);
-    }
-    endDate.setHours(0, 0, 0, 0);
 
     const advance = (d) => {
       const n = new Date(d);
@@ -191,14 +192,13 @@ const Utils = {
       return n;
     };
 
-    const SAFETY_CAP = 400; // protect against accidentally infinite loops
+    // Fixed annual count by frequency (full year cycle)
+    const N = Utils.PAYMENT_TRANCHE_COUNT[frequency] || 12;
     const tranches = [t1];
     let cur = t1;
-    while (tranches.length < SAFETY_CAP) {
-      const next = advance(cur);
-      if (next > endDate) break;
-      tranches.push(next);
-      cur = next;
+    while (tranches.length < N) {
+      cur = advance(cur);
+      tranches.push(cur);
     }
     return tranches;
   },
