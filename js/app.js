@@ -13,6 +13,7 @@ const App = {
     normativ: null,   // stored as raw arrayBuffer JSON
     ku: null,
     calculator: null, // array of activity objects
+    classifier: null, // ОКЭД → класс риска + название деятельности
   },
   _rawNormativBuffer: null, // keep raw buffer for date-dependent lookup
 
@@ -94,7 +95,13 @@ const App = {
           const result = ExcelReader.readCalculator(buf);
           App.refData.calculator = result;
           localStorage.setItem('ref_calculator', JSON.stringify(result));
-          App.populateActivityDropdown(result);
+          break;
+        }
+        case 'classifier': {
+          const result = ExcelReader.readOkedClassifier(buf);
+          App.refData.classifier = result;
+          localStorage.setItem('ref_classifier', JSON.stringify(result));
+          App.onOkedChange(); // re-lookup if ОКЭД already entered
           break;
         }
       }
@@ -209,6 +216,9 @@ const App = {
       // Show preview
       App.showPreview();
 
+      // Refresh ОКЭД hint with the value loaded from zayavka
+      App.onOkedChange();
+
       // Update upload status
       const zone = document.getElementById('zone-zayavka');
       zone.classList.add('loaded');
@@ -251,13 +261,15 @@ const App = {
     const panel = document.getElementById('preview-panel');
     const grid = document.getElementById('preview-grid');
 
+    const resolved = App._resolveOked();
     const items = [
       ['Страхователь', Utils.formatCompanyName(z.insurerName)],
       ['БИН', z.bin],
       ['Регион', z.region],
       ['Дата договора', z.periodFrom ? Utils.fmtDateShort(z.periodFrom) : (z.docDate ? Utils.fmtDateShort(z.docDate) : '-')],
-      ['Деятельность', z.activity],
-      ['Класс риска', z.riskClass],
+      ['ОКЭД', resolved.oked || z.oked || '—'],
+      ['Деятельность', resolved.activity || z.activity || '—'],
+      ['Класс риска', resolved.riskClass || z.riskClass || '—'],
       ['Страховая сумма', Utils.fmtMoney(z.insuranceSum)],
       ['Работники', Utils.fmtInteger(z.workers)],
       ['Премия', Utils.fmtMoney(z.premiumBase)],
@@ -337,15 +349,17 @@ const App = {
       return;
     }
     const z = App.zayavka || {};
+    const resolved = App._resolveOked();
+    const effRiskClass = resolved.riskClass || z.riskClass;
     const snapshot = {
       generatedAt: new Date().toISOString(),
       zayavka: {
         insurerName: z.insurerName || '',
         bin: z.bin || '',
         workers: z.workers || 0,
-        riskClass: z.riskClass || '',
-        oked: z.oked || '',
-        activity: z.activity || '',
+        riskClass: effRiskClass || '',
+        oked: resolved.oked || z.oked || '',
+        activity: resolved.activity || z.activity || '',
         region: z.region || '',
         insuranceSum: z.insuranceSum || 0,
         premiumBase: z.premiumBase || 0,
@@ -362,7 +376,7 @@ const App = {
       },
       verdict: document.getElementById('verdict') ? document.getElementById('verdict').value : 'auto',
       popravka: App.refData.popravka ? {
-        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(z.riskClass) : null,
+        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(effRiskClass) : null,
         allTariffs: App.refData.popravka.riskRates ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate })) : [],
       } : null,
       analytics: App.claims.analytics,
@@ -404,15 +418,17 @@ const App = {
     }
     // Build/refresh snapshot before opening (same as openAnalytics)
     const z = App.zayavka || {};
+    const resolved2 = App._resolveOked();
+    const effRC = resolved2.riskClass || z.riskClass;
     const snapshot = {
       generatedAt: new Date().toISOString(),
       zayavka: {
         insurerName: z.insurerName || '',
         bin: z.bin || '',
         workers: z.workers || 0,
-        riskClass: z.riskClass || '',
-        oked: z.oked || '',
-        activity: z.activity || '',
+        riskClass: effRC || '',
+        oked: resolved2.oked || z.oked || '',
+        activity: resolved2.activity || z.activity || '',
         region: z.region || '',
         insuranceSum: z.insuranceSum || 0,
         premiumBase: z.premiumBase || 0,
@@ -429,7 +445,7 @@ const App = {
       },
       verdict: document.getElementById('verdict') ? document.getElementById('verdict').value : 'auto',
       popravka: App.refData.popravka ? {
-        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(z.riskClass) : null,
+        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(effRC) : null,
         allTariffs: App.refData.popravka.riskRates ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate })) : [],
       } : null,
       analytics: App.claims.analytics,
@@ -568,11 +584,19 @@ const App = {
       if (val) periodTo = new Date(val);
     }
 
-    // Get selected activity from calculator
+    // Apply ОКЭД override (manual input > zayavka). Resolves class+name via classifier.
+    const resolved = App._resolveOked();
+    const effectiveOked = resolved.oked;
+    const effectiveRiskClass = resolved.riskClass;
+    const effectiveActivity = resolved.activity;
+
+    // Find matching activity in calculator file by ОКЭД (for death/injury rates)
     let selectedActivity = null;
-    const actIdx = document.getElementById('activityType').value;
-    if (actIdx !== '' && App.refData.calculator) {
-      selectedActivity = App.refData.calculator[parseInt(actIdx)];
+    if (effectiveOked && App.refData.calculator) {
+      const cs = String(effectiveOked);
+      selectedActivity = App.refData.calculator.find(a =>
+        a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
+      ) || null;
     }
 
     // Document date = date of zayavka submission (F3 in Excel) — per AR template,
@@ -592,6 +616,9 @@ const App = {
 
     return {
       ...z,
+      oked: effectiveOked || z.oked,
+      riskClass: effectiveRiskClass,
+      activity: effectiveActivity,
       docDate,
       docNumber,
       legalAddress: App.binData.legalAddress || '-',
@@ -631,7 +658,8 @@ const App = {
     if (App.refData.normativ) count++;
     if (App.refData.ku) count++;
     if (App.refData.calculator) count++;
-    document.getElementById('ref-badge').textContent = `${count}/4 загружено`;
+    if (App.refData.classifier) count++;
+    document.getElementById('ref-badge').textContent = `${count}/5 загружено`;
   },
 
   updateButtons() {
@@ -694,15 +722,71 @@ const App = {
     setTimeout(() => { el.className = 'msg'; }, 5000);
   },
 
-  populateActivityDropdown(activities) {
-    const select = document.getElementById('activityType');
-    select.innerHTML = '<option value="">— Выберите вид деятельности —</option>';
-    activities.forEach((act, idx) => {
-      const opt = document.createElement('option');
-      opt.value = idx;
-      opt.textContent = act.name;
-      select.appendChild(opt);
-    });
+  // ===== Resolve effective ОКЭД, риск-класс и название деятельности =====
+  // Manual ОКЭД input overrides zayavka. Lookup in classifier resolves class+name.
+  _resolveOked() {
+    const z = App.zayavka || {};
+    const manual = (document.getElementById('okedInput')?.value || '').trim();
+    const oked = manual || z.oked || '';
+    let riskClass = z.riskClass;
+    let activity = z.activity;
+    let source = manual ? 'manual' : 'zayavka';
+    if (oked && App.refData.classifier) {
+      const found = Utils.lookupOked(oked, App.refData.classifier);
+      if (found) {
+        riskClass = found.cls;
+        activity = found.name;
+        source = manual ? 'manual+classifier' : 'zayavka+classifier';
+      }
+    }
+    return { oked, riskClass, activity, source };
+  },
+
+  // ===== ОКЭД INPUT HANDLER =====
+  onOkedChange() {
+    const input = document.getElementById('okedInput');
+    const hint = document.getElementById('oked-hint');
+    const result = document.getElementById('oked-result');
+    if (!input || !result) return;
+    const code = input.value.trim();
+    if (!code) {
+      // Empty — fall back to zayavka
+      result.innerHTML = '';
+      result.classList.remove('visible', 'oked-result--found', 'oked-result--missing');
+      if (hint) hint.textContent = App.zayavka
+        ? `— пусто, используется ОКЭД из заявки (${App.zayavka.oked || '—'})`
+        : '— пусто, используется ОКЭД из заявки';
+      return;
+    }
+    if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
+    if (!App.refData.classifier) {
+      result.classList.add('visible', 'oked-result--missing');
+      result.classList.remove('oked-result--found');
+      result.innerHTML = '<span class="oked-warn">⚠ Загрузите справочник «Классификатор ОКЭД» для поиска класса и деятельности</span>';
+      return;
+    }
+    const found = Utils.lookupOked(code, App.refData.classifier);
+    if (found) {
+      result.classList.add('visible', 'oked-result--found');
+      result.classList.remove('oked-result--missing');
+      const sourceTag = found.source === 'exact'
+        ? '<span class="oked-source oked-source--exact">точное совпадение</span>'
+        : '<span class="oked-source oked-source--prefix">по префиксу</span>';
+      result.innerHTML = `
+        <div class="oked-found-line">
+          <span class="oked-label">Класс риска:</span>
+          <strong class="oked-cls">${found.cls}</strong>
+          ${sourceTag}
+        </div>
+        <div class="oked-found-line">
+          <span class="oked-label">Деятельность:</span>
+          <strong class="oked-name">${found.name}</strong>
+        </div>`;
+    } else {
+      result.classList.add('visible', 'oked-result--missing');
+      result.classList.remove('oked-result--found');
+      result.innerHTML = `<span class="oked-warn">⚠ ОКЭД «${code}» не найден в классификаторе</span>`;
+    }
   },
 
   // ===== CACHE MANAGEMENT =====
@@ -739,7 +823,13 @@ const App = {
       if (calcStr) {
         App.refData.calculator = JSON.parse(calcStr);
         App.updateRefStatus('calculator', true, 'из кэша');
-        App.populateActivityDropdown(App.refData.calculator);
+      }
+
+      // Classifier
+      const classifierStr = localStorage.getItem('ref_classifier');
+      if (classifierStr) {
+        App.refData.classifier = JSON.parse(classifierStr);
+        App.updateRefStatus('classifier', true, 'из кэша');
       }
 
       App.updateRefBadge();
@@ -753,12 +843,12 @@ const App = {
     localStorage.removeItem('ref_normativ_raw');
     localStorage.removeItem('ref_ku');
     localStorage.removeItem('ref_calculator');
+    localStorage.removeItem('ref_classifier');
     localStorage.removeItem('manual_verdict');
-    App.refData = { popravka: null, normativ: null, ku: null, calculator: null };
+    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null };
     App._rawNormativBuffer = null;
-    ['popravka', 'normativ', 'ku', 'calculator'].forEach(t => App.updateRefStatus(t, false));
+    ['popravka', 'normativ', 'ku', 'calculator', 'classifier'].forEach(t => App.updateRefStatus(t, false));
     App.updateRefBadge();
-    document.getElementById('activityType').innerHTML = '<option value="">— Загрузите калькулятор —</option>';
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
     App.updateVerdictHint();

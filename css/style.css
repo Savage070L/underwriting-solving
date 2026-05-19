@@ -419,6 +419,61 @@ header p {
   color: #b54708;
 }
 
+/* ОКЭД input — hint and lookup result */
+.oked-hint {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #98a2b3;
+  margin-left: 6px;
+}
+.oked-lookup-result {
+  display: none;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  border-left: 3px solid;
+}
+.oked-lookup-result.visible {
+  display: block;
+}
+.oked-lookup-result.oked-result--found {
+  background: #f0fdf4;
+  border-left-color: #10b981;
+  color: #065f46;
+}
+.oked-lookup-result.oked-result--missing {
+  background: #fef2f2;
+  border-left-color: #dc2626;
+  color: #7f1d1d;
+}
+.oked-found-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+.oked-label {
+  color: #475569;
+  font-weight: 500;
+}
+.oked-cls, .oked-name {
+  color: #0f172a;
+  font-weight: 700;
+}
+.oked-source {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.oked-source--exact { background: #d1fae5; color: #065f46; }
+.oked-source--prefix { background: #dbeafe; color: #1e40af; }
+.oked-warn { font-weight: 500; }
+
 /* Dates row hidden by default */
 .dates-row {
   display: none;

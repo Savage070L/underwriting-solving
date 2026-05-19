@@ -240,6 +240,32 @@ const Utils = {
     }
   },
 
+  // ===== ОКЭД → класс риска + название деятельности =====
+  // Алгоритм:
+  // 1. Точное совпадение по полному ОКЭД (например '07101').
+  // 2. Префиксное (например '07xxx' → начало '07'),
+  //    но если конкретный ОКЭД упомянут в исключениях (col D),
+  //    пропускаем эту строку и идём дальше.
+  lookupOked(code, classifier) {
+    if (!code || !classifier || !classifier.length) return null;
+    const codeStr = String(code).trim().replace(/\s+/g, '');
+    if (!codeStr) return null;
+    // 1. Exact match
+    const exact = classifier.find(e => !e.isPrefix && e.okedRaw === codeStr);
+    if (exact) {
+      return { cls: exact.cls, name: exact.name, source: 'exact', oked: codeStr };
+    }
+    // 2. Prefix match — skip rows where code is in exceptions
+    for (const e of classifier) {
+      if (!e.isPrefix || !e.prefix) continue;
+      if (codeStr.startsWith(e.prefix)) {
+        if (e.exceptions.includes(codeStr)) continue;
+        return { cls: e.cls, name: e.name, source: 'prefix', oked: codeStr };
+      }
+    }
+    return null;
+  },
+
   // === Decision tree for which organ approves this risk ===
   // Returns: 'sd' | 'pravlenie' | 'as' | 'standard'
   // For backward compat: if only sumInsured passed, uses old 3-billion threshold

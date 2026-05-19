@@ -17,7 +17,7 @@
     <div class="section">
       <div class="section-title">
         Справочники
-        <span class="badge" id="ref-badge">0/4 загружено</span>
+        <span class="badge" id="ref-badge">0/5 загружено</span>
         <button class="btn-clear" onclick="App.clearCache()">Очистить кэш</button>
       </div>
       <div class="upload-grid">
@@ -44,6 +44,12 @@
           <div class="uz-label">Калькулятор рентабельности</div>
           <div class="uz-status" id="status-calculator">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('calculator', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-classifier" onclick="this.querySelector('input').click()">
+          <div class="uz-icon">🗂️</div>
+          <div class="uz-label">Классификатор ОКЭД</div>
+          <div class="uz-status" id="status-classifier">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('classifier', this.files[0])">
         </div>
       </div>
     </div>
@@ -109,10 +115,12 @@
           <label for="nonResident">Нерезидент</label>
         </div>
         <div class="form-group">
-          <label for="activityType">Вид деятельности (для калькулятора рисков)</label>
-          <select id="activityType">
-            <option value="">— Загрузите калькулятор —</option>
-          </select>
+          <label for="okedInput">
+            ОКЭД (если не указан в заявке)
+            <span class="oked-hint" id="oked-hint">— пусто, используется ОКЭД из заявки</span>
+          </label>
+          <input type="text" id="okedInput" placeholder="например: 07101" oninput="App.onOkedChange()">
+          <div class="oked-lookup-result" id="oked-result"></div>
         </div>
         <div class="form-group full-width">
           <label for="verdict">

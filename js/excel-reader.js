@@ -35,6 +35,39 @@ const ExcelReader = {
     return null;
   },
 
+  // ===== READ ОКЭД CLASSIFIER (with exceptions) =====
+  // Returns array of entries: { cls, okedRaw, isPrefix, prefix, name, exceptions: [] }
+  readOkedClassifier(arrayBuffer) {
+    const wb = XLSX.read(arrayBuffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+    const entries = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length < 2) continue;
+      const cls = row[0];
+      const oked = row[1];
+      const name = row[2];
+      const exclStr = row[3];
+      if (cls == null || !oked) continue;
+      const okedStr = String(oked).trim();
+      const exceptions = exclStr
+        ? String(exclStr).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+        : [];
+      const isPrefix = /x{2,}$/i.test(okedStr);
+      const prefix = isPrefix ? okedStr.replace(/x+$/i, '') : null;
+      entries.push({
+        cls: parseInt(cls) || 0,
+        okedRaw: okedStr,
+        isPrefix,
+        prefix,
+        name: String(name || '').trim(),
+        exceptions,
+      });
+    }
+    return entries;
+  },
+
   // ===== READ ZAYAVKA (underwriting application) =====
   readZayavka(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
