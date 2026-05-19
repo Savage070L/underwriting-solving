@@ -506,6 +506,36 @@ const App = {
     }
   },
 
+  // ===== GENERATE СЗ на Правление =====
+  async generateSzPravlenie() {
+    try {
+      const data = App._collectData();
+      if (!data) return;
+      const blob = await SZGenerator.generate(data, 'pravlenie');
+      const fileName = `СЗ на Правление ${Utils.formatCompanyName(data.insurerName)}.docx`;
+      saveAs(blob, fileName);
+      App.showMsg(`${fileName} сформирован!`, 'success');
+    } catch (e) {
+      console.error('СЗ на Правление generation error:', e);
+      App.showMsg(`Ошибка генерации СЗ на Правление: ${e.message}`, 'error');
+    }
+  },
+
+  // ===== GENERATE СЗ на СД =====
+  async generateSzSd() {
+    try {
+      const data = App._collectData();
+      if (!data) return;
+      const blob = await SZGenerator.generate(data, 'sd');
+      const fileName = `СЗ на СД ${Utils.formatCompanyName(data.insurerName)}.docx`;
+      saveAs(blob, fileName);
+      App.showMsg(`${fileName} сформирован!`, 'success');
+    } catch (e) {
+      console.error('СЗ на СД generation error:', e);
+      App.showMsg(`Ошибка генерации СЗ на СД: ${e.message}`, 'error');
+    }
+  },
+
   // ===== COLLECT ALL DATA =====
   _collectData() {
     const z = App.zayavka;
@@ -609,7 +639,52 @@ const App = {
     document.getElementById('btnAR').disabled = !hasZayavka;
     document.getElementById('btnZakl').disabled = !hasZayavka;
     const btnProto = document.getElementById('btnProtocol');
-    if (btnProto) btnProto.disabled = !hasZayavka;
+    const btnSzPr = document.getElementById('btnSzPravlenie');
+    const btnSzSd = document.getElementById('btnSzSd');
+
+    // Determine organ from current data
+    let organ = null;
+    let pkg = ['ar', 'zakl'];
+    if (hasZayavka) {
+      const assets = App.refData.normativ?.fullAssetsTenge || 0;
+      organ = Utils.determineOrgan(
+        App.zayavka.insuranceSum,
+        App.zayavka.riskClass,
+        assets,
+      );
+      pkg = Utils.determineDocPackage(organ);
+    }
+
+    if (btnProto) btnProto.disabled = !hasZayavka || !pkg.includes('protocol');
+    if (btnSzPr) btnSzPr.disabled = !hasZayavka || !pkg.includes('sz_pravlenie');
+    if (btnSzSd) btnSzSd.disabled = !hasZayavka || !pkg.includes('sz_sd');
+
+    // Show/hide buttons depending on package
+    const setHidden = (el, hide) => { if (el) el.style.display = hide ? 'none' : ''; };
+    setHidden(btnProto, !pkg.includes('protocol'));
+    setHidden(btnSzPr, !pkg.includes('sz_pravlenie'));
+    setHidden(btnSzSd, !pkg.includes('sz_sd'));
+
+    // Update organ-banner with determined body
+    const banner = document.getElementById('organ-banner');
+    if (banner) {
+      if (organ && organ !== 'standard') {
+        banner.style.display = 'block';
+        banner.className = 'organ-banner organ-banner--' + organ;
+        const descr = Utils.describeOrgan(organ);
+        const pkgNames = pkg.map(p => ({
+          ar: 'АР', zakl: 'Заключение', protocol: 'Протокол',
+          sz_pravlenie: 'СЗ на Правление', sz_sd: 'СЗ на СД',
+        }[p])).join(' · ');
+        banner.innerHTML = `<strong>Определён орган:</strong> ${descr}<br><span class="ob-pkg">Пакет документов: ${pkgNames}</span>`;
+      } else if (organ === 'standard' && hasZayavka) {
+        banner.style.display = 'block';
+        banner.className = 'organ-banner organ-banner--standard';
+        banner.innerHTML = `<strong>Стандартная процедура.</strong> <span class="ob-pkg">Достаточно АР и Заключения</span>`;
+      } else {
+        banner.style.display = 'none';
+      }
+    }
   },
 
   showMsg(text, type) {

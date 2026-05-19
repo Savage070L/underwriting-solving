@@ -3,8 +3,29 @@
 const Utils = {
   // ===== CONSTANTS =====
 
-  // Threshold for Pravlenie vs Underwriting Council (3 billion tenge)
+  // Legacy threshold (kept for backward compatibility)
   LIMIT_AS: 3000000000,
+
+  // === New AS / Pravlenie / SD thresholds ===
+  // АС: 2-10 млрд для классов 1-15, ИЛИ 1,5-10 млрд для классов 16-22
+  // Правление: > 10 млрд И ≤ 25% активов компании
+  // СД: страх. сумма > 25% активов компании
+  LIMIT_AS_LOW_CLS_1_15: 2000000000,   // 2 млрд для классов 1–15
+  LIMIT_AS_LOW_CLS_16_22: 1500000000,  // 1,5 млрд для классов 16–22
+  LIMIT_AS_HIGH: 10000000000,          // 10 млрд верхняя граница АС
+  LIMIT_SD_ASSETS_RATIO: 0.25,         // 25 % от активов — порог СД
+
+  // Совет директоров (адресат СЗ на СД)
+  SD_CHAIR_ROLE: 'Председатель Совета директоров',
+  SD_CHAIR_NAME: 'М.К. Альжанов',
+
+  // Кто подписывает СЗ
+  DAIP_DIRECTOR_ROLE: 'Директор ДАиП',
+  DAIP_DIRECTOR_NAME: 'Джелкобаев Т.К.',
+  PRAVLENIE_CHAIR_ROLE: 'Председатель Правления',
+  PRAVLENIE_CHAIR_NAME: 'Г. Амерходжаев',
+  UPRAV_DIR_ROLE: 'Управляющий директор',
+  UPRAV_DIR_NAME: 'Аринов Д.С.',
 
   // Underwriting Council members (6 people) — insurance sum <= 3 billion
   AS_MEMBERS: [
@@ -149,8 +170,14 @@ const Utils = {
     return null;
   },
 
-  // Determine organ: "pravlenie" if sum > 3 billion, else "as"
-  determineOrgan(insuranceSum) {
+  // Determine which collegial body approves this risk.
+  // Signature: determineOrgan(insuranceSum, riskClass?, companyAssets?)
+  // - 3 args → full logic: sd / pravlenie / as / standard
+  // - 1 arg → legacy 3-billion threshold for backward compat
+  determineOrgan(insuranceSum, riskClass, companyAssets) {
+    if (riskClass != null || companyAssets != null) {
+      return Utils.determineOrganNew(insuranceSum, riskClass, companyAssets);
+    }
     return insuranceSum > Utils.LIMIT_AS ? 'pravlenie' : 'as';
   },
 
@@ -195,12 +222,72 @@ const Utils = {
 
   // Get organ name in Russian (genitive case)
   getOrganName(organ) {
-    return organ === 'pravlenie' ? 'Правления' : 'Андеррайтингового совета';
+    switch (organ) {
+      case 'pravlenie': return 'Правления';
+      case 'sd': return 'Совета директоров';
+      case 'as':
+      default: return 'Андеррайтингового совета';
+    }
   },
 
   // Get organ name for header
   getOrganNameHeader(organ) {
-    return organ === 'pravlenie' ? 'Правления' : 'Андеррайтингового Совета';
+    switch (organ) {
+      case 'pravlenie': return 'Правления';
+      case 'sd': return 'Совета директоров';
+      case 'as':
+      default: return 'Андеррайтингового Совета';
+    }
+  },
+
+  // === Decision tree for which organ approves this risk ===
+  // Returns: 'sd' | 'pravlenie' | 'as' | 'standard'
+  // For backward compat: if only sumInsured passed, uses old 3-billion threshold
+  determineOrganNew(sumInsured, riskClass, companyAssets) {
+    if (!sumInsured) return 'standard';
+    const cls = parseInt(riskClass) || 0;
+    const ratio = companyAssets > 0 ? sumInsured / companyAssets : 0;
+    // СД: если страховая сумма > 25% активов
+    if (ratio > this.LIMIT_SD_ASSETS_RATIO) return 'sd';
+    // Правление: > 10 млрд (не более 25 % активов — уже отсечено выше)
+    if (sumInsured > this.LIMIT_AS_HIGH) return 'pravlenie';
+    // АС: пороги зависят от класса риска
+    if (cls >= 1 && cls <= 15 && sumInsured >= this.LIMIT_AS_LOW_CLS_1_15) return 'as';
+    if (cls >= 16 && cls <= 22 && sumInsured >= this.LIMIT_AS_LOW_CLS_16_22) return 'as';
+    // Если класс не известен, используем большую базу для АС
+    if (cls === 0 && sumInsured >= this.LIMIT_AS_LOW_CLS_1_15) return 'as';
+    return 'standard';
+  },
+
+  // Members + secretary by organ
+  getOrganMembers(organ) {
+    if (organ === 'pravlenie' || organ === 'sd') return this.PRAVLENIE_MEMBERS;
+    return this.AS_MEMBERS;
+  },
+
+  getOrganSecretary(organ) {
+    if (organ === 'pravlenie' || organ === 'sd') return this.PRAVLENIE_SECRETARY;
+    return this.AS_SECRETARY;
+  },
+
+  // What documents need to be generated for the organ
+  determineDocPackage(organ) {
+    switch (organ) {
+      case 'sd':        return ['ar', 'zakl', 'sz_pravlenie', 'sz_sd'];
+      case 'pravlenie': return ['ar', 'zakl', 'sz_pravlenie'];
+      case 'as':        return ['ar', 'zakl', 'protocol'];
+      default:          return ['ar', 'zakl'];
+    }
+  },
+
+  // Human-readable package label
+  describeOrgan(organ) {
+    switch (organ) {
+      case 'sd': return 'Совет директоров (страх. сумма > 25 % активов)';
+      case 'pravlenie': return 'Правление (страх. сумма > 10 млрд ₸)';
+      case 'as': return 'Андеррайтинговый Совет (АС)';
+      default: return 'Стандартная процедура (без коллегиального органа)';
+    }
   },
 
   // Calculate contract duration in months

@@ -28,7 +28,7 @@ const ProtocolGenerator = {
     const emptyP = () => new Paragraph({ children: [tr('')] });
 
     // Decide organ
-    const organ = Utils.determineOrgan(data.insuranceSum);
+    const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
     const isPravlenie = organ === 'pravlenie';
     const members = isPravlenie ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
     const secretary = isPravlenie ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;

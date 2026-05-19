@@ -17,7 +17,7 @@ const ZaklGenerator = {
       children: bold ? [trB('')] : [tr('')],
     });
 
-    const organ = Utils.determineOrgan(data.insuranceSum);
+    const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
     const decision = Utils.determineDecision(data.coeff, data.coeffDown);
     const verdict = Utils.resolveVerdict(data.verdict, decision);
     const dateShort = Utils.fmtDateShort(data.docDate);
