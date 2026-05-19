@@ -138,7 +138,7 @@ const ZaklGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
 
-    // P10: Covered risks
+    // P10: Covered risks — bulleted list
     paragraphs.push(new Paragraph({
       children: [tr('Покрываемые риски:')],
       alignment: AlignmentType.JUSTIFIED,
@@ -148,6 +148,7 @@ const ZaklGenerator = {
       paragraphs.push(new Paragraph({
         children: [tr(risk)],
         alignment: AlignmentType.JUSTIFIED,
+        bullet: { level: 0 },
       }));
     }
 
@@ -357,35 +358,57 @@ const ZaklGenerator = {
       }
     }
 
-    // Risk analysis boilerplate
+    // Risk analysis — fixed template wording (per template approved by underwriting dept).
     paragraphs.push(new Paragraph({
-      children: [tr('На основании проведенного анализа статистических данных по страховым выплатам и убыткам за последние 3 года, а также с учетом специфики деятельности страхователя, департамент андеррайтинга и перестрахования отмечает следующее:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    // Risk coefficients paragraph
-    const deathRateStr = activityData.deathRate > 0
-      ? activityData.deathRate.toFixed(3).replace('.', ',')
-      : 'нет';
-    const injuryRateStr = activityData.injuryRate.toFixed(3).replace('.', ',');
-    const deathCalcStr = deathCalc.toFixed(1).replace('.', ',');
-    const injuryCalcStr = injuryCalc.toFixed(1).replace('.', ',');
-
-    const comparisonText = activityData.deathRate < activityData.injuryRate
-      ? 'более подвержены к риску травматизма, чем риску смерти'
-      : 'более подвержены к риску смерти, чем риску травматизма';
-
-    paragraphs.push(new Paragraph({
-      children: [tr(`Учитывая специфику действия предприятия, статистику за последние 3-х лет, вероятность несчастного случая данного класса риска на 1000 человек: смерть – ${deathRateStr}, травма – ${injuryRateStr}. В страхуемой группе ${Utils.fmtInteger(data.workers)} человек ${comparisonText}.`)],
+      children: [tr('Оценка рисков по данному предприятию производилась на основе предоставленных данных по статистике страховых случаев, указанных в заявлении анкете.')],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
     paragraphs.push(emptyP());
 
-    // Summary with predicted loss
-    const avgAnnualStr = avgAnnualClaims.toFixed(1).replace('.', ',');
+    // Probabilities per 1000 (from калькулятор) and projected counts at this plant.
+    // Trim trailing zeros so "0,190" → "0,19", "0,027" stays as-is.
+    const fmtRate = (v) => {
+      const s = Number(v || 0).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+      return s.replace('.', ',');
+    };
+    const deathRateStr = fmtRate(activityData.deathRate);
+    const injuryRateStr = fmtRate(activityData.injuryRate);
+    const deathOnPlantStr = fmtRate((data.workers || 0) * activityData.deathRate / 1000);
+    const injuryOnPlantStr = fmtRate((data.workers || 0) * activityData.injuryRate / 1000);
+
+    // Word for risk-class severity: 1–10 низкая, 11–15 средняя, 16–22 высокая
+    const riskWord = Utils.riskClassWord(data.riskClass);
+
+    const comparisonText = activityData.deathRate < activityData.injuryRate
+      ? 'наиболее подвержены к риску травматизма, чем риску смерти'
+      : 'наиболее подвержены к риску смерти, чем риску травматизма';
+
     paragraphs.push(new Paragraph({
-      children: [tr(`Резюмируя вышесказанное отмечаем, что вероятность возникновения травмы в страхуемой группе работников ${companyName} за последние 3 года составила ${claimsCount} случаев (в среднем ${avgAnnualStr} в год). Прогнозируемый убыток по договору составит ${Utils.fmtMoney(predictedLoss)}.`)],
+      children: [tr(
+        `Учитывая специфику действия предприятия, статистику за последние 3-х лет, ` +
+        `вероятность несчастного случая данного класса риска ${riskWord}, ` +
+        `исходя из данных Агентства статистики РК количество пострадавших в данном виде деятельности ` +
+        `коэффициент травматизма составляет ${injuryRateStr} на 1 000 человек, ` +
+        `в нашем случае риск получения травмы на данном предприятии составляет ${injuryOnPlantStr} на ${Utils.fmtInteger(data.workers)} человек, ` +
+        `при этом смертельные случаи по данному виду в статистики Агентства РК составляет ${deathRateStr} на 1 000 человек, ` +
+        `в нашем случае риск смертельного исхода на данном предприятии составляет ${deathOnPlantStr} на ${Utils.fmtInteger(data.workers)} человека. ` +
+        `Таким образом сотрудники данного предприятия ${comparisonText}.`
+      )],
+      alignment: AlignmentType.JUSTIFIED,
+    }));
+
+    paragraphs.push(emptyP());
+
+    // Summary block — fixed template per ТЗ (predicted loss 900 000 ₸ per recognized injury case)
+    paragraphs.push(new Paragraph({
+      children: [tr(
+        `Резюмируя вышесказанное отмечаем, что вероятность возникновения травмы в страхуемой группе ` +
+        `в силу профессиональной деятельности возможен, факт получения одна травма ` +
+        `(прогнозируемый убыток нетрудоспособности 900 000 тг.), ` +
+        `в связи с чем данные убытки на приемлемом уровне для Компании ` +
+        `и страховой премии будет достаточно для покрытия данных убытков.`
+      )],
       alignment: AlignmentType.JUSTIFIED,
     }));
 

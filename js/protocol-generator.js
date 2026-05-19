@@ -16,6 +16,8 @@ const ProtocolGenerator = {
   async generate(data) {
     const {
       Document, Packer, Paragraph, TextRun, AlignmentType,
+      Table, TableRow, TableCell, WidthType, BorderStyle,
+      TableLayoutType, VerticalAlign,
     } = docx;
 
     const FONT = 'Times New Roman';
@@ -166,8 +168,8 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // Voting results — empty checkboxes since we don't know the actual votes in advance
-    const CHECKBOX = '☐'; // ☐ unchecked
+    // Voting results — show only "За" per template (no "Против" column).
+    const CHECKBOX = '☐';
     paragraphs.push(new Paragraph({
       children: [trB('Результаты голосования:')],
       alignment: AlignmentType.JUSTIFIED,
@@ -178,7 +180,7 @@ const ProtocolGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`${chair[1]}     ${CHECKBOX} «За»     ${CHECKBOX} «Против»`)],
+      children: [tr(`${chair[1]}     ${CHECKBOX} «За»`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -189,24 +191,20 @@ const ProtocolGenerator = {
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
-        children: [tr(`${name}     ${CHECKBOX} «За»     ${CHECKBOX} «Против»`)],
+        children: [tr(`${name}     ${CHECKBOX} «За»`)],
         alignment: AlignmentType.JUSTIFIED,
       }));
     }
 
     paragraphs.push(emptyP());
 
-    // Totals — leave numbers blank, to be filled in by hand
+    // Totals — only "За" per template.
     paragraphs.push(new Paragraph({
       children: [trB('Всего голосов:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`«За»           - ____ из ${members.length}`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`«Против»  - ____ из ${members.length}`)],
+      children: [tr(`«За»  - ____ из ${members.length}`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -229,38 +227,98 @@ const ProtocolGenerator = {
     paragraphs.push(emptyP());
     paragraphs.push(emptyP());
 
-    // Signatures
+    // === Signatures — same 3-column invisible-border table as in AR ===
+    // Page width A4 minus 2×1134 twips of margins = 9638 twips available.
+    const COL_TOTAL = 9638;
+    const SIG_COL_NAME = 6038;
+    const SIG_COL_LINE = 2200;
+    const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE;
+    const noBorderStyle = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+    const noBorders = {
+      top: noBorderStyle, bottom: noBorderStyle,
+      left: noBorderStyle, right: noBorderStyle,
+    };
+
+    const sigRow = (nameText) => new TableRow({
+      children: [
+        new TableCell({
+          width: { size: SIG_COL_NAME, type: WidthType.DXA },
+          borders: noBorders,
+          verticalAlign: VerticalAlign.CENTER,
+          children: [new Paragraph({
+            children: [tr(nameText)],
+            alignment: AlignmentType.LEFT,
+          })],
+        }),
+        new TableCell({
+          width: { size: SIG_COL_LINE, type: WidthType.DXA },
+          borders: noBorders,
+          verticalAlign: VerticalAlign.CENTER,
+          children: [new Paragraph({
+            children: [tr('___________________')],
+            alignment: AlignmentType.CENTER,
+          })],
+        }),
+        new TableCell({
+          width: { size: SIG_COL_DATE, type: WidthType.DXA },
+          borders: noBorders,
+          verticalAlign: VerticalAlign.CENTER,
+          children: [new Paragraph({
+            children: [tr(dateLine)],
+            alignment: AlignmentType.RIGHT,
+          })],
+        }),
+      ],
+    });
+    const blankRow = () => new TableRow({
+      children: [
+        new TableCell({ width: { size: SIG_COL_NAME, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+        new TableCell({ width: { size: SIG_COL_LINE, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+        new TableCell({ width: { size: SIG_COL_DATE, type: WidthType.DXA }, borders: noBorders, children: [new Paragraph({ children: [] })] }),
+      ],
+    });
+
     paragraphs.push(new Paragraph({
       children: [trB(`Члены ${organName}: `)],
       alignment: AlignmentType.JUSTIFIED,
     }));
+    paragraphs.push(emptyP());
+
+    const sigTableRows = [];
+    for (const [role, name] of members) {
+      sigTableRows.push(sigRow(`${role} – ${name}`));
+      sigTableRows.push(blankRow());
+    }
+    paragraphs.push(new Table({
+      rows: sigTableRows,
+      width: { size: COL_TOTAL, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
+    }));
 
     paragraphs.push(emptyP());
 
-    for (const [role, name] of members) {
-      paragraphs.push(new Paragraph({
-        children: [tr(`${role} – ${name}`)],
-        alignment: AlignmentType.JUSTIFIED,
-      }));
-      paragraphs.push(new Paragraph({
-        children: [tr(`___________________      ${dateLine}`)],
-        alignment: AlignmentType.JUSTIFIED,
-      }));
-      paragraphs.push(emptyP());
-    }
-
-    // Secretary
-    paragraphs.push(new Paragraph({
-      children: [trB(`Секретарь ${organName}: `)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`${secretary}`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`__________________     ${dateLine}`)],
-      alignment: AlignmentType.JUSTIFIED,
+    // Secretary block — same column structure, header spanning 3 cells then sigRow.
+    paragraphs.push(new Table({
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: COL_TOTAL, type: WidthType.DXA },
+              borders: noBorders,
+              columnSpan: 3,
+              children: [new Paragraph({
+                children: [trB(`Секретарь ${organName}: `)],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+        sigRow(secretary),
+      ],
+      width: { size: COL_TOTAL, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
     }));
 
     // Build document

@@ -220,6 +220,31 @@ header p {
   color: #1a1a2e;
   font-weight: 600;
 }
+.preview-section {
+  grid-column: 1 / -1;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #d0d5dd;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.preview-section-title {
+  grid-column: 1 / -1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #344054;
+  margin-bottom: 4px;
+}
+.preview-section .pi-loading,
+.preview-section .pi-warn,
+.preview-section .pi-hint {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+}
+.preview-section .pi-loading { color: #667085; font-style: italic; }
+.preview-section .pi-warn { color: #b54708; }
+.preview-section .pi-hint { color: #667085; font-size: 0.75rem; margin-top: 2px; }
 
 /* BIN lookup button */
 .btn-bin {

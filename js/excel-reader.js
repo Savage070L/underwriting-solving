@@ -669,25 +669,28 @@ const ExcelReader = {
 
     // --- Legacy fields for backward compatibility ---
     const companyCounts = {};
+    const companySums = {};
     for (const c of recognized3y) {
       companyCounts[c.company] = (companyCounts[c.company] || 0) + 1;
+      companySums[c.company] = (companySums[c.company] || 0) + (c.sum || 0);
     }
     let mainCompany = '';
     let maxCount = 0;
     for (const [company, count] of Object.entries(companyCounts)) {
       if (count > maxCount) { maxCount = count; mainCompany = company; }
     }
+    const fmtTg = (v) => String(Math.round(v || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' тг.';
     let summaryText = 'НС не было';
     if (recognized3y.length > 0) {
       let cf = mainCompany;
       if (!cf.startsWith('АО')) cf = `АО «КСЖ «${mainCompany}»`;
-      summaryText = `${recognized3y.length} НС в ${cf}`;
+      summaryText = `${recognized3y.length} НС в ${cf} (${fmtTg(companySums[mainCompany])})`;
     }
     const detailedParts = [];
     for (const [company, count] of Object.entries(companyCounts)) {
       let cf = company;
       if (!cf.startsWith('АО')) cf = `АО «КСЖ «${company}»`;
-      detailedParts.push(`${count} НС в ${cf}`);
+      detailedParts.push(`${count} НС в ${cf} (${fmtTg(companySums[company])})`);
     }
 
     return {

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Standard Life — мост к stat.gov.kz",
+  "version": "0.1.0",
+  "description": "Тянет данные по БИН со stat.gov.kz (используя текущую ЭЦП-сессию пользователя) и отдаёт андеррайтинговому приложению.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://stat.gov.kz/*",
+    "https://savage070l.github.io/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://savage070l.github.io/*",
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Standard Life · stat.gov.kz bridge"
+  }
+}

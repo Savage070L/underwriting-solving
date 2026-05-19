@@ -8,6 +8,7 @@ const App = {
     legalAddress: null,
     govParticipation: null,
   },
+  statgov: null,     // auto-fetched from stat.gov.kz via chrome extension
   refData: {
     popravka: null,   // { riskRates: Map, adjustmentCoeffs: matrix }
     normativ: null,   // stored as raw arrayBuffer JSON
@@ -96,6 +97,7 @@ const App = {
           const result = ExcelReader.readCalculator(buf);
           App.refData.calculator = result;
           localStorage.setItem('ref_calculator', JSON.stringify(result));
+          App.populateActivityDropdown();
           break;
         }
         case 'classifier': {
@@ -218,6 +220,7 @@ const App = {
       // Auto-lookup BIN for address and gov participation
       if (App.zayavka.bin) {
         App.autoLookupBIN(App.zayavka.bin);
+        App.autoLookupStatGov(App.zayavka.bin);
       }
 
       // Show preview
@@ -300,11 +303,69 @@ const App = {
       ['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)'],
     ];
 
-    grid.innerHTML = items.map(([label, value]) =>
+    let html = items.map(([label, value]) =>
       `<div class="preview-item"><span class="pi-label">${label}:</span> <span class="pi-value">${value || '-'}</span></div>`
     ).join('');
 
+    // === Блок stat.gov.kz (через chrome extension) ===
+    const sg = App.statgov;
+    if (sg) {
+      let sgBody = '';
+      if (sg.loading) {
+        sgBody = '<div class="pi-loading">Поиск в реестре stat.gov.kz…</div>';
+      } else if (sg.error) {
+        sgBody = `<div class="pi-warn">⚠ ${sg.error}</div>
+                  <div class="pi-hint">Установи расширение «Standard Life — мост к stat.gov.kz» и войди в кабинет stat.gov.kz через ЭЦП.</div>`;
+      } else if (sg.found === false) {
+        sgBody = `<div class="pi-warn">БИН ${sg.bin || ''} не найден в реестре stat.gov.kz.</div>`;
+      } else {
+        const sgItems = [
+          ['Наименование (реестр)', sg.name],
+          ['Дата регистрации', sg.registrationDate],
+          ['Осн. ОКЭД', `${sg.okedPrimaryCode || ''} — ${sg.okedPrimaryName || ''}`],
+          ['Втор. ОКЭД', sg.okedSecondaryCode],
+          ['КРП (с фил.)', `${sg.krpWithBranchesCode || ''} — ${sg.krpWithBranchesName || ''}`],
+          ['КРП (без фил.)', `${sg.krpWithoutBranchesCode || ''} — ${sg.krpWithoutBranchesName || ''}`],
+          ['КАТО', sg.kato],
+          ['Юр. адрес (реестр)', sg.legalAddress],
+          ['Руководитель', sg.headFullname],
+          ['КФС', `${sg.kfsCode || ''} — ${sg.kfsName || ''}`],
+          ['Сектор экономики', `${sg.sectorCode || ''} — ${sg.sectorName || ''}`],
+        ];
+        sgBody = sgItems
+          .filter(([, v]) => v && v.replace(/[—\s-]/g, ''))
+          .map(([l, v]) => `<div class="preview-item"><span class="pi-label">${l}:</span> <span class="pi-value">${v}</span></div>`)
+          .join('');
+      }
+      html += `
+        <div class="preview-section">
+          <div class="preview-section-title">📋 stat.gov.kz (по БИН)</div>
+          ${sgBody}
+        </div>`;
+    }
+
+    grid.innerHTML = html;
+
     panel.classList.add('visible');
+  },
+
+  // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====
+  // Требует установленного расширения «Standard Life — мост к stat.gov.kz».
+  async autoLookupStatGov(bin) {
+    App.statgov = { loading: true };
+    App.showPreview();
+    if (typeof StatGovClient === 'undefined') {
+      App.statgov = { error: 'StatGovClient не подключён', loading: false };
+      App.showPreview();
+      return;
+    }
+    try {
+      const data = await StatGovClient.lookup(bin);
+      App.statgov = { ...data, loading: false };
+    } catch (e) {
+      App.statgov = { error: e.message, loading: false };
+    }
+    App.showPreview();
   },
 
   // ===== AUTO BIN LOOKUP via Cloudflare Worker proxy =====
@@ -409,17 +470,7 @@ const App = {
         lossRatioWith: App.refData.ku.lossRatioWith,
         lossRatioWithout: App.refData.ku.lossRatioWithout,
       } : null,
-      activity: (() => {
-        // Resolve activity from ОКЭД (replaces removed activityType dropdown)
-        const effOked = resolved.oked;
-        if (effOked && App.refData.calculator) {
-          const cs = String(effOked);
-          return App.refData.calculator.find(a =>
-            a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
-          ) || null;
-        }
-        return null;
-      })(),
+      activity: App._getSelectedActivity(),
     };
     localStorage.setItem('analytics_snapshot', JSON.stringify(snapshot));
     window.open('analytics.html', '_blank');
@@ -482,16 +533,7 @@ const App = {
         lossRatioWith: App.refData.ku.lossRatioWith,
         lossRatioWithout: App.refData.ku.lossRatioWithout,
       } : null,
-      activity: (() => {
-        const effOked = resolved2.oked;
-        if (effOked && App.refData.calculator) {
-          const cs = String(effOked);
-          return App.refData.calculator.find(a =>
-            a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
-          ) || null;
-        }
-        return null;
-      })(),
+      activity: App._getSelectedActivity(),
     };
     localStorage.setItem('analytics_snapshot', JSON.stringify(snapshot));
     iframe.src = 'analytics.html#inline=1&t=' + Date.now(); // force reload via hash
@@ -592,11 +634,10 @@ const App = {
       return null;
     }
 
-    // Get tariff from risk rates
-    let tariff = null;
-    if (App.refData.popravka && z.riskClass) {
-      tariff = App.refData.popravka.riskRates.get(z.riskClass);
-    }
+    // Tariff: prefer the value entered manually in заявка (D12).
+    // Only fall back to справочник (по риск-классу) when zayavka has no tariff.
+    // Note: effective risk class is resolved further below via _resolveOked();
+    // the справочник lookup happens after we know it.
 
     // Get dates (from Excel or form)
     let periodFrom = z.periodFrom;
@@ -616,14 +657,14 @@ const App = {
     const effectiveRiskClass = resolved.riskClass;
     const effectiveActivity = resolved.activity;
 
-    // Find matching activity in calculator file by ОКЭД (for death/injury rates)
-    let selectedActivity = null;
-    if (effectiveOked && App.refData.calculator) {
-      const cs = String(effectiveOked);
-      selectedActivity = App.refData.calculator.find(a =>
-        a && (a.code === cs || (a.code && cs.startsWith(String(a.code).slice(0, 2))))
-      ) || null;
+    // Tariff resolution: prefer zayavka's manual value (D12), fall back to справочник.
+    let tariff = (z.tariff != null && z.tariff !== '') ? Number(z.tariff) : null;
+    if (tariff == null && App.refData.popravka && effectiveRiskClass) {
+      tariff = App.refData.popravka.riskRates.get(effectiveRiskClass);
     }
+
+    // Activity for death/injury rates — picked manually from dropdown (sourced from Лист2 of калькулятор).
+    let selectedActivity = App._getSelectedActivity();
 
     // Document date = date of zayavka submission (F3 in Excel) — per AR template,
     // this is the date when the application was filed, NOT the contract start date.
@@ -868,6 +909,66 @@ const App = {
     }
   },
 
+  // ===== ACTIVITY DROPDOWN (filled from калькулятор Лист2) =====
+  populateActivityDropdown() {
+    const select = document.getElementById('activitySelect');
+    if (!select) return;
+    const list = App.refData.calculator || [];
+    if (!list.length) {
+      select.innerHTML = '<option value="">— загрузите справочник «Калькулятор рентабельности» —</option>';
+      return;
+    }
+    const prev = localStorage.getItem('selected_activity_idx');
+    const opts = ['<option value="">— не выбрано —</option>'];
+    list.forEach((a, i) => {
+      const death = (a.deathRate || 0).toFixed(3).replace('.', ',');
+      const injury = (a.injuryRate || 0).toFixed(3).replace('.', ',');
+      opts.push(`<option value="${i}">${a.name} (смерть ${death} / травма ${injury})</option>`);
+    });
+    select.innerHTML = opts.join('');
+    if (prev != null && list[Number(prev)]) {
+      select.value = prev;
+    }
+    App.onActivityChange();
+  },
+
+  onActivityChange() {
+    const select = document.getElementById('activitySelect');
+    const result = document.getElementById('activity-result');
+    if (!select) return;
+    const idx = select.value;
+    if (idx === '' || idx == null) {
+      localStorage.removeItem('selected_activity_idx');
+      if (result) {
+        result.classList.remove('visible', 'oked-result--found');
+        result.innerHTML = '';
+      }
+      return;
+    }
+    localStorage.setItem('selected_activity_idx', String(idx));
+    const a = (App.refData.calculator || [])[Number(idx)];
+    if (a && result) {
+      const death = (a.deathRate || 0).toFixed(3).replace('.', ',');
+      const injury = (a.injuryRate || 0).toFixed(3).replace('.', ',');
+      result.classList.add('visible', 'oked-result--found');
+      result.classList.remove('oked-result--missing');
+      result.innerHTML = `
+        <div class="oked-found-line">
+          <span class="oked-label">Коэф. смерти:</span> <strong>${death}</strong> на 1 000 чел.
+          &nbsp;&nbsp;<span class="oked-label">Коэф. травматизма:</span> <strong>${injury}</strong> на 1 000 чел.
+        </div>`;
+    }
+  },
+
+  _getSelectedActivity() {
+    const idx = localStorage.getItem('selected_activity_idx');
+    const list = App.refData.calculator || [];
+    if (idx != null && list[Number(idx)]) {
+      return list[Number(idx)];
+    }
+    return null;
+  },
+
   // ===== CACHE MANAGEMENT =====
   restoreCache() {
     try {
@@ -902,6 +1003,7 @@ const App = {
       if (calcStr) {
         App.refData.calculator = JSON.parse(calcStr);
         App.updateRefStatus('calculator', true, 'из кэша');
+        App.populateActivityDropdown();
       }
 
       // Classifier
@@ -932,10 +1034,12 @@ const App = {
     localStorage.removeItem('ref_classifier');
     localStorage.removeItem('ref_affiliated');
     localStorage.removeItem('manual_verdict');
+    localStorage.removeItem('selected_activity_idx');
     App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null };
     App._rawNormativBuffer = null;
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated'].forEach(t => App.updateRefStatus(t, false));
     App.updateRefBadge();
+    App.populateActivityDropdown();
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
     App.updateVerdictHint();
