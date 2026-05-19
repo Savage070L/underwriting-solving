@@ -737,40 +737,119 @@ const ExcelReader = {
   // ===== READ RISK RATES =====
   readRiskRates(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    const ws = wb.Sheets['risk_rates'] || wb.Sheets[wb.SheetNames[0]];
+    const ws = wb.Sheets['risk_rates']
+            || wb.Sheets[wb.SheetNames.find(n => /тариф|risk[\s_]*rate|класс/i.test(n))]
+            || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-    const rates = new Map();
-    // Data starts at row 2 (0-indexed), row 0=title, row 1=headers
-    for (let i = 2; i < data.length; i++) {
-      const row = data[i];
-      if (row && row[0] != null && row[1] != null) {
-        rates.set(Math.round(Number(row[0])), Number(row[1]));
+    // Build dense lowercase representation of a row (sparse arrays cause issues with some/findIndex)
+    const lowerCells = (row) => {
+      const out = [];
+      const len = row ? row.length : 0;
+      for (let j = 0; j < len; j++) out[j] = String(row[j] || '').toLowerCase();
+      return out;
+    };
+
+    // 1. Find header row — needs «класс» AND «тариф» in SEPARATE cells (not in a title line).
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(data.length, 10); i++) {
+      const lowers = lowerCells(data[i]);
+      if (!lowers.length) continue;
+      const hasClass = lowers.some(s => s.includes('класс'));
+      const hasTariff = lowers.some(s => /тариф|ставк|rate/.test(s));
+      // Require at least 2 distinct cells with these labels (otherwise it's a single title line)
+      const distinctLabels = lowers.filter(s => s.includes('класс') || /тариф|ставк|rate/.test(s)).length;
+      if (hasClass && hasTariff && distinctLabels >= 2) {
+        headerIdx = i;
+        break;
       }
+    }
+    if (headerIdx === -1) headerIdx = 1; // fallback to row 2 (0-indexed 1)
+
+    // 2. From headers detect which column has class, which has tariff
+    let classCol = 0, tariffCol = 1;
+    const hdr = lowerCells(data[headerIdx]);
+    hdr.forEach((s, idx) => {
+      if (s.includes('класс')) classCol = idx;
+      else if (/тариф|ставк|rate/.test(s)) tariffCol = idx;
+    });
+
+    // 3. Read all data rows until empty: class is a positive integer, tariff is a small number
+    const rates = new Map();
+    for (let i = headerIdx + 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row) continue;
+      const clsVal = row[classCol];
+      const rateVal = row[tariffCol];
+      if (clsVal == null || rateVal == null) continue;
+      const cls = parseInt(clsVal, 10);
+      const rate = Number(rateVal);
+      if (!cls || !Number.isFinite(rate)) continue;
+      rates.set(cls, rate);
     }
     return rates;
   },
 
   // ===== READ ADJUSTMENT COEFFICIENTS =====
+  // Resilient: finds the header row by label «Среднегодовое количество
+  // пострадавших работников» (or similar), then reads the matrix dynamically.
+  // Works even if rows/columns added or removed.
   readAdjustmentCoeffs(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    const ws = wb.Sheets['adjustment_coeffs'] || wb.Sheets[wb.SheetNames[1]] || wb.Sheets[wb.SheetNames[0]];
+    const ws = wb.Sheets['adjustment_coeffs']
+            || wb.Sheets[wb.SheetNames.find(n => /поправоч|adjust/i.test(n))]
+            || wb.Sheets[wb.SheetNames[1]]
+            || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-    // Matrix data in rows 3-9 (0-indexed), cols 1-6 (B-G)
-    const matrix = [];
-    for (let i = 3; i <= 9; i++) {
+    // 1. Find the header label «Среднегодовое количество пострадавших»
+    let labelRow = -1, labelCol = -1;
+    for (let i = 0; i < Math.min(data.length, 10); i++) {
       const row = data[i];
       if (!row) continue;
-      const matRow = [];
-      for (let j = 1; j <= 6; j++) {
-        matRow.push(row[j] != null ? Number(row[j]) : null);
+      const len = row.length || 0;
+      for (let j = 0; j < len; j++) {
+        const s = String(row[j] || '').toLowerCase();
+        if (s.includes('среднегодов') && (s.includes('пострадав') || s.includes('работник'))) {
+          labelRow = i;
+          labelCol = j;
+          break;
+        }
       }
-      matrix.push(matRow);
+      if (labelRow >= 0) break;
+    }
+    if (labelRow === -1) {
+      // Fallback: assume the legacy layout (rows 3-9, cols 1-6)
+      const matrix = [];
+      for (let i = 3; i <= 9; i++) {
+        const row = data[i];
+        if (!row) continue;
+        const matRow = [];
+        for (let j = 1; j <= 6; j++) matRow.push(row[j] != null ? Number(row[j]) : null);
+        matrix.push(matRow);
+      }
+      return matrix;
     }
 
-    // Also extract the recommendation texts
-    // Read from the same file if there's a column with recommendation text
+    // 2. The actual numeric matrix starts 2 rows below (after subheader with ranges).
+    //    Numeric columns are to the right of labelCol.
+    //    Detect dimensions dynamically.
+    const matrixStartRow = labelRow + 2;
+    const matrix = [];
+    for (let i = matrixStartRow; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row[labelCol] == null) break; // stop at first empty label
+      const matRow = [];
+      for (let j = labelCol + 1; j < row.length; j++) {
+        const v = row[j];
+        if (v == null) { matRow.push(null); continue; }
+        const n = Number(v);
+        matRow.push(Number.isFinite(n) ? n : null);
+      }
+      // Trim trailing nulls
+      while (matRow.length && matRow[matRow.length - 1] == null) matRow.pop();
+      if (matRow.length) matrix.push(matRow);
+    }
     return matrix;
   },
 
@@ -840,18 +919,57 @@ const ExcelReader = {
   },
 
   // ===== READ KU PO KLASSAM =====
+  // Resilient: dynamically locates the «Итого» row and the columns containing
+  // КУ values (percentage-like numbers in 0..200 range, last two such columns).
+  // Handles both: ('КУ по классам' sheet preferred), or any sheet with 'КУ' in name.
   readKuPoKlassam(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    let ws = wb.Sheets['КУ по классам'];
-    if (!ws) {
-      // Try to find the sheet
-      ws = wb.Sheets[wb.SheetNames.find(n => n.includes('КУ'))] || wb.Sheets[wb.SheetNames[0]];
+    // 1. Find the right sheet
+    let ws = wb.Sheets['КУ по классам']
+          || wb.Sheets[wb.SheetNames.find(n => /ку\s+по\s+классам/i.test(n))]
+          || wb.Sheets[wb.SheetNames.find(n => n.toLowerCase().includes('ку'))]
+          || wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+
+    // 2. Find «Итого» row by label in col A
+    let itogoRow = null;
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (!row || !row[0]) continue;
+      const label = String(row[0]).trim().toLowerCase();
+      if (label === 'итого' || label === 'итого:') {
+        itogoRow = row;
+        break;
+      }
+    }
+    if (!itogoRow) {
+      return { lossRatioWith: 0, lossRatioWithout: 0 };
     }
 
-    // H26 and I26 (1-indexed row 26 = 0-indexed row 25)
-    // But SheetJS uses A1 notation directly
-    const lossRatioWith = ExcelReader._cellNum(ws, 'H26');
-    const lossRatioWithout = ExcelReader._cellNum(ws, 'I26');
+    // 3. Find the two КУ values: typically last two cells that look like percentages
+    //    (0 < value < 200). Pick from right end of the row.
+    const percentLike = [];
+    for (let c = itogoRow.length - 1; c >= 0; c--) {
+      const v = Number(itogoRow[c]);
+      if (Number.isFinite(v) && v > 0 && v < 200) {
+        percentLike.unshift({ col: c, val: v });
+      }
+      if (percentLike.length >= 4) break; // collect enough candidates
+    }
+
+    // 4. From the candidates, the LAST two adjacent ones are typically КУ_with and КУ_without.
+    //    For our file: H26 (col 7) = lossRatioWith, I26 (col 8) = lossRatioWithout.
+    //    Default: try cols H/I (7/8) first; if missing, fall back to percentLike pairs.
+    let lossRatioWith = Number(itogoRow[7]);
+    let lossRatioWithout = Number(itogoRow[8]);
+    if (!Number.isFinite(lossRatioWith) || lossRatioWith === 0 ||
+        !Number.isFinite(lossRatioWithout) || lossRatioWithout === 0) {
+      // Use the rightmost percent-like pair as КУ values
+      if (percentLike.length >= 2) {
+        lossRatioWith = percentLike[percentLike.length - 2].val;
+        lossRatioWithout = percentLike[percentLike.length - 1].val;
+      }
+    }
 
     return {
       lossRatioWith: lossRatioWith || 0,
@@ -860,33 +978,71 @@ const ExcelReader = {
   },
 
   // ===== READ CALCULATOR (rentabelnost) =====
+  // Resilient: finds header by labels («Вид деятельности», «смерть», «травма»),
+  // detects column positions dynamically, then reads data rows.
   readCalculator(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    const ws = wb.Sheets['Лист2'] || wb.Sheets[wb.SheetNames[1]] || wb.Sheets[wb.SheetNames[0]];
+    // Try to find sheet with activity data (typically "Лист2")
+    let ws = null;
+    for (const sn of wb.SheetNames) {
+      const candidate = wb.Sheets[sn];
+      const sample = XLSX.utils.sheet_to_json(candidate, { header: 1, raw: true });
+      // Look for header containing "вид деятельности"
+      for (let i = 0; i < Math.min(sample.length, 10); i++) {
+        const row = sample[i];
+        if (!row) continue;
+        if (row.some(c => /вид\s+деятельност/i.test(String(c || '')))) {
+          ws = candidate;
+          break;
+        }
+      }
+      if (ws) break;
+    }
+    if (!ws) ws = wb.Sheets['Лист2'] || wb.Sheets[wb.SheetNames[1]] || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-    const activities = [];
-    // Data in rows 3-21 (0-indexed), A=col0, B=col1, C=col2
-    for (let i = 3; i < data.length; i++) {
+    // Find header row + column indexes for name/death/injury
+    // Defensive: build dense array (sparse arrays cause findIndex to pass undefined)
+    const cellLowerArr = (row) => {
+      const out = [];
+      const len = row ? row.length : 0;
+      for (let j = 0; j < len; j++) out[j] = String(row[j] || '').toLowerCase();
+      return out;
+    };
+    let headerIdx = -1, nameCol = 0, deathCol = 1, injuryCol = 2;
+    for (let i = 0; i < Math.min(data.length, 10); i++) {
       const row = data[i];
-      if (!row || !row[0]) continue;
-
-      const name = String(row[0]).trim();
-      let deathRate = row[1];
-      let injuryRate = row[2];
-
-      // Handle "нет" string for death rate
-      if (typeof deathRate === 'string' && deathRate.toLowerCase().includes('нет')) {
-        deathRate = 0;
-      } else {
-        deathRate = Number(deathRate) || 0;
+      if (!row) continue;
+      const lowers = cellLowerArr(row);
+      const nameIdx = lowers.findIndex(s => s.includes('вид') && s.includes('деятельност'));
+      const deathIdx = lowers.findIndex(s => s.includes('смерт'));
+      const injuryIdx = lowers.findIndex(s => s.includes('травм'));
+      if (nameIdx >= 0 && (deathIdx >= 0 || injuryIdx >= 0)) {
+        headerIdx = i;
+        nameCol = nameIdx;
+        if (deathIdx >= 0) deathCol = deathIdx;
+        if (injuryIdx >= 0) injuryCol = injuryIdx;
+        break;
       }
+    }
+    if (headerIdx === -1) headerIdx = 2; // fallback to legacy row 3
 
-      injuryRate = Number(injuryRate) || 0;
-
+    const activities = [];
+    for (let i = headerIdx + 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row || !row[nameCol]) continue;
+      const name = String(row[nameCol]).trim();
+      if (!name) continue;
+      // Skip rows that look like sub-totals/footers
+      if (/^итого|всего/i.test(name)) continue;
+      let deathRate = row[deathCol];
+      let injuryRate = row[injuryCol];
+      if (typeof deathRate === 'string' && /нет|—|-/.test(deathRate)) deathRate = 0;
+      else deathRate = Number(deathRate) || 0;
+      if (typeof injuryRate === 'string' && /нет|—|-/.test(injuryRate)) injuryRate = 0;
+      else injuryRate = Number(injuryRate) || 0;
       activities.push({ name, deathRate, injuryRate });
     }
-
     return activities;
   },
 
