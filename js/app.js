@@ -1159,13 +1159,23 @@ const App = {
     const a = App._calcActivities()[Number(idx)];
     if (!a) return;
 
-    // Контекст по самой компании: ОКЭД-название (из stat.gov.kz если есть,
-    // иначе из ОКЭД-classifier), класс риска, тариф.
+    // Контекст по самой компании: ОКЭД-название (из stat.gov.kz если активный
+    // ОКЭД совпадает с primary; иначе из ОКЭД-classifier через _collectCompanyOkeds),
+    // класс риска, тариф.
     const resolved = App._resolveOked ? App._resolveOked() : {};
     const oked = resolved.oked || '—';
-    const statGovName = (App.statgov && !App.statgov.loading && !App.statgov.error)
-      ? App.statgov.okedPrimaryName : null;
-    const okedName = statGovName || resolved.activity || '—';
+    let okedName = resolved.activity || '—';
+    const sg = App.statgov && !App.statgov.loading && !App.statgov.error ? App.statgov : null;
+    if (sg && resolved.oked === sg.okedPrimaryCode && sg.okedPrimaryName) {
+      // Для primary берём специфичное название из stat.gov.kz
+      okedName = sg.okedPrimaryName;
+    } else {
+      // Для secondary или ручного — ищем имя через _collectCompanyOkeds (он сам
+      // соберёт name из classifier).
+      const company = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+      const found = company.find(o => o.code === resolved.oked);
+      if (found && found.name) okedName = found.name;
+    }
     const riskClass = resolved.riskClass || '—';
     const tariff = App._resolveTariff(resolved.riskClass);
     const tariffStr = tariff != null ? Utils.fmtPct(tariff) : '—';
