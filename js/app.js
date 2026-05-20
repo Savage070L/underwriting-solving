@@ -386,32 +386,10 @@ const App = {
   _fillDateInputs() {
     const z = App.zayavka;
     if (!z) return;
-    const inDoc = document.getElementById('docDateInput');
     const inFrom = document.getElementById('periodFrom');
     const inTo = document.getElementById('periodTo');
-    if (inDoc) inDoc.value = App._dateToInputValue(z.docDate);
     if (inFrom) inFrom.value = App._dateToInputValue(z.periodFrom);
     if (inTo) inTo.value = App._dateToInputValue(z.periodTo);
-  },
-
-  // При ручном изменении «Даты заявки» — пересчитываем период страхования
-  // и обновляем оба инпута. Если пользователь хочет нестандартный период,
-  // он редактирует periodFrom/periodTo ПОСЛЕ docDate.
-  onDocDateChange() {
-    const val = document.getElementById('docDateInput')?.value;
-    if (!val) return;
-    const docDate = new Date(val);
-    if (isNaN(docDate)) return;
-    if (!App.zayavka) App.zayavka = {};
-    App.zayavka.docDate = docDate;
-    const { from, to } = App._computePeriodFromDocDate(docDate);
-    App.zayavka.periodFrom = from;
-    App.zayavka.periodTo = to;
-    const inFrom = document.getElementById('periodFrom');
-    const inTo = document.getElementById('periodTo');
-    if (inFrom) inFrom.value = App._dateToInputValue(from);
-    if (inTo) inTo.value = App._dateToInputValue(to);
-    App.showPreview();
   },
 
   // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====
@@ -742,15 +720,15 @@ const App = {
     // Note: effective risk class is resolved further below via _resolveOked();
     // the справочник lookup happens after we know it.
 
-    // Даты: приоритет на UI-инпуты (пользователь мог переопределить),
-    // fallback на App.zayavka.docDate/periodFrom/periodTo, заполненные в loadZayavka.
-    const docDateInput = document.getElementById('docDateInput')?.value;
+    // Даты: docDate = F3 из заявки (для шапки документа).
+    // Период страхования: приоритет на UI-инпуты (ручной ввод), fallback на
+    // App.zayavka.periodFrom/periodTo, которые в loadZayavka уже вычислены как
+    // F3 + 1 день / F3 + 1 год.
     const periodFromInput = document.getElementById('periodFrom')?.value;
     const periodToInput = document.getElementById('periodTo')?.value;
-    const docDate = docDateInput ? new Date(docDateInput) : (z.docDate || null);
+    const docDate = z.docDate || null;
     let periodFrom = periodFromInput ? new Date(periodFromInput) : z.periodFrom;
     let periodTo = periodToInput ? new Date(periodToInput) : z.periodTo;
-    // Если периода нет вообще — вычислим из docDate (продукт всегда 1 год)
     if (docDate && (!periodFrom || !periodTo)) {
       const p = App._computePeriodFromDocDate(docDate);
       if (!periodFrom) periodFrom = p.from;

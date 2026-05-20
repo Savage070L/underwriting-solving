@@ -198,26 +198,19 @@
         </div>
       </div>
 
-      <!-- Даты: заполняются автоматически от F3 заявки (1 год), редактируются вручную -->
+      <!-- Период страхования: по умолчанию F3 + 1 день → +1 год. Ручной ввод имеет приоритет. -->
       <div class="dates-row visible" id="dates-row">
-        <div class="form-group">
-          <label for="docDateInput">
-            Дата заявки (F3)
-            <span class="oked-hint">— из заявки, можно изменить</span>
-          </label>
-          <input type="date" id="docDateInput" oninput="App.onDocDateChange()">
-        </div>
         <div class="form-group">
           <label for="periodFrom">
             Период страхования с
-            <span class="oked-hint">— по умолчанию F3 + 1 день</span>
+            <span class="oked-hint">— по умолчанию F3 + 1 день, можно изменить</span>
           </label>
           <input type="date" id="periodFrom">
         </div>
         <div class="form-group">
           <label for="periodTo">
             Период страхования по
-            <span class="oked-hint">— по умолчанию +1 год</span>
+            <span class="oked-hint">— по умолчанию +1 год, можно изменить</span>
           </label>
           <input type="date" id="periodTo">
         </div>
