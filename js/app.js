@@ -294,72 +294,186 @@ const App = {
     const grid = document.getElementById('preview-grid');
 
     const resolved = App._resolveOked();
-    const items = [
-      ['Страхователь', Utils.formatCompanyName(z.insurerName)],
-      ['БИН', z.bin],
-      ['Регион', z.region],
-      ['Дата заявки (F3)', z.docDate ? Utils.fmtDateShort(z.docDate) : '-'],
-      ['Период страхования', (z.periodFrom && z.periodTo)
-        ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}`
-        : '-'],
-      ['ОКЭД', resolved.oked || z.oked || '—'],
-      ['Деятельность', resolved.activity || z.activity || '—'],
-      ['Класс риска', resolved.riskClass || z.riskClass || '—'],
-      ['Страховая сумма', Utils.fmtMoney(z.insuranceSum)],
-      ['Работники', Utils.fmtInteger(z.workers)],
-      ['Премия', Utils.fmtMoney(z.premiumBase)],
-      ['Премия с поправкой', Utils.fmtMoney(z.premiumWithCoeff)],
-      ['Коэффициент', z.coeff],
-      ['Понижающий коэфф.', z.coeffDown],
-      ['Порядок оплаты', z.paymentOrder],
-      ['Юр. адрес', App.binData.legalAddress || '(поиск...)'],
-      ['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)'],
-    ];
 
-    let html = items.map(([label, value]) =>
-      `<div class="preview-item"><span class="pi-label">${label}:</span> <span class="pi-value">${value || '-'}</span></div>`
-    ).join('');
+    // === Источник истины: stat.gov.kz (если доступен), иначе — заявка ===
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov : null;
 
-    // === Блок stat.gov.kz (через chrome extension) ===
-    const sg = App.statgov;
-    if (sg) {
-      let sgBody = '';
-      if (sg.loading) {
-        sgBody = '<div class="pi-loading">Поиск в реестре stat.gov.kz…</div>';
-      } else if (sg.error) {
-        sgBody = `<div class="pi-warn">⚠ ${sg.error}</div>
-                  <div class="pi-hint">Установи расширение «Standard Life — мост к stat.gov.kz» и войди в кабинет stat.gov.kz через ЭЦП.</div>`;
-      } else if (sg.found === false) {
-        sgBody = `<div class="pi-warn">БИН ${sg.bin || ''} не найден в реестре stat.gov.kz.</div>`;
-      } else {
-        const sgItems = [
-          ['Наименование (реестр)', sg.name],
-          ['Дата регистрации', sg.registrationDate],
-          ['Осн. ОКЭД', `${sg.okedPrimaryCode || ''} — ${sg.okedPrimaryName || ''}`],
-          ['Втор. ОКЭД', sg.okedSecondaryCode],
-          ['КРП (с фил.)', `${sg.krpWithBranchesCode || ''} — ${sg.krpWithBranchesName || ''}`],
-          ['КРП (без фил.)', `${sg.krpWithoutBranchesCode || ''} — ${sg.krpWithoutBranchesName || ''}`],
-          ['КАТО', sg.kato],
-          ['Юр. адрес (реестр)', sg.legalAddress],
-          ['Руководитель', sg.headFullname],
-          ['КФС', `${sg.kfsCode || ''} — ${sg.kfsName || ''}`],
-          ['Сектор экономики', `${sg.sectorCode || ''} — ${sg.sectorName || ''}`],
-        ];
-        sgBody = sgItems
-          .filter(([, v]) => v && v.replace(/[—\s-]/g, ''))
-          .map(([l, v]) => `<div class="preview-item"><span class="pi-label">${l}:</span> <span class="pi-value">${v}</span></div>`)
-          .join('');
-      }
-      html += `
-        <div class="preview-section">
-          <div class="preview-section-title">📋 stat.gov.kz (по БИН)</div>
-          ${sgBody}
-        </div>`;
+    // Активные значения для документов (через _resolveOked)
+    const effOked = resolved.oked || z.oked || '';
+    const effClass = resolved.riskClass || z.riskClass;
+    const effTariff = App._resolveTariff ? App._resolveTariff(effClass) : null;
+
+    // Имя деятельности для активного ОКЭДа: если primary statgov — okedPrimaryName,
+    // иначе из classifier через _collectCompanyOkeds
+    let effActivityName = resolved.activity;
+    if (sg && effOked === sg.okedPrimaryCode && sg.okedPrimaryName) {
+      effActivityName = sg.okedPrimaryName;
+    } else if (App._collectCompanyOkeds) {
+      const co = App._collectCompanyOkeds().find(o => o.code === effOked);
+      if (co && co.name) effActivityName = co.name;
     }
 
-    grid.innerHTML = html;
+    // ========== СЕКЦИЯ 1: Страхователь ==========
+    const insurerName = sg?.name ? Utils.formatCompanyName(sg.name) : Utils.formatCompanyName(z.insurerName);
+    const sec1 = [
+      ['БИН', z.bin],
+      ['Наименование', insurerName],
+      sg?.registrationDate ? ['Дата регистрации', sg.registrationDate] : null,
+      sg?.headFullname ? ['ФИО руководителя', sg.headFullname] : null,
+      ['КАТО', sg?.kato || '—'],
+      ['Юридический адрес', sg?.legalAddress || App.binData.legalAddress || '(поиск...)'],
+    ].filter(Boolean);
+
+    // ========== СЕКЦИЯ 2: Деятельность ==========
+    const sec2 = [
+      ['Основной код ОКЭД', sg?.okedPrimaryCode || effOked || '—'],
+      ['Наименование вида экономической деятельности', effActivityName || '—'],
+    ];
+    if (sg?.okedSecondaryCodes && sg.okedSecondaryCodes.length) {
+      sec2.push(['Вторичный код ОКЭД', sg.okedSecondaryCodes.join(', ')]);
+    } else if (sg?.okedSecondaryCode) {
+      sec2.push(['Вторичный код ОКЭД', sg.okedSecondaryCode]);
+    }
+    sec2.push(['Активный ОКЭД для документов', effOked || '—']);
+    sec2.push(['Класс риска', effClass || '—']);
+    sec2.push(['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—']);
+
+    // ========== СЕКЦИЯ 3: Размер и собственность ==========
+    const sec3 = [];
+    if (sg?.krpWithBranchesCode) sec3.push(['Код КРП (с учётом филиалов)', sg.krpWithBranchesCode]);
+    if (sg?.krpWithBranchesName) sec3.push(['Наименование КРП', sg.krpWithBranchesName]);
+    if (sg?.krpWithoutBranchesCode) sec3.push(['Код КРП (без учёта филиалов)', sg.krpWithoutBranchesCode]);
+    if (sg?.krpWithoutBranchesName) sec3.push(['Наименование КРП', sg.krpWithoutBranchesName]);
+    if (sg?.kfsCode) sec3.push(['Код КФС', sg.kfsCode]);
+    if (sg?.kfsName) sec3.push(['Наименование КФС', sg.kfsName]);
+    if (sg?.sectorCode) sec3.push(['Код сектора экономики', sg.sectorCode]);
+    if (sg?.sectorName) sec3.push(['Наименование сектора экономики', sg.sectorName]);
+    sec3.push(['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)']);
+
+    // ========== СЕКЦИЯ 4: Параметры договора ==========
+    const sec4 = [
+      ['Регион', z.region || '—'],
+      ['Дата заявки', z.docDate ? Utils.fmtDateShort(z.docDate) : '—'],
+      ['Период страхования', (z.periodFrom && z.periodTo)
+        ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}` : '—'],
+      ['Работники', Utils.fmtInteger(z.workers)],
+      ['Страховая сумма', Utils.fmtMoney(z.insuranceSum)],
+      ['Премия', Utils.fmtMoney(z.premiumBase)],
+      ['Премия с поправкой', Utils.fmtMoney(z.premiumWithCoeff)],
+      ['Порядок оплаты', z.paymentOrder],
+    ];
+
+    const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    const renderItems = (rows) => rows.map(([l, v]) => {
+      const display = (v == null || v === '') ? '—' : v;
+      const canCopy = display !== '—' && display !== '(поиск...)';
+      const copyBtn = canCopy
+        ? `<button class="pi-copy" title="Скопировать" onclick="App.copyToClipboard('${escAttr(display)}', this)">⧉</button>`
+        : '';
+      return `<div class="preview-item">
+        <span class="pi-label">${l}:</span>
+        <span class="pi-value">${display}</span>
+        ${copyBtn}
+      </div>`;
+    }).join('');
+
+    const renderSection = (title, rows) => `
+      <div class="preview-section">
+        <div class="preview-section-title">${title}</div>
+        ${renderItems(rows)}
+      </div>`;
+
+    // Статус-плашка stat.gov.kz (отдельно, если loading/error/not-found)
+    let sgStatus = '';
+    if (App.statgov?.loading) {
+      sgStatus = `<div class="preview-section"><div class="pi-loading">Поиск в реестре stat.gov.kz…</div></div>`;
+    } else if (App.statgov?.error) {
+      sgStatus = `<div class="preview-section"><div class="pi-warn">⚠ ${App.statgov.error}</div>
+        <div class="pi-hint">Установи расширение «Standard Life — мост к stat.gov.kz» и войди в кабинет через ЭЦП.</div></div>`;
+    } else if (App.statgov?.found === false) {
+      sgStatus = `<div class="preview-section"><div class="pi-warn">БИН ${App.statgov.bin || ''} не найден в реестре stat.gov.kz.</div></div>`;
+    }
+
+    grid.innerHTML =
+      renderSection('Страхователь', sec1) +
+      renderSection('Деятельность', sec2) +
+      renderSection('Размер и собственность', sec3) +
+      renderSection('Параметры договора', sec4) +
+      sgStatus;
 
     panel.classList.add('visible');
+  },
+
+  // Открывает выбранный AI-сервис с пред-заполненным промптом про компанию.
+  // service: 'chatgpt' | 'gemini' | 'perplexity'
+  // Имя приоритетно из stat.gov.kz, fallback на заявку. Промпт также копируется
+  // в буфер обмена — если сервис не подхватит ?q=, можно вставить Cmd+V.
+  copyAskAiPrompt(service, btn) {
+    const z = App.zayavka || {};
+    const bin = z.bin || '';
+    if (!bin) {
+      App.showMsg('Сначала загрузите заявку — нужен БИН/ИИН.', 'error');
+      return;
+    }
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false) ? App.statgov : null;
+    const name = (sg?.name) || z.insurerName || '(имя не известно)';
+    const prompt =
+      `Расскажи кратко о компании. Наименование: ${name}, БИН: ${bin}. ` +
+      `Максимум 4-5 предложений как один абзац — чем они занимаются, ` +
+      `вид деятельности, регион, размер. Используй веб-поиск.`;
+    const enc = encodeURIComponent(prompt);
+    let url = '';
+    switch (service) {
+      case 'chatgpt':
+        // hints=search активирует режим веб-поиска
+        url = `https://chatgpt.com/?hints=search&q=${enc}`;
+        break;
+      case 'gemini':
+        // Gemini не поддерживает ?q= параметр — открываем главную, промпт в буфере.
+        url = 'https://gemini.google.com/app';
+        break;
+      case 'perplexity':
+        url = `https://www.perplexity.ai/?q=${enc}`;
+        break;
+      default:
+        url = `https://chatgpt.com/?hints=search&q=${enc}`;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    App.copyToClipboard(prompt, btn);
+  },
+
+  // Копирует значение в буфер обмена. Показывает анимацию на кнопке.
+  copyToClipboard(text, btn) {
+    const decoded = String(text).replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const showOk = () => {
+      if (!btn) return;
+      const orig = btn.textContent;
+      btn.textContent = '✓';
+      btn.classList.add('pi-copy--ok');
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.classList.remove('pi-copy--ok');
+      }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(decoded).then(showOk).catch(() => {
+        // Fallback на устаревший API
+        const ta = document.createElement('textarea');
+        ta.value = decoded;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showOk(); } catch (e) {}
+        document.body.removeChild(ta);
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = decoded;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); showOk(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
   },
 
   // ===== DATES (F3 + период страхования) =====
@@ -503,42 +617,63 @@ const App = {
     App.showPreview();
   },
 
-  // ===== OPEN ANALYTICS DASHBOARD =====
-  openAnalytics() {
-    if (!App.claims || !App.claims.analytics) {
-      App.showMsg('Сначала загрузите историю убытков.', 'error');
-      return;
-    }
+  // Собирает snapshot для аналитики на основе ВСЕХ актуальных значений:
+  // ручной ОКЭД, выбранный вид деятельности, переопределённый тариф/период,
+  // statgov-данные (имя, ОКЭДы компании, КРП, КФС, ...).
+  _buildAnalyticsSnapshot() {
     const z = App.zayavka || {};
     const resolved = App._resolveOked();
-    const effRiskClass = resolved.riskClass || z.riskClass;
-    const snapshot = {
+    const effOked = resolved.oked || z.oked || '';
+    const effRC = resolved.riskClass || z.riskClass;
+    // Активный тариф с учётом ручных корректировок
+    const effTariff = App._resolveTariff ? App._resolveTariff(effRC) : null;
+    // Деятельность: для primary statgov — точное название из реестра
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov : null;
+    let effActivity = resolved.activity;
+    if (sg && effOked === sg.okedPrimaryCode && sg.okedPrimaryName) {
+      effActivity = sg.okedPrimaryName;
+    }
+    // Даты — приоритет инпутов формы
+    const periodFromInput = document.getElementById('periodFrom')?.value;
+    const periodToInput = document.getElementById('periodTo')?.value;
+    const periodFrom = periodFromInput ? new Date(periodFromInput) : z.periodFrom;
+    const periodTo = periodToInput ? new Date(periodToInput) : z.periodTo;
+    // Имя и адрес — приоритет statgov
+    const insurerName = (sg && sg.name) || z.insurerName || '';
+    const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '';
+
+    return {
       generatedAt: new Date().toISOString(),
       zayavka: {
-        insurerName: z.insurerName || '',
+        insurerName,
         bin: z.bin || '',
         workers: z.workers || 0,
-        riskClass: effRiskClass || '',
-        oked: resolved.oked || z.oked || '',
-        activity: resolved.activity || z.activity || '',
+        riskClass: effRC || '',
+        oked: effOked,
+        activity: effActivity || '',
         region: z.region || '',
         insuranceSum: z.insuranceSum || 0,
         premiumBase: z.premiumBase || 0,
         premiumWithCoeff: z.premiumWithCoeff || 0,
-        periodFrom: z.periodFrom ? new Date(z.periodFrom).toISOString() : null,
-        periodTo: z.periodTo ? new Date(z.periodTo).toISOString() : null,
-        tariff: z.tariff || null,
+        periodFrom: periodFrom ? new Date(periodFrom).toISOString() : null,
+        periodTo: periodTo ? new Date(periodTo).toISOString() : null,
+        tariff: effTariff,                 // ← пересчитанный тариф, не сырой z.tariff
         coeff: z.coeff || null,
         coeffDown: z.coeffDown || 0,
         paymentOrder: z.paymentOrder || '',
         docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
         govParticipation: App.binData.govParticipation || z.govParticipation || '',
-        legalAddress: App.binData.legalAddress || '',
+        legalAddress,
+        // Источники активного ОКЭДа (manual / statgov-max-class / zayavka)
+        okedSource: resolved.source || 'unknown',
       },
-      verdict: document.getElementById('verdict') ? document.getElementById('verdict').value : 'auto',
+      verdict: document.getElementById('verdict')?.value || 'auto',
       popravka: App.refData.popravka ? {
-        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(effRiskClass) : null,
-        allTariffs: App.refData.popravka.riskRates ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate })) : [],
+        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(effRC) : null,
+        allTariffs: App.refData.popravka.riskRates
+          ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate }))
+          : [],
       } : null,
       analytics: App.claims.analytics,
       normativ: App.refData.normativ ? {
@@ -552,12 +687,41 @@ const App = {
         lossRatioWithout: App.refData.ku.lossRatioWithout,
       } : null,
       activity: App._getSelectedActivity(),
+      // Новое: statgov + ОКЭДы компании
+      statgov: sg ? {
+        name: sg.name,
+        bin: sg.bin,
+        registrationDate: sg.registrationDate,
+        legalAddress: sg.legalAddress,
+        headFullname: sg.headFullname,
+        okedPrimaryCode: sg.okedPrimaryCode,
+        okedPrimaryName: sg.okedPrimaryName,
+        okedSecondaryCodes: sg.okedSecondaryCodes || [],
+        krpWithBranchesCode: sg.krpWithBranchesCode,
+        krpWithBranchesName: sg.krpWithBranchesName,
+        krpWithoutBranchesCode: sg.krpWithoutBranchesCode,
+        krpWithoutBranchesName: sg.krpWithoutBranchesName,
+        kato: sg.kato,
+        kfsCode: sg.kfsCode,
+        kfsName: sg.kfsName,
+        sectorCode: sg.sectorCode,
+        sectorName: sg.sectorName,
+      } : null,
+      companyOkeds: App._collectCompanyOkeds ? App._collectCompanyOkeds() : [],
     };
-    localStorage.setItem('analytics_snapshot', JSON.stringify(snapshot));
+  },
+
+  // ===== OPEN ANALYTICS DASHBOARD =====
+  openAnalytics() {
+    if (!App.claims || !App.claims.analytics) {
+      App.showMsg('Сначала загрузите историю убытков.', 'error');
+      return;
+    }
+    localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
     window.open('analytics.html', '_blank');
   },
 
-  // ===== TOGGLE INLINE ANALYTICS (under "Файлы по кейсу") =====
+  // ===== TOGGLE INLINE ANALYTICS =====
   toggleInlineAnalytics() {
     if (!App.claims || !App.claims.analytics) {
       App.showMsg('Сначала загрузите историю убытков.', 'error');
@@ -571,52 +735,7 @@ const App = {
       hint.textContent = '↓ развернуть';
       return;
     }
-    // Build/refresh snapshot before opening (same as openAnalytics)
-    const z = App.zayavka || {};
-    const resolved2 = App._resolveOked();
-    const effRC = resolved2.riskClass || z.riskClass;
-    const snapshot = {
-      generatedAt: new Date().toISOString(),
-      zayavka: {
-        insurerName: z.insurerName || '',
-        bin: z.bin || '',
-        workers: z.workers || 0,
-        riskClass: effRC || '',
-        oked: resolved2.oked || z.oked || '',
-        activity: resolved2.activity || z.activity || '',
-        region: z.region || '',
-        insuranceSum: z.insuranceSum || 0,
-        premiumBase: z.premiumBase || 0,
-        premiumWithCoeff: z.premiumWithCoeff || 0,
-        periodFrom: z.periodFrom ? new Date(z.periodFrom).toISOString() : null,
-        periodTo: z.periodTo ? new Date(z.periodTo).toISOString() : null,
-        coeff: z.coeff || null,
-        coeffDown: z.coeffDown || 0,
-        paymentOrder: z.paymentOrder || '',
-        docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
-        govParticipation: App.binData.govParticipation || z.govParticipation || '',
-        legalAddress: App.binData.legalAddress || '',
-        tariff: z.tariff || null,
-      },
-      verdict: document.getElementById('verdict') ? document.getElementById('verdict').value : 'auto',
-      popravka: App.refData.popravka ? {
-        baseTariff: App.refData.popravka.riskRates ? App.refData.popravka.riskRates.get(effRC) : null,
-        allTariffs: App.refData.popravka.riskRates ? Array.from(App.refData.popravka.riskRates.entries()).map(([cls, rate]) => ({ cls, rate })) : [],
-      } : null,
-      analytics: App.claims.analytics,
-      normativ: App.refData.normativ ? {
-        date: App.refData.normativ.date,
-        fullAssetsTenge: App.refData.normativ.fullAssetsTenge,
-        fullAssets: App.refData.normativ.fullAssets,
-        portfolioShare: App.refData.normativ.portfolioShare,
-      } : null,
-      ku: App.refData.ku ? {
-        lossRatioWith: App.refData.ku.lossRatioWith,
-        lossRatioWithout: App.refData.ku.lossRatioWithout,
-      } : null,
-      activity: App._getSelectedActivity(),
-    };
-    localStorage.setItem('analytics_snapshot', JSON.stringify(snapshot));
+    localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
     iframe.src = 'analytics.html#inline=1&t=' + Date.now(); // force reload via hash
     container.classList.add('is-open');
     hint.textContent = '↑ свернуть';

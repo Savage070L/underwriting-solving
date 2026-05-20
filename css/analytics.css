@@ -2482,3 +2482,93 @@ table.t tfoot td {
   .section-head, .kpi-row, .row-1, .row-2, .dash-footer { padding-left: 20px; padding-right: 20px; }
   .kpi-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* ===== Statgov profile card ===== */
+.statgov-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.statgov-flag {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.statgov-flag--warn { background: #fef3c7; color: #92400e; border-left: 3px solid #f59e0b; }
+.statgov-flag--info { background: #dbeafe; color: #1e40af; border-left: 3px solid #3b82f6; }
+
+.statgov-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.statgov-card {
+  padding: 12px 14px;
+  background: var(--card, #f8fafc);
+  border: 1px solid var(--border-3, #e2e8f0);
+  border-radius: 8px;
+}
+.statgov-card .sc-label {
+  font-size: 0.75rem;
+  color: var(--muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.statgov-card .sc-code {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent, #2563eb);
+  margin-bottom: 4px;
+}
+.statgov-card .sc-name {
+  font-size: 0.85rem;
+  color: var(--text, #1e293b);
+  line-height: 1.4;
+}
+
+.statgov-section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text, #1e293b);
+  margin: 16px 0 8px;
+}
+.statgov-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-3, #e2e8f0);
+  border-radius: 8px;
+}
+table.statgov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+table.statgov-table th,
+table.statgov-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-2, #f1f5f9);
+}
+table.statgov-table th {
+  background: var(--card, #f8fafc);
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--muted, #64748b);
+}
+table.statgov-table tr.active {
+  background: #ecfdf5;
+}
+table.statgov-table .muted { color: var(--muted, #94a3b8); font-style: italic; }
+.tag-active {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #d1fae5;
+  color: #065f46;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: lowercase;
+}

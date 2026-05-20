@@ -1,5 +1,5 @@
 // sz-generator.js — Generates Служебная Записка (СЗ) addressed to Правление or СД.
-// One module covers both via the `mode` parameter: 'pravlenie' | 'sd'.
+// Табличный формат: левая колонка — инструкции/ярлыки, правая — ответы.
 
 const SZGenerator = {
 
@@ -9,14 +9,13 @@ const SZGenerator = {
   ],
 
   /**
-   * Generate Служебная Записка.
    * @param {Object} data — common data object (same shape as for AR/Zakl)
    * @param {'pravlenie'|'sd'} mode — recipient: chair of Правление or Совет директоров
    */
   async generate(data, mode) {
     const { Document, Packer, Paragraph, TextRun, AlignmentType,
             Table, TableRow, TableCell, WidthType, BorderStyle,
-            TabStopType } = docx;
+            TableLayoutType, VerticalAlign, TabStopType } = docx;
 
     const FONT = 'Times New Roman';
     const SIZE = 24; // 12pt
@@ -40,158 +39,160 @@ const SZGenerator = {
     const recipientRole = isPravlenie
       ? 'Председателю Правления'
       : 'Председателю Совета директоров';
-    const recipientName = isPravlenie
-      ? `${Utils.PRAVLENIE_CHAIR_NAME.replace('Г.', 'Амерходжаеву Г.Т')}` // dative case
-      : Utils.SD_CHAIR_NAME;
-
     const fixedRecipientName = isPravlenie ? 'Амерходжаеву Г.Т.' : Utils.SD_CHAIR_NAME;
 
     const subject = isPravlenie
       ? 'О вынесении на рассмотрение Правления решения о заключении сделки (договора ОСРНС)'
       : 'О заключении c аффилированным лицом (договор ОСРНС)';
 
-    // Project decision text
     const projectDecision = isPravlenie
       ? `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей сделки с компанией – ${companyName}.`
       : `Заключить договор обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
 
-    // Bottom approval signatory
     const approverRole = isPravlenie ? Utils.UPRAV_DIR_ROLE : Utils.PRAVLENIE_CHAIR_ROLE;
     const approverName = isPravlenie ? Utils.UPRAV_DIR_NAME : Utils.PRAVLENIE_CHAIR_NAME;
 
-    // ---- Helper: two-column row with right-aligned name (tab stops) ----
-    const tabRight = 9000;
+    // ============ Table column widths ============
+    // A4 - 2×1134 twip margins ≈ 9638 usable.
+    const COL_TOTAL = 9638;
+    const COL_LEFT = 3000;
+    const COL_RIGHT = COL_TOTAL - COL_LEFT;
+
+    // Borders
+    const thinBorder = { style: BorderStyle.SINGLE, size: 1, color: '000000' };
+    const borders = {
+      top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder,
+    };
+
+    // Helper: cell with paragraphs
+    const cell = (paragraphs, width) => new TableCell({
+      children: Array.isArray(paragraphs) ? paragraphs : [paragraphs],
+      width: { size: width, type: WidthType.DXA },
+      borders,
+      verticalAlign: VerticalAlign.TOP,
+      margins: { top: 80, bottom: 80, left: 110, right: 110 },
+    });
+
+    const justifyP = (children) => new Paragraph({
+      children: Array.isArray(children) ? children : [children],
+      alignment: AlignmentType.JUSTIFIED,
+    });
+
+    // ============ Body lines for the 2nd row (details) ============
+    const claimsLine = (data.claims && data.claims.detailedSummary && data.claims.detailedSummary !== 'НС не было')
+      ? data.claims.detailedSummary
+      : (data.claimsSummary || 'НС не было');
+    const premWithCoeff = data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase
+      ? Utils.fmtMoney(data.premiumWithCoeff) : '-';
+
+    const detailLine = (label, value) => justifyP([trB(`${label}: `), tr(String(value))]);
+    const detailParas = [
+      detailLine('Страхователь', companyName),
+      detailLine('Класс риска', `– ${data.riskClass || '—'}`),
+      detailLine('Вид деятельности страхователя', `«${data.activity || '—'}»`),
+      detailLine('Страховая сумма', Utils.fmtMoney(data.insuranceSum)),
+      detailLine('Количество работников', Utils.fmtInteger(data.workers)),
+      detailLine('Страховая премия', Utils.fmtMoney(data.premiumBase)),
+      detailLine('Страховая премия с учетом ПК', premWithCoeff),
+      detailLine('Оплата', data.paymentOrder || '—'),
+      detailLine('Статистика НС за последние 3-х лет', claimsLine),
+      detailLine('Организация с государственным участием', `– ${data.govParticipation || '—'}`),
+    ];
+
+    // ============ Build the main table ============
+    const makeRow = (leftText, rightParas) => new TableRow({
+      children: [
+        cell(justifyP(tr(leftText)), COL_LEFT),
+        cell(rightParas, COL_RIGHT),
+      ],
+    });
+
+    const mainTable = new Table({
+      rows: [
+        makeRow(
+          'Укажите формулировку вопроса включаемого в повестку дня заседания.',
+          justifyP(trB(subject))
+        ),
+        makeRow(
+          'Коротко дайте пояснения по предлагаемому вопросу повестки дня.',
+          detailParas
+        ),
+        makeRow(
+          'Укажите проект решения по вопросу повестки.',
+          justifyP(tr(projectDecision))
+        ),
+        new TableRow({
+          children: [
+            cell(justifyP(tr('Докладчик:')), COL_LEFT),
+            cell(justifyP(tr(Utils.DAIP_DIRECTOR_NAME)), COL_RIGHT),
+          ],
+        }),
+        new TableRow({
+          children: [
+            cell(justifyP(tr('Приложения')), COL_LEFT),
+            cell([
+              justifyP(tr(`Андеррайтинговое решение № ${docNumber} от ${dateDot}`)),
+              justifyP(tr(`Заключение ДАиП от ${dateDot}`)),
+            ], COL_RIGHT),
+          ],
+        }),
+      ],
+      width: { size: COL_TOTAL, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      alignment: AlignmentType.CENTER,
+    });
+
+    // ============ Signature block (after table) ============
+    const tabRight = COL_TOTAL;
     const sigLine = (left, right) => new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: tabRight }],
       children: [trB(left), trB('\t'), trB(right)],
     });
 
-    const paragraphs = [];
+    // ============ Compose final paragraphs ============
+    const paragraphs = [
+      // Recipient (right-aligned)
+      new Paragraph({
+        children: [trB(recipientRole)],
+        alignment: AlignmentType.RIGHT,
+      }),
+      new Paragraph({
+        children: [trB(fixedRecipientName)],
+        alignment: AlignmentType.RIGHT,
+      }),
+      emptyP(),
 
-    // P1: Recipient (right-aligned)
-    paragraphs.push(new Paragraph({
-      children: [trB(recipientRole)],
-      alignment: AlignmentType.RIGHT,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [trB(fixedRecipientName)],
-      alignment: AlignmentType.RIGHT,
-    }));
+      // Title centered + date right (one line)
+      new Paragraph({
+        tabStops: [{ type: TabStopType.RIGHT, position: tabRight }],
+        children: [trB('Служебная записка'), tr('\t'), tr(dateDot)],
+        alignment: AlignmentType.CENTER,
+      }),
+      emptyP(),
 
-    paragraphs.push(emptyP());
-    paragraphs.push(emptyP());
+      // Main table
+      mainTable,
 
-    // P2: Title + date — title centered, date on the right
-    paragraphs.push(new Paragraph({
-      tabStops: [{ type: TabStopType.RIGHT, position: tabRight }],
-      children: [trB('Служебная записка'), tr('\t'), tr(dateDot)],
-      alignment: AlignmentType.LEFT,
-    }));
+      emptyP(),
+      emptyP(),
+      emptyP(),
 
-    paragraphs.push(emptyP());
+      // Signatures
+      sigLine(Utils.DAIP_DIRECTOR_ROLE, Utils.DAIP_DIRECTOR_NAME),
+      emptyP(),
+      new Paragraph({
+        children: [trB('Согласовано:')],
+        alignment: AlignmentType.JUSTIFIED,
+      }),
+      sigLine(approverRole, approverName),
+    ];
 
-    // P3: Subject line
-    paragraphs.push(new Paragraph({
-      children: [
-        tr('Укажите формулировку вопроса включаемого в повестку дня заседания. ', { italics: true, color: '808080' }),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [trB(subject)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(emptyP());
-
-    // P4: Body with details
-    paragraphs.push(new Paragraph({
-      children: [
-        tr('Коротко дайте пояснения по предлагаемому вопросу повестки дня. ', { italics: true, color: '808080' }),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    // Detail lines
-    const detail = (label, value) => new Paragraph({
-      children: [trB(`${label}: `), tr(String(value))],
-      alignment: AlignmentType.JUSTIFIED,
-    });
-
-    paragraphs.push(detail('Страхователь', companyName));
-    paragraphs.push(detail('Класс риска', `– ${data.riskClass || '—'}`));
-    paragraphs.push(detail('Вид деятельности страхователя', `«${data.activity || '—'}»`));
-    paragraphs.push(detail('Страховая сумма', `${Utils.fmtMoney(data.insuranceSum)}`));
-    paragraphs.push(detail('Количество работников', `${Utils.fmtInteger(data.workers)}`));
-    paragraphs.push(detail('Страховая премия', `${Utils.fmtMoney(data.premiumBase)}`));
-    const premWithCoeff = data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase
-      ? Utils.fmtMoney(data.premiumWithCoeff) : '-';
-    paragraphs.push(detail('Страховая премия с учетом ПК', premWithCoeff));
-    paragraphs.push(detail('Оплата', data.paymentOrder || '—'));
-    const claimsLine = (data.claims && data.claims.detailedSummary && data.claims.detailedSummary !== 'НС не было')
-      ? data.claims.detailedSummary
-      : (data.claimsSummary || 'НС не было');
-    paragraphs.push(detail('Статистика НС за последние 3-х лет', claimsLine));
-    paragraphs.push(detail('Организация с государственным участием', `– ${data.govParticipation || '—'}`));
-
-    paragraphs.push(emptyP());
-
-    // P5: Project of decision
-    paragraphs.push(new Paragraph({
-      children: [
-        tr('Укажите проект решения по вопросу повестки. ', { italics: true, color: '808080' }),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(projectDecision)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(emptyP());
-
-    // P6: Speaker
-    paragraphs.push(new Paragraph({
-      children: [trB('Докладчик: '), tr(Utils.DAIP_DIRECTOR_NAME)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(emptyP());
-
-    // P7: Attachments
-    paragraphs.push(new Paragraph({
-      children: [trB('Приложения')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`Андеррайтинговое решение № ${docNumber} от ${dateDot}`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`Заключение ДАиП от ${dateDot}`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(emptyP());
-    paragraphs.push(emptyP());
-
-    // P8: Signatures — Director ДАиП + Approver
-    paragraphs.push(sigLine(Utils.DAIP_DIRECTOR_ROLE, Utils.DAIP_DIRECTOR_NAME));
-
-    paragraphs.push(emptyP());
-
-    paragraphs.push(new Paragraph({
-      children: [trB('Согласовано:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(sigLine(approverRole, approverName));
-
-    // Build document
     const doc = new Document({
       sections: [{
         properties: {
           page: {
-            margin: { top: 1440, bottom: 1440, left: 1800, right: 1800 },
+            // A4 with symmetric 2cm margins (1134 twips)
+            margin: { top: 1134, bottom: 1134, left: 1134, right: 1134 },
           },
         },
         children: paragraphs,

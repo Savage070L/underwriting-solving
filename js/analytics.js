@@ -1334,6 +1334,122 @@
       </div>`;
   })();
 
+  // ===== STATGOV REGISTRY PROFILE =====
+  // Реестровые данные: КРП, КФС, сектор, перечень ОКЭДов компании.
+  // Показывает выделенные кейсы: гос. участие, max-class secondary > primary,
+  // несовпадение реестрового имени с заявленным и т.д.
+  (function renderStatgovProfile() {
+    const sg = snap.statgov;
+    const company = snap.companyOkeds || [];
+    const section = document.getElementById('card-statgov-profile-section');
+    const body = document.getElementById('statgov-profile-body');
+    if (!section || !body) return;
+    if (!sg && !company.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+
+    // Flags / инсайты
+    const flags = [];
+    // 1. Гос. участие через КФС
+    if (sg?.kfsCode) {
+      const code = String(sg.kfsCode);
+      if (/^1[0-5]$/.test(code) || code === '12') {
+        flags.push({ kind: 'warn', text: `Гос. собственность по КФС ${code} — «${sg.kfsName || ''}»` });
+      }
+    }
+    // 2. Расхождение наименований
+    if (sg?.name && z.insurerName) {
+      const norm = (s) => String(s || '').toUpperCase().replace(/[«»"'\s.,]/g, '');
+      if (!norm(sg.name).includes(norm(z.insurerName).slice(0, 10)) &&
+          !norm(z.insurerName).includes(norm(sg.name).slice(0, 10))) {
+        flags.push({ kind: 'info', text: 'Имя в заявке отличается от имени в реестре' });
+      }
+    }
+    // 3. ОКЭД secondary имеет класс выше primary
+    if (company.length > 1) {
+      const primary = company.find(o => o.kind === 'primary');
+      const maxSec = company.filter(o => o.kind === 'secondary')
+        .reduce((max, o) => (o.riskClass != null && (max == null || o.riskClass > max.riskClass)) ? o : max, null);
+      if (primary && maxSec && maxSec.riskClass != null && primary.riskClass != null
+          && maxSec.riskClass > primary.riskClass) {
+        flags.push({
+          kind: 'warn',
+          text: `Вторичный ОКЭД ${maxSec.code} (класс ${maxSec.riskClass}) опаснее основного ${primary.code} (класс ${primary.riskClass})`,
+        });
+      }
+    }
+
+    // ОКЭД-таблица
+    const fmtRate = (v) => v != null ? Number(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',') : '—';
+    const fmtTariff = (v) => v != null ? (v * 100).toFixed(2).replace('.', ',') + '%' : '—';
+    const okedTable = company.length ? `
+      <div class="statgov-table-wrap">
+        <table class="statgov-table">
+          <thead>
+            <tr>
+              <th>Код</th>
+              <th>Название</th>
+              <th>Смерт. /1000</th>
+              <th>Травм. /1000</th>
+              <th>Класс</th>
+              <th>Тариф</th>
+              <th>Тип</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${company.map(o => `
+              <tr class="${o.code === z.oked ? 'active' : ''}">
+                <td><strong>${o.code}</strong>${o.code === z.oked ? ' <span class="tag tag-active">активный</span>' : ''}</td>
+                <td>${o.name || '<span class="muted">— нет в классификаторе</span>'}</td>
+                <td>${fmtRate(o.deathRate)}</td>
+                <td>${fmtRate(o.injuryRate)}</td>
+                <td>${o.riskClass != null ? '<strong>' + o.riskClass + '</strong>' : '—'}</td>
+                <td>${fmtTariff(o.tariff)}</td>
+                <td>${o.kind === 'primary' ? 'осн.' : 'втор.'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : '';
+
+    // Профильные карточки (КРП, КФС, сектор)
+    const profileCard = (label, code, name) => (code || name) ? `
+      <div class="statgov-card">
+        <div class="sc-label">${label}</div>
+        ${code ? `<div class="sc-code">${code}</div>` : ''}
+        ${name ? `<div class="sc-name">${name}</div>` : ''}
+      </div>
+    ` : '';
+
+    body.innerHTML = `
+      ${flags.length ? `
+        <div class="statgov-flags">
+          ${flags.map(f => `<div class="statgov-flag statgov-flag--${f.kind}">${f.kind === 'warn' ? '⚠' : 'ℹ'} ${f.text}</div>`).join('')}
+        </div>
+      ` : ''}
+
+      <div class="statgov-cards">
+        ${profileCard('КРП (с учётом филиалов)', sg?.krpWithBranchesCode, sg?.krpWithBranchesName)}
+        ${profileCard('КРП (без учёта филиалов)', sg?.krpWithoutBranchesCode, sg?.krpWithoutBranchesName)}
+        ${profileCard('КФС', sg?.kfsCode, sg?.kfsName)}
+        ${profileCard('Сектор экономики', sg?.sectorCode, sg?.sectorName)}
+      </div>
+
+      ${okedTable ? `<div class="statgov-section-title">ОКЭДы компании (всего ${company.length})</div>${okedTable}` : ''}
+
+      ${sg?.headFullname || sg?.registrationDate ? `
+        <div class="statgov-cards" style="margin-top: 12px">
+          ${sg?.registrationDate ? `<div class="statgov-card"><div class="sc-label">Дата регистрации</div><div class="sc-name">${sg.registrationDate}</div></div>` : ''}
+          ${sg?.headFullname ? `<div class="statgov-card"><div class="sc-label">Руководитель</div><div class="sc-name">${sg.headFullname}</div></div>` : ''}
+          ${sg?.kato ? `<div class="statgov-card"><div class="sc-label">КАТО</div><div class="sc-name">${sg.kato}</div></div>` : ''}
+        </div>
+      ` : ''}
+    `;
+  })();
+
   // ===== TARIFF STRUCTURE =====
   (function renderTariff() {
     const sumInsured = z.insuranceSum || 0;
@@ -3063,12 +3179,12 @@
       let url, prefillSupported = false;
       switch (service) {
         case 'chatgpt':
-          // ChatGPT supports ?q= and ?prompt= — pre-fills the input
+          // ChatGPT supports ?q= and ?hints=search (enables web search mode).
           if (enc.length <= URL_LIMIT) {
-            url = 'https://chatgpt.com/?q=' + enc;
+            url = 'https://chatgpt.com/?hints=search&q=' + enc;
             prefillSupported = true;
           } else {
-            url = 'https://chatgpt.com/';
+            url = 'https://chatgpt.com/?hints=search';
           }
           break;
         case 'claude':

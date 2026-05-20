@@ -183,7 +183,7 @@ const ProtocolGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`${chair[1]}     «За»`)],
+      children: [tr(`${chair[1]}   —  «За»`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -194,20 +194,20 @@ const ProtocolGenerator = {
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
-        children: [tr(`${name}     «За»`)],
+        children: [tr(`${name}   —  «За»`)],
         alignment: AlignmentType.JUSTIFIED,
       }));
     }
 
     paragraphs.push(emptyP());
 
-    // Totals — only "За" per template.
+    // Totals — все «За» (единогласно, число членов = число голосов).
     paragraphs.push(new Paragraph({
       children: [trB('Всего голосов:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`«За»  - ____ из ${members.length}`)],
+      children: [tr(`«За»  - ${members.length} из ${members.length}`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 

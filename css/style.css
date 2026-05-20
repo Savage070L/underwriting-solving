@@ -53,6 +53,13 @@ header p {
   border-radius: 10px;
   font-weight: 500;
 }
+.section-sub {
+  font-size: 0.82rem;
+  color: #667085;
+  margin-top: -10px;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
 
 /* File upload zones */
 .upload-grid {
@@ -157,6 +164,45 @@ header p {
   font-weight: 500;
   color: #344054;
 }
+.ai-buttons-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 4px 0 10px;
+}
+.btn-ai {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: white;
+  border: none;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+.btn-ai:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+  opacity: 0.95;
+}
+.btn-ai:active { transform: translateY(0); }
+.btn-ai .ai-icon { font-size: 1.1rem; }
+.btn-ai--chatgpt {
+  background: linear-gradient(135deg, #10a37f 0%, #0d8c6c 100%);
+}
+.btn-ai--gemini {
+  background: linear-gradient(135deg, #4285f4 0%, #9b72cb 50%, #f9ab00 100%);
+}
+.btn-ai--perplexity {
+  background: linear-gradient(135deg, #20808d 0%, #1a6770 100%);
+}
 .form-group input,
 .form-group textarea,
 .form-group select {
@@ -219,6 +265,33 @@ header p {
 .preview-item .pi-value {
   color: #1a1a2e;
   font-weight: 600;
+}
+.preview-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.pi-copy {
+  background: transparent;
+  border: 1px solid #e4e7ec;
+  color: #667085;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  transition: all 0.15s;
+}
+.pi-copy:hover {
+  background: #f0f2f5;
+  color: #344054;
+  border-color: #d0d5dd;
+}
+.pi-copy--ok {
+  color: #027a48 !important;
+  background: #d1fadf;
+  opacity: 1 !important;
 }
 .preview-section {
   grid-column: 1 / -1;

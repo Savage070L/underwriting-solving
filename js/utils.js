@@ -421,18 +421,17 @@ const Utils = {
     let name = raw.trim();
     // If already formatted with quotes «», return as is
     if (name.includes('«')) return name;
-    // Handle quoted names like ТОО "RG GOLD"
+    // Handle quoted names like ТОО "RG GOLD" — оборачиваем от первой " до последней " в «»,
+    // сохраняя ВСЁ содержимое между ними (включая внутренние "" — это правильно
+    // по русской типографике: внешние ёлочки, внутренние лапки).
     if (name.includes('"')) {
-      name = name.replace(/"/g, match => '«').replace(/"/g, '»');
-      // Fix: replace pairs
-      let count = 0;
-      name = name.replace(/«/g, () => (count++ % 2 === 0) ? '«' : '»');
-      // Simpler: just replace first " with « and second with »
-      name = raw.trim();
-      const parts = name.split('"');
-      if (parts.length >= 3) {
-        // e.g. ТОО "RG GOLD" -> parts = ['ТОО ', 'RG GOLD', '']
-        return `${parts[0].trim()} «${parts[1]}»`;
+      const firstQ = name.indexOf('"');
+      const lastQ = name.lastIndexOf('"');
+      if (firstQ >= 0 && lastQ > firstQ) {
+        const before = name.substring(0, firstQ).trim();
+        const inside = name.substring(firstQ + 1, lastQ).trim();
+        const after = name.substring(lastQ + 1).trim();
+        return [before, '«' + inside + '»', after].filter(Boolean).join(' ');
       }
     }
     // Detect prefix at start or end: "Жасыл ел тараз тоо" or "ТОО Жасыл ел тараз"
