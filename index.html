@@ -198,14 +198,27 @@
         </div>
       </div>
 
-      <!-- Contract dates (shown only if empty in Excel) -->
-      <div class="dates-row" id="dates-row">
+      <!-- Даты: заполняются автоматически от F3 заявки (1 год), редактируются вручную -->
+      <div class="dates-row visible" id="dates-row">
         <div class="form-group">
-          <label for="periodFrom">Дата начала договора</label>
+          <label for="docDateInput">
+            Дата заявки (F3)
+            <span class="oked-hint">— из заявки, можно изменить</span>
+          </label>
+          <input type="date" id="docDateInput" oninput="App.onDocDateChange()">
+        </div>
+        <div class="form-group">
+          <label for="periodFrom">
+            Период страхования с
+            <span class="oked-hint">— по умолчанию F3 + 1 день</span>
+          </label>
           <input type="date" id="periodFrom">
         </div>
         <div class="form-group">
-          <label for="periodTo">Дата окончания договора</label>
+          <label for="periodTo">
+            Период страхования по
+            <span class="oked-hint">— по умолчанию +1 год</span>
+          </label>
           <input type="date" id="periodTo">
         </div>
       </div>

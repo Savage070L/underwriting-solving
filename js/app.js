@@ -176,6 +176,7 @@ const App = {
       }
       if (p.binData) App.binData = p.binData;
       if (App.zayavka) {
+        App._fillDateInputs();
         App.showPreview();
         // Если БИН уже известен — попытаться (фоном) перезагрузить statgov из расширения.
         if (App.zayavka.bin) App.autoLookupStatGov(App.zayavka.bin);
@@ -208,18 +209,22 @@ const App = {
       const buf = await App._readFile(file);
       App.zayavka = ExcelReader.readZayavka(buf);
 
-      // Update normativ with contract date (E21) or fallback to F3
+      // Период страхования всегда: F3 + 1 день → F3 + 1 год.
+      // Продукт ОСНС заключается строго на год; E21/G21 в заявке менеджеры
+      // часто не заполняют — игнорируем и считаем от даты подачи заявления.
+      if (App.zayavka.docDate) {
+        const { from, to } = App._computePeriodFromDocDate(App.zayavka.docDate);
+        App.zayavka.periodFrom = from;
+        App.zayavka.periodTo = to;
+      }
+
+      // Заполняем UI-инпуты вычисленными датами (пользователь может изменить).
+      App._fillDateInputs();
+
+      // Update normativ with contract date (теперь всегда есть, если F3 заполнен)
       const effectiveDate = App.zayavka.periodFrom || App.zayavka.docDate;
       if (App._rawNormativBuffer && effectiveDate) {
         App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
-      }
-
-      // Show/hide date fields
-      const datesRow = document.getElementById('dates-row');
-      if (!App.zayavka.periodFrom || !App.zayavka.periodTo) {
-        datesRow.classList.add('visible');
-      } else {
-        datesRow.classList.remove('visible');
       }
 
       // Auto-lookup BIN for address and gov participation
@@ -293,7 +298,10 @@ const App = {
       ['Страхователь', Utils.formatCompanyName(z.insurerName)],
       ['БИН', z.bin],
       ['Регион', z.region],
-      ['Дата договора', z.docDate ? Utils.fmtDateShort(z.docDate) : (z.periodFrom ? Utils.fmtDateShort(z.periodFrom) : '-')],
+      ['Дата заявки (F3)', z.docDate ? Utils.fmtDateShort(z.docDate) : '-'],
+      ['Период страхования', (z.periodFrom && z.periodTo)
+        ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}`
+        : '-'],
       ['ОКЭД', resolved.oked || z.oked || '—'],
       ['Деятельность', resolved.activity || z.activity || '—'],
       ['Класс риска', resolved.riskClass || z.riskClass || '—'],
@@ -352,6 +360,58 @@ const App = {
     grid.innerHTML = html;
 
     panel.classList.add('visible');
+  },
+
+  // ===== DATES (F3 + период страхования) =====
+  _computePeriodFromDocDate(docDate) {
+    const d = new Date(docDate);
+    const from = new Date(d);
+    from.setDate(from.getDate() + 1);
+    const to = new Date(from);
+    to.setFullYear(to.getFullYear() + 1);
+    return { from, to };
+  },
+
+  // Превращает Date в yyyy-mm-dd (формат HTML date input).
+  _dateToInputValue(d) {
+    if (!d) return '';
+    const dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt)) return '';
+    const yy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  },
+
+  _fillDateInputs() {
+    const z = App.zayavka;
+    if (!z) return;
+    const inDoc = document.getElementById('docDateInput');
+    const inFrom = document.getElementById('periodFrom');
+    const inTo = document.getElementById('periodTo');
+    if (inDoc) inDoc.value = App._dateToInputValue(z.docDate);
+    if (inFrom) inFrom.value = App._dateToInputValue(z.periodFrom);
+    if (inTo) inTo.value = App._dateToInputValue(z.periodTo);
+  },
+
+  // При ручном изменении «Даты заявки» — пересчитываем период страхования
+  // и обновляем оба инпута. Если пользователь хочет нестандартный период,
+  // он редактирует periodFrom/periodTo ПОСЛЕ docDate.
+  onDocDateChange() {
+    const val = document.getElementById('docDateInput')?.value;
+    if (!val) return;
+    const docDate = new Date(val);
+    if (isNaN(docDate)) return;
+    if (!App.zayavka) App.zayavka = {};
+    App.zayavka.docDate = docDate;
+    const { from, to } = App._computePeriodFromDocDate(docDate);
+    App.zayavka.periodFrom = from;
+    App.zayavka.periodTo = to;
+    const inFrom = document.getElementById('periodFrom');
+    const inTo = document.getElementById('periodTo');
+    if (inFrom) inFrom.value = App._dateToInputValue(from);
+    if (inTo) inTo.value = App._dateToInputValue(to);
+    App.showPreview();
   },
 
   // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====
@@ -682,16 +742,19 @@ const App = {
     // Note: effective risk class is resolved further below via _resolveOked();
     // the справочник lookup happens after we know it.
 
-    // Get dates (from Excel or form)
-    let periodFrom = z.periodFrom;
-    let periodTo = z.periodTo;
-    if (!periodFrom) {
-      const val = document.getElementById('periodFrom').value;
-      if (val) periodFrom = new Date(val);
-    }
-    if (!periodTo) {
-      const val = document.getElementById('periodTo').value;
-      if (val) periodTo = new Date(val);
+    // Даты: приоритет на UI-инпуты (пользователь мог переопределить),
+    // fallback на App.zayavka.docDate/periodFrom/periodTo, заполненные в loadZayavka.
+    const docDateInput = document.getElementById('docDateInput')?.value;
+    const periodFromInput = document.getElementById('periodFrom')?.value;
+    const periodToInput = document.getElementById('periodTo')?.value;
+    const docDate = docDateInput ? new Date(docDateInput) : (z.docDate || null);
+    let periodFrom = periodFromInput ? new Date(periodFromInput) : z.periodFrom;
+    let periodTo = periodToInput ? new Date(periodToInput) : z.periodTo;
+    // Если периода нет вообще — вычислим из docDate (продукт всегда 1 год)
+    if (docDate && (!periodFrom || !periodTo)) {
+      const p = App._computePeriodFromDocDate(docDate);
+      if (!periodFrom) periodFrom = p.from;
+      if (!periodTo) periodTo = p.to;
     }
 
     // Apply ОКЭД override (manual input > zayavka). Resolves class+name via classifier.
@@ -709,9 +772,12 @@ const App = {
     // Activity for death/injury rates — picked manually from dropdown (sourced from Лист2 of калькулятор).
     let selectedActivity = App._getSelectedActivity();
 
-    // Document date = date of zayavka submission (F3 in Excel) — per AR template,
-    // this is the date when the application was filed, NOT the contract start date.
-    const docDate = z.docDate || periodFrom;
+    // docDate уже определён выше из инпута (или z.docDate). На случай отсутствия —
+    // используем periodFrom как fallback.
+    const effectiveDocDate = docDate || periodFrom;
+    // Перетираем z.docDate, чтобы итоговый объект (через ...z потом docDate) был
+    // согласован с тем, что показывает UI.
+    z.docDate = effectiveDocDate;
 
     // If there were any claims (НС > 0), discount does not apply
     const claimsCount = App.claims ? App.claims.totalClaims : 0;
@@ -776,7 +842,7 @@ const App = {
       oked: effectiveOked || z.oked,
       riskClass: effectiveRiskClass,
       activity,
-      docDate,
+      docDate: effectiveDocDate,
       docNumber,
       legalAddress,
       headFullname,
