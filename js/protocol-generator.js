@@ -1,13 +1,13 @@
 // protocol-generator.js — Generate Protocol of Underwriting Council meeting
+// Стиль по шаблону: основной блок 10pt, подписной блок 8pt, чтобы протокол
+// помещался на одну страницу.
 
 const ProtocolGenerator = {
 
-  // Russian month names (genitive case for "от 02 февраля")
   MONTHS_GEN: [
     'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
   ],
-  // Russian month names (nominative — as used in original template)
   MONTHS_NOM: [
     'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
     'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
@@ -17,20 +17,22 @@ const ProtocolGenerator = {
     const {
       Document, Packer, Paragraph, TextRun, AlignmentType,
       Table, TableRow, TableCell, WidthType, BorderStyle,
-      TableLayoutType, VerticalAlign,
+      TableLayoutType, VerticalAlign, TabStopType,
     } = docx;
 
     const FONT = 'Times New Roman';
-    const SIZE = 24; // 12pt in half-points
-    const SIZE_TITLE = 32; // 16pt
-    const SIZE_SIG = 18; // 9pt — компактный блок подписей с датами
+    const SIZE = 20;          // 10pt — основной блок (до «Принято РЕШЕНИЕ»)
+    const SIZE_TITLE = 28;    // 14pt — «ПРОТОКОЛ»
+    const SIZE_FOOTER = 16;   // 8pt — подписной блок
 
-    // Helpers
+    // Helpers — основной шрифт (10pt)
     const tr = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE, ...opts });
     const trB = (text, opts = {}) => tr(text, { bold: true, ...opts });
-    const trSig = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE_SIG, ...opts });
-    const trSigB = (text, opts = {}) => trSig(text, { bold: true, ...opts });
+    // Подписной блок (8pt)
+    const trF = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE_FOOTER, ...opts });
+    const trFB = (text, opts = {}) => trF(text, { bold: true, ...opts });
     const emptyP = () => new Paragraph({ children: [tr('')] });
+    const emptyPF = () => new Paragraph({ children: [trF('')] });
 
     // Decide organ
     const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
@@ -38,8 +40,6 @@ const ProtocolGenerator = {
     const members = isPravlenie ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
     const secretary = isPravlenie ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;
     const organName = isPravlenie ? 'Правления' : 'Андеррайтингового Совета';
-    const organNameShort = isPravlenie ? 'Правления' : 'АС';
-    const organNameFull = isPravlenie ? 'Правление' : 'Андеррайтинговый Совет';
 
     // Format date
     const docDate = data.docDate ? new Date(data.docDate) : new Date();
@@ -47,22 +47,21 @@ const ProtocolGenerator = {
     const monthNom = ProtocolGenerator.MONTHS_NOM[docDate.getMonth()];
     const year = docDate.getFullYear();
     const dateLine = `«${day}» ${monthNom} ${year} г.`;
+    const dateDot = `${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г.`;
 
     const companyName = Utils.formatCompanyName(data.insurerName);
-
-    // Number
     const docNumber = data.docNumber || '13';
 
-    const { TabStopType } = docx;
+    // Page width A4 - 2×1134 twips margins = 9638 twips usable
+    const COL_TOTAL = 9638;
+
     const paragraphs = [];
 
-    // P1: Title — "П Р О Т О К О Л NN" on one line
+    // === P1: Title === (14pt, bold, центр)
     paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: `П Р О Т О К О Л ${docNumber}`, font: FONT, size: SIZE_TITLE, bold: true })],
+      children: [new TextRun({ text: `П Р О Т О К О Л  ${docNumber}`, font: FONT, size: SIZE_TITLE, bold: true })],
       alignment: AlignmentType.CENTER,
     }));
-
-    // P2: subtitle lines
     paragraphs.push(new Paragraph({
       children: [trB(`заседания ${organName}`)],
       alignment: AlignmentType.CENTER,
@@ -74,28 +73,23 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // P3: City (left) and date (right) on the same line via right-aligned tab stop
+    // === P3: City + date (tab-stop, на одну строку) ===
     paragraphs.push(new Paragraph({
-      tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
-      children: [
-        trB('г. Алматы'),
-        tr('\t'),
-        trB(`от ${dateLine}`),
-      ],
+      tabStops: [{ type: TabStopType.RIGHT, position: COL_TOTAL }],
+      children: [trB('г. Алматы'), tr('\t'), trB(`от ${dateLine}`)],
     }));
 
     paragraphs.push(emptyP());
 
-    // P4: Attendance header
+    // === P4: Присутствовали ===
     paragraphs.push(new Paragraph({
       children: [trB(`На заседании ${organName} Компании присутствовали:`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
-
     paragraphs.push(emptyP());
 
-    // Председатель (chair) — first member
-    const chair = members[0]; // ['Председатель Правления', 'Амерходжаев Г.Т.']
+    // Председатель
+    const chair = members[0];
     paragraphs.push(new Paragraph({
       children: [trB(`Председатель ${organName}: `)],
       alignment: AlignmentType.JUSTIFIED,
@@ -104,10 +98,9 @@ const ProtocolGenerator = {
       children: [tr(`- ${chair[1]} – ${chair[0]};`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
+    // (без emptyP — переходим сразу к Членам)
 
-    paragraphs.push(emptyP());
-
-    // Члены Совета (members 2..N-1; last one if not Director — actually the protocol includes Director ДАиП at the end)
+    // Члены
     paragraphs.push(new Paragraph({
       children: [trB(`Члены ${organName}:`)],
       alignment: AlignmentType.JUSTIFIED,
@@ -119,27 +112,20 @@ const ProtocolGenerator = {
         alignment: AlignmentType.JUSTIFIED,
       }));
     }
-
-    paragraphs.push(emptyP());
+    // (без emptyP)
 
     // Секретарь
     paragraphs.push(new Paragraph({
-      children: [trB(`Секретарь ${organName}: `)],
+      children: [trB(`Секретарь ${organName}: `), tr(`${secretary} – главный специалист департамента андеррайтинга и перестрахования.`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`- ${secretary} – главный специалист департамента андеррайтинга и перестрахования.`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    // (без emptyP)
 
-    paragraphs.push(emptyP());
-
-    // Agenda
+    // === Повестка дня ===
     paragraphs.push(new Paragraph({
       children: [trB('Повестка дня:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
-
     paragraphs.push(new Paragraph({
       children: [tr(
         `Рассмотрение целесообразности заключения сделки, подпадающей под лимиты ${organName} Компании – ` +
@@ -150,20 +136,20 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // Speaker section
-    const directorName = 'Джелкобаев Т.К.';
+    // === По вопросу повестки дня (жирным) + продолжение (обычным) в одном параграфе ===
     paragraphs.push(new Paragraph({
-      children: [tr(
-        `По вопросу повестки дня выступил Директор департамента андеррайтинга и перестрахования ${directorName}, ` +
-        `предложил членам ${organName} рассмотреть Заключение (рекомендации) департамента андеррайтинга и перестрахования ` +
-        `№ ${docNumber} от ${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г. ` +
-        `по данной сделке и принять решение о целесообразности заключения.`
-      )],
+      children: [
+        trB('По вопросу повестки дня '),
+        tr(
+          `выступил Директор департамента андеррайтинга и перестрахования ${Utils.DAIP_DIRECTOR_NAME}, ` +
+          `предложил членам ${organName} рассмотреть Заключение (рекомендации) департамента андеррайтинга и перестрахования ` +
+          `№ ${docNumber} от ${dateDot} по данной сделке и принять решение о целесообразности заключения.`
+        ),
+      ],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
     paragraphs.push(emptyP());
-
     paragraphs.push(new Paragraph({
       children: [tr('Вопрос поставлен на голосование.')],
       alignment: AlignmentType.JUSTIFIED,
@@ -171,20 +157,20 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // Voting results — show only "За" per template (no "Против" column,
-    // no ☐ checkbox — текстовая пометка).
+    // === Результаты голосования — с выровненной табуляцией ===
+    // Tab-stop в позиции 2400 — все «- «За»» выровнены в одну вертикальную колонку.
+    const VOTE_TAB = 2400;
     paragraphs.push(new Paragraph({
       children: [trB('Результаты голосования:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
-
     paragraphs.push(new Paragraph({
       children: [trB('Председатель Совета:')],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`${chair[1]}   —  «За»`)],
-      alignment: AlignmentType.JUSTIFIED,
+      tabStops: [{ type: TabStopType.LEFT, position: VOTE_TAB }],
+      children: [tr(chair[1]), tr('\t'), tr('- «За»')],
     }));
 
     paragraphs.push(new Paragraph({
@@ -194,45 +180,53 @@ const ProtocolGenerator = {
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
-        children: [tr(`${name}   —  «За»`)],
-        alignment: AlignmentType.JUSTIFIED,
+        tabStops: [{ type: TabStopType.LEFT, position: VOTE_TAB }],
+        children: [tr(name), tr('\t'), tr('- «За»')],
       }));
     }
+    // (без emptyP)
 
-    paragraphs.push(emptyP());
-
-    // Totals — все «За» (единогласно, число членов = число голосов).
+    // === Всего голосов: две строки с выровненной правой колонкой ===
+    // Tab-stop'ы: 2400 = метка «За/Против», 3200 = разделитель, 3600 = число
+    const TOT_LABEL_TAB = 2400;
+    const TOT_DASH_TAB = 3300;
+    const TOT_NUM_TAB = 3700;
     paragraphs.push(new Paragraph({
-      children: [trB('Всего голосов:')],
-      alignment: AlignmentType.JUSTIFIED,
+      tabStops: [
+        { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
+        { type: TabStopType.LEFT, position: TOT_DASH_TAB },
+        { type: TabStopType.LEFT, position: TOT_NUM_TAB },
+      ],
+      children: [trB('Всего голосов:'), tr('\t'), trB('«За»'), tr('\t'), tr('-'), tr('\t'), tr(String(members.length))],
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`«За»  - ${members.length} из ${members.length}`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(emptyP());
-
-    // DECISION
-    paragraphs.push(new Paragraph({
-      children: [trB('Принято РЕШЕНИЕ:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
-    paragraphs.push(new Paragraph({
-      children: [tr(
-        `заключить договор по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, ` +
-        `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г.`
-      )],
-      alignment: AlignmentType.JUSTIFIED,
+      tabStops: [
+        { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
+        { type: TabStopType.LEFT, position: TOT_DASH_TAB },
+        { type: TabStopType.LEFT, position: TOT_NUM_TAB },
+      ],
+      children: [tr(''), tr('\t'), trB('«Против»'), tr('\t'), tr('-'), tr('\t'), tr('0')],
     }));
 
     paragraphs.push(emptyP());
-    paragraphs.push(emptyP());
 
-    // === Signatures — same 3-column invisible-border table as in AR ===
-    // Page width A4 minus 2×1134 twips of margins = 9638 twips available.
-    const COL_TOTAL = 9638;
+    // === Принято РЕШЕНИЕ (жирным) + продолжение (обычным) в одной строке-параграфе ===
+    paragraphs.push(new Paragraph({
+      children: [
+        trB('Принято РЕШЕНИЕ: '),
+        tr(
+          `заключить договор по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, ` +
+          `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`
+        ),
+      ],
+      alignment: AlignmentType.JUSTIFIED,
+    }));
+
+    paragraphs.push(emptyPF());
+
+    // ============================================
+    // ПОДПИСНОЙ БЛОК (8pt)
+    // ============================================
     const SIG_COL_NAME = 6038;
     const SIG_COL_LINE = 2200;
     const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE;
@@ -249,7 +243,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [trSig(nameText)],
+            children: [trF(nameText)],
             alignment: AlignmentType.LEFT,
           })],
         }),
@@ -258,7 +252,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [trSig('___________________')],
+            children: [trF('___________________')],
             alignment: AlignmentType.CENTER,
           })],
         }),
@@ -267,7 +261,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [trSig(dateLine)],
+            children: [trF(dateLine)],
             alignment: AlignmentType.RIGHT,
           })],
         }),
@@ -282,10 +276,9 @@ const ProtocolGenerator = {
     });
 
     paragraphs.push(new Paragraph({
-      children: [trSigB(`Члены ${organName}: `)],
+      children: [trFB(`Члены ${organName}: `)],
       alignment: AlignmentType.JUSTIFIED,
     }));
-    paragraphs.push(emptyP());
 
     const sigTableRows = [];
     for (const [role, name] of members) {
@@ -299,9 +292,7 @@ const ProtocolGenerator = {
       alignment: AlignmentType.CENTER,
     }));
 
-    paragraphs.push(emptyP());
-
-    // Secretary block — same column structure, header spanning 3 cells then sigRow.
+    // Secretary block
     paragraphs.push(new Table({
       rows: [
         new TableRow({
@@ -311,7 +302,7 @@ const ProtocolGenerator = {
               borders: noBorders,
               columnSpan: 3,
               children: [new Paragraph({
-                children: [trSigB(`Секретарь ${organName}: `)],
+                children: [trFB(`Секретарь ${organName}: `)],
                 alignment: AlignmentType.LEFT,
               })],
             }),
@@ -324,17 +315,11 @@ const ProtocolGenerator = {
       alignment: AlignmentType.CENTER,
     }));
 
-    // Build document
     const doc = new Document({
       sections: [{
         properties: {
           page: {
-            margin: {
-              top: 1134,   // 2 cm
-              bottom: 1134,
-              left: 1134,
-              right: 1134,
-            },
+            margin: { top: 1134, bottom: 1134, left: 1134, right: 1134 },
           },
         },
         children: paragraphs,

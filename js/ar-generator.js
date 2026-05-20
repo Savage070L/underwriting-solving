@@ -10,8 +10,16 @@ const ARGenerator = {
     } = docx;
 
     const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
-    const decision = Utils.determineDecision(data.coeff, data.coeffDown);
-    const verdict = Utils.resolveVerdict(data.verdict, decision);
+    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
+    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
+    // Decision (для текста «...со стандартным/пониженным/повышенным коэффициентом»)
+    // привязан к вердикту:
+    //   accept_standard → стандартный (форсируем coeffEffective=1)
+    //   accept_adjusted → вычисленный (lowered/raised по coeff/coeffDown)
+    //   reject/defer     → не используется (execution-line другая)
+    const decision = (verdict === 'accept_standard')
+      ? 'standard'
+      : (verdict === 'accept_adjusted' ? autoDecision : autoDecision);
     const organName = Utils.getOrganName(organ);
     const organNameHeader = Utils.getOrganNameHeader(organ);
     const members = organ === 'pravlenie' ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
@@ -22,10 +30,14 @@ const ARGenerator = {
     const dateShort = Utils.fmtDateShort(data.docDate);
     const dateRu = Utils.fmtDateRu(data.docDate);
 
-    // Determine premium with coefficient display
-    const coeffEffective = (data.coeffDown != null && data.coeffDown !== 0)
-      ? (1 - data.coeffDown) : 1;
-    const premiumWithCoeffText = coeffEffective !== 1
+    // Coefficient + premium-with-PK строго следуют решению:
+    //   accept_standard → 1.0 в row 14, «-» в row 16
+    //   accept_adjusted → реальный коэффициент в 14, премия с ПК в 16
+    //   reject/defer   → также показываем как «1.0» / «-» (стандартный фон)
+    const useAdjusted = (verdict === 'accept_adjusted')
+      && data.coeffDown != null && data.coeffDown !== 0;
+    const coeffEffective = useAdjusted ? (1 - data.coeffDown) : 1;
+    const premiumWithCoeffText = useAdjusted
       ? Utils.fmtMoney(data.premiumWithCoeff)
       : '-';
 
