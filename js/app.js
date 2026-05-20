@@ -704,35 +704,46 @@ const App = {
     const target = norm(industry);
     const targetWords = words(industry);
 
-    let best = null;
+    // Этап 1: exact match
+    for (let i = 0; i < activities.length; i++) {
+      if (norm(activities[i].name) === target) {
+        return { idx: i, score: 1.0, kind: 'exact', name: activities[i].name };
+      }
+    }
+
+    // Этап 2: contains — но только если совпадение однозначно (1 категория)
+    const containsHits = activities
+      .map((a, idx) => ({ idx, name: a.name, n: norm(a.name) }))
+      .filter(c => c.n.length > 5 && (c.n.includes(target) || target.includes(c.n)));
+    if (containsHits.length === 1) {
+      const c = containsHits[0];
+      return { idx: c.idx, score: 0.9, kind: 'contains', name: c.name };
+    }
+
+    // Этап 3: word overlap — выбираем категорию с максимальным score ≥ 40%.
+    // Если target имеет < 2 значащих слов — overlap не применяем (слишком общее).
+    // Если у двух категорий одинаковый максимальный score — ambiguous → null.
+    if (targetWords.length < 2) return null;
+
+    const scored = [];
     activities.forEach((a, idx) => {
-      const n = norm(a.name);
       const aw = words(a.name);
-      let score = 0;
-      let kind = '';
-
-      // 1. Точное совпадение
-      if (n === target) { score = 1.0; kind = 'exact'; }
-      // 2. Подстрока
-      else if (n.length > 5 && (n.includes(target) || target.includes(n))) {
-        score = 0.9; kind = 'contains';
-      }
-      // 3. Word overlap: пересечение значащих слов / min(размер каждого)
-      else if (aw.length && targetWords.length) {
-        const setA = new Set(aw);
-        const setT = new Set(targetWords);
-        let common = 0;
-        for (const w of setA) if (setT.has(w)) common++;
-        const denom = Math.min(setA.size, setT.size);
-        const overlap = denom > 0 ? common / denom : 0;
-        if (overlap >= 0.6) { score = overlap; kind = 'overlap-' + common + '/' + denom; }
-      }
-
-      if (score > 0 && (!best || score > best.score)) {
-        best = { idx, score, kind, name: a.name };
+      if (!aw.length) return;
+      const setA = new Set(aw);
+      const setT = new Set(targetWords);
+      let common = 0;
+      for (const w of setA) if (setT.has(w)) common++;
+      const denom = Math.min(setA.size, setT.size);
+      const overlap = denom > 0 ? common / denom : 0;
+      if (overlap >= 0.4) {
+        scored.push({ idx, score: overlap, kind: 'overlap-' + common + '/' + denom, name: a.name });
       }
     });
-    return best;
+    if (!scored.length) return null;
+    scored.sort((a, b) => b.score - a.score);
+    // Если есть несколько с тем же максимальным score — неоднозначно
+    if (scored.length > 1 && scored[1].score === scored[0].score) return null;
+    return scored[0];
   },
 
   // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====
