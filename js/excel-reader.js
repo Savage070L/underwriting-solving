@@ -911,67 +911,102 @@ const ExcelReader = {
   },
 
   // ===== READ NORMATIV =====
+  // Динамически определяет колонки по заголовку (Дата / Размер крупной сделки /
+  // Доля нетто-премии). Берёт ПОСЛЕДНЮЮ строку с данными ≤ docDate.month, или
+  // самую последнюю если docDate не задана. Это критично т.к. норматив
+  // обновляется ежемесячно и количество строк растёт.
   readNormativ(arrayBuffer, docDate) {
     const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
     const ws = wb.Sheets['Лист1'] || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true });
+    if (!data.length) return null;
 
-    // Find the row with date strictly before the docDate month
-    // Or if no docDate, use the last row
+    // Шаг 1: ищем заголовок (первые 5 строк) и определяем колонки
+    const lc = (v) => String(v || '').toLowerCase().replace(/\s+/g, '');
+    let headerIdx = -1;
+    let cols = { date: 0, assets25: 3, portfolio: 4 }; // fallback на старый layout
+    for (let i = 0; i < Math.min(data.length, 5); i++) {
+      const row = data[i] || [];
+      const labels = row.map(lc);
+      const dateCol = labels.findIndex(s => s.includes('дата') || s === 'датас');
+      // Активы: колонка содержит «0,25», «активы» или «крупн»
+      const assets25Col = labels.findIndex(s =>
+        (s.includes('0,25') || s.includes('0.25')) ||
+        (s.includes('крупн') && s.includes('сделк')) ||
+        (s.includes('размер') && s.includes('активы'))
+      );
+      // Portfolio share: «доля», «нетто», «портфел»
+      const portfolioCol = labels.findIndex(s =>
+        (s.includes('доля') && (s.includes('нетто') || s.includes('осн') || s.includes('портфел')))
+      );
+      if (dateCol >= 0 && assets25Col >= 0) {
+        headerIdx = i;
+        cols = {
+          date: dateCol,
+          assets25: assets25Col,
+          portfolio: portfolioCol >= 0 ? portfolioCol : assets25Col + 1,
+        };
+        break;
+      }
+    }
+    if (headerIdx === -1) {
+      headerIdx = 0; // fallback
+    }
+
+    // Шаг 2: находим последнюю строку с данными ≤ docDate (или самую последнюю)
     let bestRow = null;
     let bestDate = null;
+    const targetMonth = docDate
+      ? (() => {
+          const t = Utils.parseExcelDate(docDate);
+          return t ? new Date(t.getFullYear(), t.getMonth(), 1) : null;
+        })()
+      : null;
 
-    for (let i = 1; i < data.length; i++) {
+    for (let i = headerIdx + 1; i < data.length; i++) {
       const row = data[i];
-      if (!row || !row[0] || !row[3]) continue;
+      if (!row || row[cols.date] == null || row[cols.assets25] == null) continue;
 
-      let rowDate = row[0];
-      if (!(rowDate instanceof Date)) {
-        rowDate = Utils.parseExcelDate(rowDate);
-      }
+      let rowDate = row[cols.date];
+      if (!(rowDate instanceof Date)) rowDate = Utils.parseExcelDate(rowDate);
       if (!rowDate) continue;
 
-      if (docDate) {
-        const targetDate = Utils.parseExcelDate(docDate);
-        // Use the row from at least 1 full month before the document date
-        // (the previous month's finalized data)
-        const targetMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+      if (targetMonth) {
         if (rowDate < targetMonth) {
-          if (!bestDate || rowDate > bestDate) {
-            bestDate = rowDate;
-            bestRow = row;
-          }
+          if (!bestDate || rowDate > bestDate) { bestDate = rowDate; bestRow = row; }
         }
       } else {
-        // Just take the last row with data
+        // Без docDate — самая последняя строка с данными
         bestRow = row;
         bestDate = rowDate;
       }
     }
 
+    // Fallback: если строки ≤ docDate не нашли — берём самую последнюю строку
     if (!bestRow) {
-      // Fallback: last row with data
-      for (let i = data.length - 1; i >= 1; i--) {
-        if (data[i] && data[i][3]) {
-          bestRow = data[i];
-          bestDate = data[i][0] instanceof Date ? data[i][0] : Utils.parseExcelDate(data[i][0]);
-          break;
-        }
+      for (let i = data.length - 1; i > headerIdx; i--) {
+        const row = data[i];
+        if (!row || row[cols.assets25] == null) continue;
+        const rd = row[cols.date] instanceof Date
+          ? row[cols.date] : Utils.parseExcelDate(row[cols.date]);
+        if (!rd) continue;
+        bestRow = row;
+        bestDate = rd;
+        break;
       }
     }
-
     if (!bestRow) return null;
 
-    const assets25pct = Number(bestRow[3]); // Column D (0-indexed 3), in thousands tenge
-    const portfolioShare = Number(bestRow[4]); // Column E (0-indexed 4), decimal
-    const fullAssets = assets25pct / 0.25; // Full assets in thousands tenge
+    const assets25pct = Number(bestRow[cols.assets25]);     // в тысячах тенге
+    const portfolioShare = Number(bestRow[cols.portfolio]); // доля
+    const fullAssets = assets25pct / 0.25;                  // в тысячах тенге
 
     return {
       date: bestDate,
       assets25pct,
       portfolioShare,
       fullAssets,
-      fullAssetsTenge: fullAssets * 1000, // Convert to tenge
+      fullAssetsTenge: fullAssets * 1000,
     };
   },
 
@@ -981,14 +1016,27 @@ const ExcelReader = {
   // Handles both: ('КУ по классам' sheet preferred), or any sheet with 'КУ' in name.
   readKuPoKlassam(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    // 1. Find the right sheet
+    // 1. Лист с КУ — приоритет на «КУ по классам», иначе ищем по содержимому
     let ws = wb.Sheets['КУ по классам']
           || wb.Sheets[wb.SheetNames.find(n => /ку\s+по\s+классам/i.test(n))]
           || wb.Sheets[wb.SheetNames.find(n => n.toLowerCase().includes('ку'))]
           || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-    // 2. Find «Итого» row by label in col A
+    // 2. Динамически ищем колонки «КУ» и «КУ нетто» по заголовку.
+    //    Заголовок может быть разбит на 2 строки (Row 1 = метки, Row 2 = подметки).
+    const lc = (v) => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    let kuCol = -1, kuNettoCol = -1;
+    for (let i = 0; i < Math.min(data.length, 5); i++) {
+      const row = data[i] || [];
+      for (let j = 0; j < row.length; j++) {
+        const s = lc(row[j]);
+        if (kuCol === -1 && s === 'ку') kuCol = j;
+        else if (kuNettoCol === -1 && (s === 'ку нетто' || s === 'кунетто' || (s.startsWith('ку') && s.includes('нетто')))) kuNettoCol = j;
+      }
+    }
+
+    // 3. Находим строку «Итого» по метке в col A
     let itogoRow = null;
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
@@ -1003,34 +1051,31 @@ const ExcelReader = {
       return { lossRatioWith: 0, lossRatioWithout: 0 };
     }
 
-    // 3. Find the two КУ values: typically last two cells that look like percentages
-    //    (0 < value < 200). Pick from right end of the row.
-    const percentLike = [];
-    for (let c = itogoRow.length - 1; c >= 0; c--) {
-      const v = Number(itogoRow[c]);
-      if (Number.isFinite(v) && v > 0 && v < 200) {
-        percentLike.unshift({ col: c, val: v });
-      }
-      if (percentLike.length >= 4) break; // collect enough candidates
-    }
+    // 4. Если колонки найдены — берём из «Итого». Если нет (формат поменялся) —
+    //    fallback: последние две процент-подобные числа в строке.
+    let lossRatioWith = kuCol >= 0 ? Number(itogoRow[kuCol]) : NaN;
+    let lossRatioWithout = kuNettoCol >= 0 ? Number(itogoRow[kuNettoCol]) : NaN;
 
-    // 4. From the candidates, the LAST two adjacent ones are typically КУ_with and КУ_without.
-    //    For our file: H26 (col 7) = lossRatioWith, I26 (col 8) = lossRatioWithout.
-    //    Default: try cols H/I (7/8) first; if missing, fall back to percentLike pairs.
-    let lossRatioWith = Number(itogoRow[7]);
-    let lossRatioWithout = Number(itogoRow[8]);
-    if (!Number.isFinite(lossRatioWith) || lossRatioWith === 0 ||
-        !Number.isFinite(lossRatioWithout) || lossRatioWithout === 0) {
-      // Use the rightmost percent-like pair as КУ values
+    if (!Number.isFinite(lossRatioWith) || !Number.isFinite(lossRatioWithout)) {
+      const percentLike = [];
+      for (let c = itogoRow.length - 1; c >= 0; c--) {
+        const v = Number(itogoRow[c]);
+        if (Number.isFinite(v) && v > 0 && v < 200) {
+          percentLike.unshift({ col: c, val: v });
+        }
+        if (percentLike.length >= 4) break;
+      }
       if (percentLike.length >= 2) {
-        lossRatioWith = percentLike[percentLike.length - 2].val;
-        lossRatioWithout = percentLike[percentLike.length - 1].val;
+        // Последние две — обычно КУ и КУ нетто (рядом)
+        lossRatioWith = lossRatioWith || percentLike[percentLike.length - 2].val;
+        lossRatioWithout = lossRatioWithout || percentLike[percentLike.length - 1].val;
       }
     }
 
     return {
       lossRatioWith: lossRatioWith || 0,
       lossRatioWithout: lossRatioWithout || 0,
+      _cols: { kuCol, kuNettoCol }, // для отладки
     };
   },
 

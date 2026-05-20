@@ -92,14 +92,22 @@ const App = {
           const base64 = App._arrayBufferToBase64(buf);
           localStorage.setItem('ref_normativ_raw', base64);
           App._rawNormativBuffer = buf;
-          // Also do a default read (last row)
-          App.refData.normativ = ExcelReader.readNormativ(buf);
+          // Если заявка уже загружена — читаем с учётом её даты.
+          // Иначе берём самую последнюю строку файла.
+          const effDate = App.zayavka
+            ? (App.zayavka.periodFrom || App.zayavka.docDate) : null;
+          App.refData.normativ = ExcelReader.readNormativ(buf, effDate);
+          // Перерисовать превью и кнопки (могут зависеть от активов компании)
+          if (App.zayavka) App.showPreview();
+          App.updateButtons();
           break;
         }
         case 'ku': {
           const result = ExcelReader.readKuPoKlassam(buf);
           App.refData.ku = result;
           localStorage.setItem('ref_ku', JSON.stringify(result));
+          // Превью и документы используют ku.lossRatioWith / Without — перерисуем
+          if (App.zayavka) App.showPreview();
           break;
         }
         case 'calculator': {
