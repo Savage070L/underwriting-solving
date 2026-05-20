@@ -746,20 +746,36 @@ const App = {
       paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
     }
 
-    // Источник имени и юр. адреса: stat.gov.kz (реестр) > заявка > pk.uchet.kz worker.
-    // Реестровые данные считаем наиболее достоверными.
+    // Источник имени, юр. адреса, региона и деятельности: stat.gov.kz (реестр)
+    // считаем наиболее достоверным. Заявка / pk.uchet.kz — fallback.
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
     const insurerName = (sg && sg.name) || z.insurerName;
     const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '-';
     const headFullname = (sg && sg.headFullname) || null;
 
+    // Регион: заявка E3 → первая часть юр. адреса из stat.gov.kz.
+    // Адрес: «ТУРКЕСТАНСКАЯ ОБЛАСТЬ, ТУРКЕСТАН Г.А., ...» — берём до запятой.
+    let region = z.region;
+    if ((!region || region === '-') && sg && sg.legalAddress) {
+      const firstPart = String(sg.legalAddress).split(',')[0].trim();
+      if (firstPart) region = firstPart;
+    }
+
+    // Деятельность: для активного ОКЭДа, если это primary stat.gov.kz —
+    // берём statgov-имя (специфичное), иначе fallback на classifier name.
+    let activity = effectiveActivity;
+    if (sg && effectiveOked && effectiveOked === sg.okedPrimaryCode && sg.okedPrimaryName) {
+      activity = sg.okedPrimaryName;
+    }
+
     return {
       ...z,
       insurerName,
+      region,
       oked: effectiveOked || z.oked,
       riskClass: effectiveRiskClass,
-      activity: effectiveActivity,
+      activity,
       docDate,
       docNumber,
       legalAddress,

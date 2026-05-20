@@ -23,10 +23,13 @@ const ProtocolGenerator = {
     const FONT = 'Times New Roman';
     const SIZE = 24; // 12pt in half-points
     const SIZE_TITLE = 32; // 16pt
+    const SIZE_SIG = 18; // 9pt — компактный блок подписей с датами
 
     // Helpers
     const tr = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE, ...opts });
     const trB = (text, opts = {}) => tr(text, { bold: true, ...opts });
+    const trSig = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE_SIG, ...opts });
+    const trSigB = (text, opts = {}) => trSig(text, { bold: true, ...opts });
     const emptyP = () => new Paragraph({ children: [tr('')] });
 
     // Decide organ
@@ -168,8 +171,8 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // Voting results — show only "За" per template (no "Против" column).
-    const CHECKBOX = '☐';
+    // Voting results — show only "За" per template (no "Против" column,
+    // no ☐ checkbox — текстовая пометка).
     paragraphs.push(new Paragraph({
       children: [trB('Результаты голосования:')],
       alignment: AlignmentType.JUSTIFIED,
@@ -180,7 +183,7 @@ const ProtocolGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(new Paragraph({
-      children: [tr(`${chair[1]}     ${CHECKBOX} «За»`)],
+      children: [tr(`${chair[1]}     «За»`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -191,7 +194,7 @@ const ProtocolGenerator = {
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
-        children: [tr(`${name}     ${CHECKBOX} «За»`)],
+        children: [tr(`${name}     «За»`)],
         alignment: AlignmentType.JUSTIFIED,
       }));
     }
@@ -246,7 +249,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [tr(nameText)],
+            children: [trSig(nameText)],
             alignment: AlignmentType.LEFT,
           })],
         }),
@@ -255,7 +258,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [tr('___________________')],
+            children: [trSig('___________________')],
             alignment: AlignmentType.CENTER,
           })],
         }),
@@ -264,7 +267,7 @@ const ProtocolGenerator = {
           borders: noBorders,
           verticalAlign: VerticalAlign.CENTER,
           children: [new Paragraph({
-            children: [tr(dateLine)],
+            children: [trSig(dateLine)],
             alignment: AlignmentType.RIGHT,
           })],
         }),
@@ -279,7 +282,7 @@ const ProtocolGenerator = {
     });
 
     paragraphs.push(new Paragraph({
-      children: [trB(`Члены ${organName}: `)],
+      children: [trSigB(`Члены ${organName}: `)],
       alignment: AlignmentType.JUSTIFIED,
     }));
     paragraphs.push(emptyP());
@@ -308,7 +311,7 @@ const ProtocolGenerator = {
               borders: noBorders,
               columnSpan: 3,
               children: [new Paragraph({
-                children: [trB(`Секретарь ${organName}: `)],
+                children: [trSigB(`Секретарь ${organName}: `)],
                 alignment: AlignmentType.LEFT,
               })],
             }),
