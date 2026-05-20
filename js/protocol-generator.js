@@ -1,6 +1,7 @@
 // protocol-generator.js — Generate Protocol of Underwriting Council meeting
-// Стиль по шаблону: основной блок 10pt, подписной блок 8pt, чтобы протокол
-// помещался на одну страницу.
+// Layout: основной блок 10pt с отступом «красная строка» для контента
+// (имена, повестка, голосование), без отступа для меток («Председатель …:»).
+// Подписной блок 8pt без отступа.
 
 const ProtocolGenerator = {
 
@@ -25,7 +26,11 @@ const ProtocolGenerator = {
     const SIZE_TITLE = 28;    // 14pt — «ПРОТОКОЛ»
     const SIZE_FOOTER = 16;   // 8pt — подписной блок
 
-    // Helpers — основной шрифт (10pt)
+    // Indent для «красной строки» — все имена, повестка, голосование.
+    // Метки типа «Председатель …:» идут БЕЗ indent.
+    const INDENT_LEFT = 720; // 0.5"
+
+    // Основной шрифт (10pt)
     const tr = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE, ...opts });
     const trB = (text, opts = {}) => tr(text, { bold: true, ...opts });
     // Подписной блок (8pt)
@@ -34,12 +39,24 @@ const ProtocolGenerator = {
     const emptyP = () => new Paragraph({ children: [tr('')] });
     const emptyPF = () => new Paragraph({ children: [trF('')] });
 
+    // Helpers для параграфов
+    const p = (children, opts = {}) => new Paragraph({
+      children: Array.isArray(children) ? children : [children],
+      alignment: AlignmentType.JUSTIFIED,
+      ...opts,
+    });
+    const pInd = (children, opts = {}) => p(children, {
+      indent: { left: INDENT_LEFT },
+      ...opts,
+    });
+
     // Decide organ
     const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
     const isPravlenie = organ === 'pravlenie';
     const members = isPravlenie ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
     const secretary = isPravlenie ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;
     const organName = isPravlenie ? 'Правления' : 'Андеррайтингового Совета';
+    const organNameShort = isPravlenie ? 'Правления' : 'Совета';
 
     // Format date
     const docDate = data.docDate ? new Date(data.docDate) : new Date();
@@ -59,7 +76,7 @@ const ProtocolGenerator = {
 
     // === P1: Title === (14pt, bold, центр)
     paragraphs.push(new Paragraph({
-      children: [new TextRun({ text: `П Р О Т О К О Л  ${docNumber}`, font: FONT, size: SIZE_TITLE, bold: true })],
+      children: [new TextRun({ text: `П Р О Т О К О Л  №${docNumber}`, font: FONT, size: SIZE_TITLE, bold: true })],
       alignment: AlignmentType.CENTER,
     }));
     paragraphs.push(new Paragraph({
@@ -73,125 +90,83 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // === P3: City + date (tab-stop, на одну строку) ===
+    // === P3: City + date (на одной строке, без пустой строки до «На заседании») ===
     paragraphs.push(new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: COL_TOTAL }],
       children: [trB('г. Алматы'), tr('\t'), trB(`от ${dateLine}`)],
     }));
 
+    // === P4: Присутствовали (БЕЗ пустой строки до этого) ===
+    paragraphs.push(p(trB(`На заседании ${organName} Компании присутствовали:`)));
     paragraphs.push(emptyP());
 
-    // === P4: Присутствовали ===
-    paragraphs.push(new Paragraph({
-      children: [trB(`На заседании ${organName} Компании присутствовали:`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(emptyP());
-
-    // Председатель
+    // Председатель — метка без отступа, имя с отступом
     const chair = members[0];
-    paragraphs.push(new Paragraph({
-      children: [trB(`Председатель ${organName}: `)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(`- ${chair[1]} – ${chair[0]};`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    // (без emptyP — переходим сразу к Членам)
+    paragraphs.push(p(trB(`Председатель ${organName}:`)));
+    paragraphs.push(pInd(tr(`- ${chair[1]} – ${chair[0]};`)));
 
-    // Члены
-    paragraphs.push(new Paragraph({
-      children: [trB(`Члены ${organName}:`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    // Члены — метка без отступа, имена с отступом
+    paragraphs.push(p(trB(`Члены ${organName}:`)));
     for (let i = 1; i < members.length; i++) {
       const [role, name] = members[i];
-      paragraphs.push(new Paragraph({
-        children: [tr(`- ${name} – ${role};`)],
-        alignment: AlignmentType.JUSTIFIED,
-      }));
+      paragraphs.push(pInd(tr(`- ${name} – ${role};`)));
     }
-    // (без emptyP)
 
-    // Секретарь
-    paragraphs.push(new Paragraph({
-      children: [trB(`Секретарь ${organName}: `), tr(`${secretary} – главный специалист департамента андеррайтинга и перестрахования.`)],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    // (без emptyP)
+    // Секретарь — метка без отступа, имя с отступом
+    paragraphs.push(p(trB(`Секретарь ${organName}:`)));
+    paragraphs.push(pInd(tr(`- ${secretary} – главный специалист департамента андеррайтинга и перестрахования.`)));
 
-    // === Повестка дня ===
-    paragraphs.push(new Paragraph({
-      children: [trB('Повестка дня:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [tr(
-        `Рассмотрение целесообразности заключения сделки, подпадающей под лимиты ${organName} Компании – ` +
-        `договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}.`
-      )],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    // === Повестка дня — с красной строкой ===
+    paragraphs.push(pInd(trB('Повестка дня:')));
+    paragraphs.push(pInd(tr(
+      `Рассмотрение целесообразности заключения сделки, подпадающей под лимиты ${organName} Компании – ` +
+      `договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}.`
+    )));
 
-    paragraphs.push(emptyP());
-
-    // === По вопросу повестки дня (жирным) + продолжение (обычным) в одном параграфе ===
-    paragraphs.push(new Paragraph({
-      children: [
-        trB('По вопросу повестки дня '),
-        tr(
-          `выступил Директор департамента андеррайтинга и перестрахования ${Utils.DAIP_DIRECTOR_NAME}, ` +
-          `предложил членам ${organName} рассмотреть Заключение (рекомендации) департамента андеррайтинга и перестрахования ` +
-          `№ ${docNumber} от ${dateDot} по данной сделке и принять решение о целесообразности заключения.`
-        ),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    // === По вопросу повестки дня — с отступом ===
+    paragraphs.push(pInd([
+      trB('По вопросу повестки дня '),
+      tr(
+        `выступил Директор департамента андеррайтинга и перестрахования ${Utils.DAIP_DIRECTOR_NAME}, ` +
+        `предложил членам ${organName} рассмотреть Заключение (рекомендации) департамента андеррайтинга и перестрахования ` +
+        `№ ${docNumber} от ${dateDot} по данной сделке и принять решение о целесообразности заключения.`
+      ),
+    ]));
 
     paragraphs.push(emptyP());
-    paragraphs.push(new Paragraph({
-      children: [tr('Вопрос поставлен на голосование.')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-
+    // === Вопрос поставлен на голосование — БЕЗ отступа ===
+    paragraphs.push(p(tr('Вопрос поставлен на голосование.')));
     paragraphs.push(emptyP());
 
-    // === Результаты голосования — с выровненной табуляцией ===
-    // Tab-stop в позиции 2400 — все «- «За»» выровнены в одну вертикальную колонку.
+    // === Результаты голосования — С красной строкой ===
+    // Vote tab-stop рассчитан от позиции indent (внутренние tabStops).
+    // Чтобы все «- «За»» выровнялись, позиция = INDENT_LEFT + 1680 = 2400.
     const VOTE_TAB = 2400;
+
+    paragraphs.push(pInd(trB('Результаты голосования:')));
+    paragraphs.push(pInd(trB(`Председатель ${organNameShort}:`)));
     paragraphs.push(new Paragraph({
-      children: [trB('Результаты голосования:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
-      children: [trB('Председатель Совета:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
-    paragraphs.push(new Paragraph({
+      indent: { left: INDENT_LEFT },
       tabStops: [{ type: TabStopType.LEFT, position: VOTE_TAB }],
       children: [tr(chair[1]), tr('\t'), tr('- «За»')],
     }));
 
-    paragraphs.push(new Paragraph({
-      children: [trB('Члены Совета:')],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    paragraphs.push(pInd(trB(`Члены ${organNameShort}:`)));
     for (let i = 1; i < members.length; i++) {
       const name = members[i][1];
       paragraphs.push(new Paragraph({
+        indent: { left: INDENT_LEFT },
         tabStops: [{ type: TabStopType.LEFT, position: VOTE_TAB }],
         children: [tr(name), tr('\t'), tr('- «За»')],
       }));
     }
-    // (без emptyP)
 
-    // === Всего голосов: две строки с выровненной правой колонкой ===
-    // Tab-stop'ы: 2400 = метка «За/Против», 3200 = разделитель, 3600 = число
-    const TOT_LABEL_TAB = 2400;
-    const TOT_DASH_TAB = 3300;
-    const TOT_NUM_TAB = 3700;
+    // === Всего голосов — две строки с tab-stop'ами ===
+    const TOT_LABEL_TAB = 2400; // позиция «За»/«Против»
+    const TOT_DASH_TAB = 3200;  // позиция «-»
+    const TOT_NUM_TAB = 3500;   // позиция числа
     paragraphs.push(new Paragraph({
+      indent: { left: INDENT_LEFT },
       tabStops: [
         { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
         { type: TabStopType.LEFT, position: TOT_DASH_TAB },
@@ -200,6 +175,7 @@ const ProtocolGenerator = {
       children: [trB('Всего голосов:'), tr('\t'), trB('«За»'), tr('\t'), tr('-'), tr('\t'), tr(String(members.length))],
     }));
     paragraphs.push(new Paragraph({
+      indent: { left: INDENT_LEFT },
       tabStops: [
         { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
         { type: TabStopType.LEFT, position: TOT_DASH_TAB },
@@ -210,22 +186,19 @@ const ProtocolGenerator = {
 
     paragraphs.push(emptyP());
 
-    // === Принято РЕШЕНИЕ (жирным) + продолжение (обычным) в одной строке-параграфе ===
-    paragraphs.push(new Paragraph({
-      children: [
-        trB('Принято РЕШЕНИЕ: '),
-        tr(
-          `заключить договор по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, ` +
-          `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`
-        ),
-      ],
-      alignment: AlignmentType.JUSTIFIED,
-    }));
+    // === Принято РЕШЕНИЕ — БЕЗ красной строки ===
+    paragraphs.push(p([
+      trB('Принято РЕШЕНИЕ: '),
+      tr(
+        `заключить договор по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, ` +
+        `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`
+      ),
+    ]));
 
     paragraphs.push(emptyPF());
 
     // ============================================
-    // ПОДПИСНОЙ БЛОК (8pt)
+    // ПОДПИСНОЙ БЛОК (8pt) — без красной строки
     // ============================================
     const SIG_COL_NAME = 6038;
     const SIG_COL_LINE = 2200;
@@ -276,7 +249,7 @@ const ProtocolGenerator = {
     });
 
     paragraphs.push(new Paragraph({
-      children: [trFB(`Члены ${organName}: `)],
+      children: [trFB(`Члены ${organName}:`)],
       alignment: AlignmentType.JUSTIFIED,
     }));
 
@@ -292,7 +265,6 @@ const ProtocolGenerator = {
       alignment: AlignmentType.CENTER,
     }));
 
-    // Secretary block
     paragraphs.push(new Table({
       rows: [
         new TableRow({
@@ -302,7 +274,7 @@ const ProtocolGenerator = {
               borders: noBorders,
               columnSpan: 3,
               children: [new Paragraph({
-                children: [trFB(`Секретарь ${organName}: `)],
+                children: [trFB(`Секретарь ${organName}:`)],
                 alignment: AlignmentType.LEFT,
               })],
             }),
