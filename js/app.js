@@ -668,17 +668,16 @@ const App = {
     App.showPreview();
   },
 
-  // Прямое сравнение «Отрасль» из statsnet с категориями калькулятора.
-  // Если найдено — выставляем в dropdown и помечаем как auto (overrideable вручную).
+  // Сравнение «Отрасль» из statsnet с категориями калькулятора.
+  // Алгоритм матчинга (по убыванию приоритета):
+  //   1. Точное совпадение нормализованных строк
+  //   2. Одна строка является подстрокой другой (~contains)
+  //   3. Перекрытие значащих слов (длиной ≥ 4 символов) ≥ 60%
+  // Выбирается категория с максимальным score.
   _applyStatsnetIndustry(industry) {
     if (!industry) return;
-    const norm = (s) => String(s || '').toLowerCase()
-      .replace(/[«»"',.()]/g, '')
-      .replace(/\s+/g, ' ').trim();
-    const target = norm(industry);
-    const activities = App._calcActivities ? App._calcActivities() : [];
-    const idx = activities.findIndex(a => norm(a.name) === target);
-    if (idx < 0) return; // нет точного совпадения — оставим текущий выбор
+    const matched = App._findActivityByIndustry(industry);
+    if (matched == null) return; // нет совпадения — оставим текущий выбор
     // Не перезаписываем ручной выбор пользователя
     const resolved = App._resolveOked();
     if (resolved.oked && localStorage.getItem('manual_activity_for_oked') === resolved.oked) {
@@ -687,11 +686,53 @@ const App = {
     // Применяем
     const select = document.getElementById('activitySelect');
     if (select) {
-      select.value = String(idx);
-      localStorage.setItem('selected_activity_idx', String(idx));
-      App._activityAutoForOked = resolved.oked; // пометка «авто»
+      select.value = String(matched.idx);
+      localStorage.setItem('selected_activity_idx', String(matched.idx));
+      App._activityAutoForOked = resolved.oked;
     }
     App._renderActivityHint();
+  },
+
+  // Возвращает {idx, score, kind, name} или null
+  _findActivityByIndustry(industry) {
+    const activities = App._calcActivities ? App._calcActivities() : [];
+    if (!activities.length) return null;
+    const norm = (s) => String(s || '').toLowerCase()
+      .replace(/[«»"',.():;–—-]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const words = (s) => norm(s).split(/\s+/).filter(w => w.length >= 4);
+    const target = norm(industry);
+    const targetWords = words(industry);
+
+    let best = null;
+    activities.forEach((a, idx) => {
+      const n = norm(a.name);
+      const aw = words(a.name);
+      let score = 0;
+      let kind = '';
+
+      // 1. Точное совпадение
+      if (n === target) { score = 1.0; kind = 'exact'; }
+      // 2. Подстрока
+      else if (n.length > 5 && (n.includes(target) || target.includes(n))) {
+        score = 0.9; kind = 'contains';
+      }
+      // 3. Word overlap: пересечение значащих слов / min(размер каждого)
+      else if (aw.length && targetWords.length) {
+        const setA = new Set(aw);
+        const setT = new Set(targetWords);
+        let common = 0;
+        for (const w of setA) if (setT.has(w)) common++;
+        const denom = Math.min(setA.size, setT.size);
+        const overlap = denom > 0 ? common / denom : 0;
+        if (overlap >= 0.6) { score = overlap; kind = 'overlap-' + common + '/' + denom; }
+      }
+
+      if (score > 0 && (!best || score > best.score)) {
+        best = { idx, score, kind, name: a.name };
+      }
+    });
+    return best;
   },
 
   // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====
