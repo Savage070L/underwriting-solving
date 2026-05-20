@@ -111,7 +111,9 @@ const Utils = {
   // Format money without "тенге" suffix (rounds to integer, shows ,00)
   fmtMoneyRaw(value) {
     if (value == null || isNaN(value)) return '-';
-    const num = Math.round(value); // round to integer like templates
+    // Сохраняем копейки из заявки: «5 313 852 043,57» (не округляем до целого).
+    // Округление до 2 знаков — защита от float-noise.
+    const num = Math.round(Number(value) * 100) / 100;
     const parts = num.toFixed(2).split('.');
     const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
     return intPart + ',' + parts[1];
