@@ -741,11 +741,8 @@ const App = {
     const effectiveRiskClass = resolved.riskClass;
     const effectiveActivity = resolved.activity;
 
-    // Tariff resolution: prefer zayavka's manual value (D12), fall back to справочник.
-    let tariff = (z.tariff != null && z.tariff !== '') ? Number(z.tariff) : null;
-    if (tariff == null && App.refData.popravka && effectiveRiskClass) {
-      tariff = App.refData.popravka.riskRates.get(effectiveRiskClass);
-    }
+    // Тариф «связан» с активным ОКЭДом — см. _resolveTariff().
+    const tariff = App._resolveTariff(effectiveRiskClass);
 
     // Activity for death/injury rates — picked manually from dropdown (sourced from Лист2 of калькулятор).
     let selectedActivity = App._getSelectedActivity();
@@ -1200,10 +1197,16 @@ const App = {
     return localStorage.getItem('manual_activity_for_oked') !== oked;
   },
 
-  // Тариф: D12 заявки → popravka.riskRates[класс] → classifier.tariff[ОКЭД]
+  // Тариф «связан» с активным ОКЭДом.
+  // Если ОКЭД остался из заявки (source = 'zayavka') — используем z.tariff (D12).
+  // Если ОКЭД изменился (manual, statgov-max-class, override) — пересчитываем
+  // через справочник/классификатор по новому классу.
   _resolveTariff(riskClass) {
     const z = App.zayavka || {};
-    if (z.tariff != null && z.tariff !== '') {
+    const resolved = App._resolveOked ? App._resolveOked() : { source: 'zayavka' };
+    const okedFromZayavka = resolved.source && resolved.source.startsWith('zayavka');
+
+    if (okedFromZayavka && z.tariff != null && z.tariff !== '') {
       const t = Number(z.tariff);
       if (Number.isFinite(t)) return t;
     }
@@ -1211,12 +1214,14 @@ const App = {
       const t = App.refData.popravka.riskRates.get(riskClass);
       if (Number.isFinite(t)) return t;
     }
-    if (App.refData.classifier) {
-      const resolved = App._resolveOked ? App._resolveOked() : {};
-      if (resolved.oked) {
-        const entry = App.refData.classifier.find(e => !e.isPrefix && e.okedRaw === String(resolved.oked));
-        if (entry && Number.isFinite(entry.tariff)) return entry.tariff;
-      }
+    if (App.refData.classifier && resolved.oked) {
+      const entry = App.refData.classifier.find(e => !e.isPrefix && e.okedRaw === String(resolved.oked));
+      if (entry && Number.isFinite(entry.tariff)) return entry.tariff;
+    }
+    // Last-resort fallback на z.tariff если ничего не нашли
+    if (z.tariff != null && z.tariff !== '') {
+      const t = Number(z.tariff);
+      if (Number.isFinite(t)) return t;
     }
     return null;
   },
