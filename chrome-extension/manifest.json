@@ -4,10 +4,17 @@
   "version": "0.1.0",
   "description": "Тянет данные по БИН со stat.gov.kz (используя текущую ЭЦП-сессию пользователя) и отдаёт андеррайтинговому приложению.",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://stat.gov.kz/*",
+    "https://statsnet.co/*",
+    "https://yandex.kz/*",
+    "https://yandex.ru/*",
+    "https://yandex.com/*",
+    "https://duckduckgo.com/*",
     "https://savage070l.github.io/*",
     "http://localhost:*/*",
     "http://127.0.0.1:*/*"

@@ -54,6 +54,43 @@ const StatGovClient = {
     });
   },
 
+  // Лукап через statsnet.co — ищем «Отрасль» (10-40 сек, открывает background-вкладки).
+  async lookupStatsnet(bin) {
+    const cleanBin = String(bin || '').trim();
+    if (!/^\d{12}$/.test(cleanBin)) {
+      throw new Error('БИН должен содержать 12 цифр');
+    }
+    if (!StatGovClient._ready) {
+      const p = await StatGovClient.ping();
+      if (!p.ok) throw new Error('Расширение «Standard Life — мост к stat.gov.kz» не установлено');
+    }
+    const requestId = 'statsnet-' + Math.random().toString(36).slice(2);
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        const d = event.data;
+        if (!d || d.source !== StatGovClient.SOURCE_BRIDGE) return;
+        if (d.type !== 'STATSNET_LOOKUP_RESULT' || d.requestId !== requestId) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        if (d.ok) resolve(d.data);
+        else reject(new Error(d.error || 'Неизвестная ошибка statsnet-лукапа'));
+      };
+      window.addEventListener('message', handler);
+      window.postMessage(
+        { source: StatGovClient.SOURCE_APP, type: 'STATSNET_LOOKUP', requestId, bin: cleanBin },
+        '*',
+      );
+      // 60 секунд таймаут — statsnet через 2 вкладки + рендер может занять до 30-40 сек
+      setTimeout(() => {
+        if (done) return;
+        window.removeEventListener('message', handler);
+        reject(new Error('Таймаут statsnet-лукапа (60 сек)'));
+      }, 60000);
+    });
+  },
+
   // Главный метод: возвращает Promise с данными по БИН или error.
   async lookup(bin) {
     const cleanBin = String(bin || '').trim();

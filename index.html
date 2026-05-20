@@ -148,9 +148,13 @@
           <div class="oked-lookup-result" id="oked-result"></div>
         </div>
         <div class="form-group full-width">
-          <label for="activitySelect">
-            Вид деятельности (для оценки рисков смерти/травмы)
-            <span class="oked-hint" id="activity-hint">— список из калькулятора рентабельности (Лист2)</span>
+          <label for="activitySelect" class="activity-label-row">
+            <span>Вид деятельности (для оценки рисков смерти/травмы)
+              <span class="oked-hint" id="activity-hint">— список из калькулятора рентабельности (Лист2)</span>
+            </span>
+            <button type="button" class="btn-find-industry" onclick="App.manualStatsnetLookup(this)" title="Открыть Яндекс → statsnet.co, найти «Отрасль» и применить">
+              🔎 Найти отрасль через statsnet
+            </button>
           </label>
           <select id="activitySelect" onchange="App.onActivityChange()">
             <option value="">— загрузите справочник «Калькулятор рентабельности» —</option>

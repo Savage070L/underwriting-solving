@@ -337,6 +337,8 @@ const App = {
       if (App.zayavka.bin) {
         App.autoLookupBIN(App.zayavka.bin);
         App.autoLookupStatGov(App.zayavka.bin);
+        // statsnet — отдельно, дольше (открывает background-вкладки)
+        App.autoLookupStatsnet(App.zayavka.bin);
       }
 
       // Show preview
@@ -611,6 +613,85 @@ const App = {
     const inTo = document.getElementById('periodTo');
     if (inFrom) inFrom.value = App._dateToInputValue(z.periodFrom);
     if (inTo) inTo.value = App._dateToInputValue(z.periodTo);
+  },
+
+  // Ручной триггер statsnet-лукапа (кнопка рядом с dropdown «Вид деятельности»).
+  async manualStatsnetLookup(btn) {
+    const bin = App.zayavka?.bin;
+    if (!bin) {
+      App.showMsg('Сначала загрузите заявку — нужен БИН.', 'error');
+      return;
+    }
+    if (btn) {
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = '⏳ Ищем…';
+      try {
+        await App.autoLookupStatsnet(bin);
+        if (App.statsnet?.found && App.statsnet?.industry) {
+          App.showMsg(`Отрасль найдена: «${App.statsnet.industry}»`, 'success');
+        } else if (App.statsnet?.error) {
+          App.showMsg(App.statsnet.error, 'error');
+        } else {
+          App.showMsg('Отрасль на statsnet не найдена.', 'error');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    } else {
+      await App.autoLookupStatsnet(bin);
+    }
+  },
+
+  // ===== AUTO LOOKUP via Chrome extension (statsnet.co — «Отрасль») =====
+  // Открывает background-вкладку с Яндекс-поиском, находит ссылку на statsnet,
+  // парсит «Отрасль», закрывает вкладку. Если «Отрасль» совпадает с одной из
+  // 17 категорий калькулятора — выставляет её в dropdown «Вид деятельности»
+  // (только если пользователь не сделал ручной выбор для этого ОКЭДа).
+  async autoLookupStatsnet(bin) {
+    App.statsnet = { loading: true };
+    if (typeof StatGovClient === 'undefined') {
+      App.statsnet = { error: 'Расширение не подключено', loading: false };
+      return;
+    }
+    try {
+      const data = await StatGovClient.lookupStatsnet(bin);
+      App.statsnet = { ...data, loading: false };
+      // Применяем «Отрасль» к dropdown, если совпадает с категорией калькулятора
+      if (data?.found && data.industry) {
+        App._applyStatsnetIndustry(data.industry);
+      }
+    } catch (e) {
+      App.statsnet = { error: e.message, loading: false };
+    }
+    App.showPreview();
+  },
+
+  // Прямое сравнение «Отрасль» из statsnet с категориями калькулятора.
+  // Если найдено — выставляем в dropdown и помечаем как auto (overrideable вручную).
+  _applyStatsnetIndustry(industry) {
+    if (!industry) return;
+    const norm = (s) => String(s || '').toLowerCase()
+      .replace(/[«»"',.()]/g, '')
+      .replace(/\s+/g, ' ').trim();
+    const target = norm(industry);
+    const activities = App._calcActivities ? App._calcActivities() : [];
+    const idx = activities.findIndex(a => norm(a.name) === target);
+    if (idx < 0) return; // нет точного совпадения — оставим текущий выбор
+    // Не перезаписываем ручной выбор пользователя
+    const resolved = App._resolveOked();
+    if (resolved.oked && localStorage.getItem('manual_activity_for_oked') === resolved.oked) {
+      return;
+    }
+    // Применяем
+    const select = document.getElementById('activitySelect');
+    if (select) {
+      select.value = String(idx);
+      localStorage.setItem('selected_activity_idx', String(idx));
+      App._activityAutoForOked = resolved.oked; // пометка «авто»
+    }
+    App._renderActivityHint();
   },
 
   // ===== AUTO LOOKUP via Chrome extension (stat.gov.kz) =====

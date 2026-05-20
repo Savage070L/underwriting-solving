@@ -48,4 +48,20 @@ window.addEventListener('message', (event) => {
       );
     });
   }
+
+  if (data.type === 'STATSNET_LOOKUP') {
+    chrome.runtime.sendMessage({ type: 'STATSNET_LOOKUP', bin: data.bin }, (response) => {
+      window.postMessage(
+        {
+          source: SOURCE_BRIDGE,
+          type: 'STATSNET_LOOKUP_RESULT',
+          requestId: data.requestId,
+          ok: !!(response && response.ok),
+          data: response && response.data,
+          error: response && response.error,
+        },
+        '*',
+      );
+    });
+  }
 });
