@@ -45,8 +45,11 @@ const ProtocolGenerator = {
       alignment: AlignmentType.JUSTIFIED,
       ...opts,
     });
+    // pInd = «красная строка»: первая строка с отступом, остальные с левого края.
+    // Это критично для многострочных параграфов (повестка, по вопросу...) —
+    // иначе justify растягивает слова на всю ширину.
     const pInd = (children, opts = {}) => p(children, {
-      indent: { left: INDENT_LEFT },
+      indent: { firstLine: INDENT_LEFT },
       ...opts,
     });
 
@@ -146,7 +149,7 @@ const ProtocolGenerator = {
     paragraphs.push(pInd(trB('Результаты голосования:')));
     paragraphs.push(pInd(trB(`Председатель ${organNameShort}:`)));
     paragraphs.push(new Paragraph({
-      indent: { left: INDENT_LEFT },
+      indent: { firstLine: INDENT_LEFT },
       tabStops: [{ type: TabStopType.LEFT, position: VOTE_TAB }],
       children: [tr(chair[1]), tr('\t'), tr('- «За»')],
     }));
@@ -166,7 +169,7 @@ const ProtocolGenerator = {
     const TOT_DASH_TAB = 4200;  // позиция «-»
     const TOT_NUM_TAB = 4500;   // позиция числа
     paragraphs.push(new Paragraph({
-      indent: { left: INDENT_LEFT },
+      indent: { firstLine: INDENT_LEFT },
       tabStops: [
         { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
         { type: TabStopType.LEFT, position: TOT_DASH_TAB },
@@ -175,7 +178,7 @@ const ProtocolGenerator = {
       children: [trB('Всего голосов:'), tr('\t'), trB('«За»'), tr('\t'), tr('-'), tr('\t'), tr(String(members.length))],
     }));
     paragraphs.push(new Paragraph({
-      indent: { left: INDENT_LEFT },
+      indent: { firstLine: INDENT_LEFT },
       tabStops: [
         { type: TabStopType.LEFT, position: TOT_LABEL_TAB },
         { type: TabStopType.LEFT, position: TOT_DASH_TAB },
