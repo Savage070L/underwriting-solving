@@ -116,8 +116,8 @@ const ProtocolGenerator = {
     paragraphs.push(p(trB(`Секретарь ${organName}:`)));
     paragraphs.push(pInd(tr(`- ${secretary} – главный специалист департамента андеррайтинга и перестрахования.`)));
 
-    // === Повестка дня — с красной строкой ===
-    paragraphs.push(pInd(trB('Повестка дня:')));
+    // === Повестка дня — метка без отступа, текст с отступом ===
+    paragraphs.push(p(trB('Повестка дня:')));
     paragraphs.push(pInd(tr(
       `Рассмотрение целесообразности заключения сделки, подпадающей под лимиты ${organName} Компании – ` +
       `договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}.`
@@ -161,10 +161,10 @@ const ProtocolGenerator = {
       }));
     }
 
-    // === Всего голосов — две строки с tab-stop'ами ===
-    const TOT_LABEL_TAB = 2400; // позиция «За»/«Против»
-    const TOT_DASH_TAB = 3200;  // позиция «-»
-    const TOT_NUM_TAB = 3500;   // позиция числа
+    // === Всего голосов — две строки с tab-stop'ами (как в шаблоне) ===
+    const TOT_LABEL_TAB = 2800; // позиция «За»/«Против»
+    const TOT_DASH_TAB = 4200;  // позиция «-»
+    const TOT_NUM_TAB = 4500;   // позиция числа
     paragraphs.push(new Paragraph({
       indent: { left: INDENT_LEFT },
       tabStops: [
