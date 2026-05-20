@@ -1035,16 +1035,84 @@ const ExcelReader = {
   },
 
   // ===== READ CALCULATOR (rentabelnost) =====
-  // Resilient: finds header by labels («Вид деятельности», «смерть», «травма»),
-  // detects column positions dynamically, then reads data rows.
+  // Возвращает объект:
+  //   { activities: [{ name, deathRate, injuryRate }, ...],
+  //     okedMap:    { '07298': 'Горнодобывающая промышленность ...', ... } }
+  //
+  // Парсинг приоритезирует Лист3 (новый формат: Код 1С / Сайт / Вид деятельности /
+  // Смерть / Травма / Класс риска / Тариф) — там есть прямой маппинг ОКЭД→категория.
+  // Если Лист3 не подходит — fallback на Лист2 (старые 17 категорий без ОКЭДа,
+  // okedMap будет пуст; авто-детект по ОКЭД работать не будет, dropdown остаётся).
   readCalculator(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
-    // Try to find sheet with activity data (typically "Лист2")
+
+    // --- Попытка 1: Лист3 c маппингом ОКЭД ---
+    const v2 = ExcelReader._readCalculatorV2(wb);
+    if (v2) return v2;
+
+    // --- Fallback: Лист2 (старый формат) ---
+    const legacy = ExcelReader._readCalculatorLegacy(wb);
+    return { activities: legacy, okedMap: {} };
+  },
+
+  // Лист3: Код 1С | Сайт | Вид деятельности | Смерть | Травма | Класс риска | Тариф
+  _readCalculatorV2(wb) {
+    const ws = wb.Sheets['Лист3'];
+    if (!ws) return null;
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+    if (!data.length) return null;
+
+    const lowerOf = (v) => String(v || '').toLowerCase().trim();
+    let headerIdx = -1, cols = null;
+    for (let i = 0; i < Math.min(data.length, 5); i++) {
+      const row = data[i] || [];
+      const lc = row.map(lowerOf);
+      const okedC = lc.findIndex(s => s.includes('код') && s.includes('1с'));
+      const activityC = lc.findIndex(s => s.includes('вид') && s.includes('деятельност'));
+      const deathC = lc.findIndex(s => s.includes('смерт'));
+      const injuryC = lc.findIndex(s => s.includes('травм'));
+      if (okedC >= 0 && activityC >= 0 && deathC >= 0 && injuryC >= 0) {
+        headerIdx = i;
+        cols = { oked: okedC, activity: activityC, death: deathC, injury: injuryC };
+        break;
+      }
+    }
+    if (headerIdx === -1) return null;
+
+    const okedMap = {};
+    const activitiesMap = new Map(); // name → { name, deathRate, injuryRate }
+    for (let i = headerIdx + 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row) continue;
+      const okedRaw = row[cols.oked];
+      const activityRaw = row[cols.activity];
+      if (okedRaw == null || activityRaw == null) continue;
+      const okedStr = String(okedRaw).trim();
+      const name = String(activityRaw).trim();
+      if (!okedStr || !name) continue;
+
+      let deathRate = row[cols.death];
+      let injuryRate = row[cols.injury];
+      if (typeof deathRate === 'string' && /нет|—|-/.test(deathRate)) deathRate = 0;
+      else deathRate = Number(deathRate) || 0;
+      if (typeof injuryRate === 'string' && /нет|—|-/.test(injuryRate)) injuryRate = 0;
+      else injuryRate = Number(injuryRate) || 0;
+
+      if (!activitiesMap.has(name)) {
+        activitiesMap.set(name, { name, deathRate, injuryRate });
+      }
+      okedMap[okedStr] = name;
+    }
+    if (activitiesMap.size === 0) return null;
+    return { activities: Array.from(activitiesMap.values()), okedMap };
+  },
+
+  // Старый Лист2: только список категорий (без маппинга ОКЭД).
+  _readCalculatorLegacy(wb) {
     let ws = null;
     for (const sn of wb.SheetNames) {
       const candidate = wb.Sheets[sn];
       const sample = XLSX.utils.sheet_to_json(candidate, { header: 1, raw: true });
-      // Look for header containing "вид деятельности"
       for (let i = 0; i < Math.min(sample.length, 10); i++) {
         const row = sample[i];
         if (!row) continue;
@@ -1058,8 +1126,6 @@ const ExcelReader = {
     if (!ws) ws = wb.Sheets['Лист2'] || wb.Sheets[wb.SheetNames[1]] || wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-    // Find header row + column indexes for name/death/injury
-    // Defensive: build dense array (sparse arrays cause findIndex to pass undefined)
     const cellLowerArr = (row) => {
       const out = [];
       const len = row ? row.length : 0;
@@ -1082,7 +1148,7 @@ const ExcelReader = {
         break;
       }
     }
-    if (headerIdx === -1) headerIdx = 2; // fallback to legacy row 3
+    if (headerIdx === -1) headerIdx = 2;
 
     const activities = [];
     for (let i = headerIdx + 1; i < data.length; i++) {
@@ -1090,7 +1156,6 @@ const ExcelReader = {
       if (!row || !row[nameCol]) continue;
       const name = String(row[nameCol]).trim();
       if (!name) continue;
-      // Skip rows that look like sub-totals/footers
       if (/^итого|всего/i.test(name)) continue;
       let deathRate = row[deathCol];
       let injuryRate = row[injuryCol];

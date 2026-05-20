@@ -105,6 +105,7 @@ const App = {
           App.refData.classifier = result;
           localStorage.setItem('ref_classifier', JSON.stringify(result));
           App.onOkedChange(); // re-lookup if ОКЭД already entered
+          App.renderCompanyOkeds();
           break;
         }
         case 'affiliated': {
@@ -174,7 +175,11 @@ const App = {
         document.getElementById('analytics-cta')?.classList.add('visible');
       }
       if (p.binData) App.binData = p.binData;
-      if (App.zayavka) App.showPreview();
+      if (App.zayavka) {
+        App.showPreview();
+        // Если БИН уже известен — попытаться (фоном) перезагрузить statgov из расширения.
+        if (App.zayavka.bin) App.autoLookupStatGov(App.zayavka.bin);
+      }
     } catch (e) { console.warn('Restore case failed:', e); }
   },
   clearCaseCache() {
@@ -354,9 +359,11 @@ const App = {
   async autoLookupStatGov(bin) {
     App.statgov = { loading: true };
     App.showPreview();
+    App.renderCompanyOkeds();
     if (typeof StatGovClient === 'undefined') {
       App.statgov = { error: 'StatGovClient не подключён', loading: false };
       App.showPreview();
+      App.renderCompanyOkeds();
       return;
     }
     try {
@@ -366,6 +373,42 @@ const App = {
       App.statgov = { error: e.message, loading: false };
     }
     App.showPreview();
+    App.renderCompanyOkeds();
+    // После того как statgov загружен, _resolveOked() начнёт возвращать max-class ОКЭД —
+    // пересинхронизируем hint и автовыбор вида деятельности.
+    App.onOkedChange();
+  },
+
+  // Рендерит таблицу «ОКЭДы компании» под полем «Номер АР».
+  renderCompanyOkeds() {
+    const section = document.getElementById('company-okeds-section');
+    const tbody = document.getElementById('company-okeds-body');
+    if (!section || !tbody) return;
+    const list = App._collectCompanyOkeds();
+    if (!list.length) {
+      section.style.display = 'none';
+      tbody.innerHTML = '';
+      return;
+    }
+    section.style.display = '';
+    const resolved = App._resolveOked();
+    const activeOked = resolved.oked;
+    const fmtNum = (v) => v != null ? Number(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',') : '—';
+    const fmtTariff = (v) => v != null ? (v * 100).toFixed(2).replace('.', ',') + '%' : '—';
+    tbody.innerHTML = list.map(o => {
+      const isActive = o.code === activeOked;
+      const cls = isActive ? 'active' : '';
+      const badge = isActive ? '<span class="oked-active-badge">активный</span>' : '';
+      return `<tr class="${cls}">
+        <td><strong>${o.code}</strong> ${badge}</td>
+        <td>${o.name || '<span class="muted">— нет в классификаторе</span>'}</td>
+        <td>${fmtNum(o.deathRate)}</td>
+        <td>${fmtNum(o.injuryRate)}</td>
+        <td>${o.riskClass != null ? '<strong>' + o.riskClass + '</strong>' : '—'}</td>
+        <td>${fmtTariff(o.tariff)}</td>
+        <td>${o.kind === 'primary' ? 'осн.' : 'втор.'}</td>
+      </tr>`;
+    }).join('');
   },
 
   // ===== AUTO BIN LOOKUP via Cloudflare Worker proxy =====
@@ -703,14 +746,25 @@ const App = {
       paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
     }
 
+    // Источник имени и юр. адреса: stat.gov.kz (реестр) > заявка > pk.uchet.kz worker.
+    // Реестровые данные считаем наиболее достоверными.
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov : null;
+    const insurerName = (sg && sg.name) || z.insurerName;
+    const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '-';
+    const headFullname = (sg && sg.headFullname) || null;
+
     return {
       ...z,
+      insurerName,
       oked: effectiveOked || z.oked,
       riskClass: effectiveRiskClass,
       activity: effectiveActivity,
       docDate,
       docNumber,
-      legalAddress: App.binData.legalAddress || '-',
+      legalAddress,
+      headFullname,
+      statgov: sg, // полный объект — для генераторов, которые захотят что-то ещё
       nonResident: document.getElementById('nonResident').checked,
       isAffiliated,
       affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,
@@ -819,23 +873,81 @@ const App = {
   },
 
   // ===== Resolve effective ОКЭД, риск-класс и название деятельности =====
-  // Manual ОКЭД input overrides zayavka. Lookup in classifier resolves class+name.
+  // Приоритет:
+  //   1. Manual ОКЭД из инпута (явное намерение оператора)
+  //   2. ОКЭД с максимальным классом среди всех ОКЭДов компании из stat.gov.kz
+  //      (основной + все вторичные), если они есть и классификатор загружен
+  //   3. ОКЭД из заявки
   _resolveOked() {
     const z = App.zayavka || {};
     const manual = (document.getElementById('okedInput')?.value || '').trim();
-    const oked = manual || z.oked || '';
+    let oked = manual;
+    let source = 'manual';
+
+    if (!oked) {
+      const company = App._collectCompanyOkeds();
+      const withCls = company.filter(o => o.riskClass != null);
+      if (withCls.length > 0) {
+        withCls.sort((a, b) => b.riskClass - a.riskClass);
+        oked = withCls[0].code;
+        source = 'statgov-max-class';
+      }
+    }
+
+    if (!oked) {
+      oked = z.oked || '';
+      source = oked ? 'zayavka' : 'empty';
+    }
+
     let riskClass = z.riskClass;
     let activity = z.activity;
-    let source = manual ? 'manual' : 'zayavka';
     if (oked && App.refData.classifier) {
       const found = Utils.lookupOked(oked, App.refData.classifier);
       if (found) {
         riskClass = found.cls;
         activity = found.name;
-        source = manual ? 'manual+classifier' : 'zayavka+classifier';
+        source += '+classifier';
       }
     }
     return { oked, riskClass, activity, source };
+  },
+
+  // Собирает список всех ОКЭДов компании из stat.gov.kz и обогащает
+  // классификатором (класс, тариф) + калькулятором (смертность, травматизм).
+  // Возвращает: [{code, kind: 'primary'|'secondary', name, riskClass, deathRate, injuryRate, tariff}, ...]
+  _collectCompanyOkeds() {
+    const sg = App.statgov;
+    if (!sg || sg.loading || sg.error || sg.found === false) return [];
+    const items = [];
+    if (sg.okedPrimaryCode) {
+      items.push({ code: String(sg.okedPrimaryCode), kind: 'primary' });
+    }
+    const seen = new Set([sg.okedPrimaryCode].filter(Boolean).map(String));
+    for (const code of sg.okedSecondaryCodes || []) {
+      const c = String(code);
+      if (seen.has(c)) continue;
+      seen.add(c);
+      items.push({ code: c, kind: 'secondary' });
+    }
+    const okedMap = App._calcOkedMap ? App._calcOkedMap() : {};
+    const activities = App._calcActivities ? App._calcActivities() : [];
+    const classifier = App.refData.classifier || [];
+    return items.map(it => {
+      const clsLookup = Utils.lookupOked(it.code, classifier);
+      const classifierEntry = classifier.find(e => !e.isPrefix && e.okedRaw === it.code);
+      const calcIdx = okedMap[it.code];
+      const activity = calcIdx != null ? activities[calcIdx] : null;
+      return {
+        code: it.code,
+        kind: it.kind,
+        name: clsLookup?.name || null,
+        riskClass: clsLookup?.cls ?? null,
+        deathRate: activity?.deathRate ?? null,
+        injuryRate: activity?.injuryRate ?? null,
+        tariff: classifierEntry?.tariff ?? null,
+        activityName: activity?.name || null,
+      };
+    });
   },
 
   // ===== PAYMENT ORDER + FREQUENCY HANDLERS =====
@@ -876,44 +988,67 @@ const App = {
       if (hint) hint.textContent = App.zayavka
         ? `— пусто, используется ОКЭД из заявки (${App.zayavka.oked || '—'})`
         : '— пусто, используется ОКЭД из заявки';
-      return;
-    }
-    if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
-    if (!App.refData.classifier) {
+    } else if (!App.refData.classifier) {
+      if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
       result.classList.add('visible', 'oked-result--missing');
       result.classList.remove('oked-result--found');
       result.innerHTML = '<span class="oked-warn">⚠ Загрузите справочник «Классификатор ОКЭД» для поиска класса и деятельности</span>';
-      return;
-    }
-    const found = Utils.lookupOked(code, App.refData.classifier);
-    if (found) {
-      result.classList.add('visible', 'oked-result--found');
-      result.classList.remove('oked-result--missing');
-      const sourceTag = found.source === 'exact'
-        ? '<span class="oked-source oked-source--exact">точное совпадение</span>'
-        : '<span class="oked-source oked-source--prefix">по префиксу</span>';
-      result.innerHTML = `
-        <div class="oked-found-line">
-          <span class="oked-label">Класс риска:</span>
-          <strong class="oked-cls">${found.cls}</strong>
-          ${sourceTag}
-        </div>
-        <div class="oked-found-line">
-          <span class="oked-label">Деятельность:</span>
-          <strong class="oked-name">${found.name}</strong>
-        </div>`;
     } else {
-      result.classList.add('visible', 'oked-result--missing');
-      result.classList.remove('oked-result--found');
-      result.innerHTML = `<span class="oked-warn">⚠ ОКЭД «${code}» не найден в классификаторе</span>`;
+      if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
+      const found = Utils.lookupOked(code, App.refData.classifier);
+      if (found) {
+        result.classList.add('visible', 'oked-result--found');
+        result.classList.remove('oked-result--missing');
+        const sourceTag = found.source === 'exact'
+          ? '<span class="oked-source oked-source--exact">точное совпадение</span>'
+          : '<span class="oked-source oked-source--prefix">по префиксу</span>';
+        result.innerHTML = `
+          <div class="oked-found-line">
+            <span class="oked-label">Класс риска:</span>
+            <strong class="oked-cls">${found.cls}</strong>
+            ${sourceTag}
+          </div>
+          <div class="oked-found-line">
+            <span class="oked-label">Деятельность:</span>
+            <strong class="oked-name">${found.name}</strong>
+          </div>`;
+      } else {
+        result.classList.add('visible', 'oked-result--missing');
+        result.classList.remove('oked-result--found');
+        result.innerHTML = `<span class="oked-warn">⚠ ОКЭД «${code}» не найден в классификаторе</span>`;
+      }
     }
+    // После определения эффективного ОКЭДа — auto-выбор activity, всегда.
+    // Resolved ОКЭД может быть из заявки даже когда ручной инпут пуст.
+    App._autoSelectActivityByOked();
+    App._renderActivityHint();
+    App.renderCompanyOkeds();
   },
 
-  // ===== ACTIVITY DROPDOWN (filled from калькулятор Лист2) =====
+  // ===== ACTIVITY DROPDOWN =====
+  // Структура App.refData.calculator:
+  //   { activities: [{ name, deathRate, injuryRate }, ...], okedMap: { '07298': 'имя', ... } }
+  // Backward-compat: если в кэше лежит массив — оборачиваем.
+  _calcActivities() {
+    const c = App.refData.calculator;
+    if (!c) return [];
+    if (Array.isArray(c)) return c;
+    return c.activities || [];
+  },
+  _calcOkedMap() {
+    const c = App.refData.calculator;
+    if (!c || Array.isArray(c)) return {};
+    return c.okedMap || {};
+  },
+
+  // Trackers
+  _activityAutoForOked: null,  // ОКЭД, для которого dropdown был выставлен авто
+  _lastResolvedOked: null,     // последний resolved ОКЭД (для UI и сравнений)
+
   populateActivityDropdown() {
     const select = document.getElementById('activitySelect');
     if (!select) return;
-    const list = App.refData.calculator || [];
+    const list = App._calcActivities();
     if (!list.length) {
       select.innerHTML = '<option value="">— загрузите справочник «Калькулятор рентабельности» —</option>';
       return;
@@ -929,44 +1064,140 @@ const App = {
     if (prev != null && list[Number(prev)]) {
       select.value = prev;
     }
-    App.onActivityChange();
+    // Auto-detect по ОКЭД (если ОКЭД уже известен и не было ручного выбора).
+    App._autoSelectActivityByOked();
+    App._renderActivityHint();
   },
 
+  // user-driven event (onchange="App.onActivityChange()" в html)
   onActivityChange() {
     const select = document.getElementById('activitySelect');
-    const result = document.getElementById('activity-result');
     if (!select) return;
     const idx = select.value;
     if (idx === '' || idx == null) {
       localStorage.removeItem('selected_activity_idx');
-      if (result) {
-        result.classList.remove('visible', 'oked-result--found');
-        result.innerHTML = '';
+      localStorage.removeItem('manual_activity_for_oked');
+      App._activityAutoForOked = null;
+    } else {
+      localStorage.setItem('selected_activity_idx', String(idx));
+      // Если пользователь сам поменял — помечаем как ручной для текущего ОКЭДа.
+      if (App._lastResolvedOked) {
+        localStorage.setItem('manual_activity_for_oked', App._lastResolvedOked);
       }
+      App._activityAutoForOked = null;
+    }
+    App._renderActivityHint();
+  },
+
+  _renderActivityHint() {
+    const select = document.getElementById('activitySelect');
+    const result = document.getElementById('activity-result');
+    if (!select || !result) return;
+    const idx = select.value;
+    if (idx === '' || idx == null) {
+      result.classList.remove('visible', 'oked-result--found');
+      result.innerHTML = '';
       return;
     }
-    localStorage.setItem('selected_activity_idx', String(idx));
-    const a = (App.refData.calculator || [])[Number(idx)];
-    if (a && result) {
-      const death = (a.deathRate || 0).toFixed(3).replace('.', ',');
-      const injury = (a.injuryRate || 0).toFixed(3).replace('.', ',');
-      result.classList.add('visible', 'oked-result--found');
-      result.classList.remove('oked-result--missing');
-      result.innerHTML = `
-        <div class="oked-found-line">
-          <span class="oked-label">Коэф. смерти:</span> <strong>${death}</strong> на 1 000 чел.
-          &nbsp;&nbsp;<span class="oked-label">Коэф. травматизма:</span> <strong>${injury}</strong> на 1 000 чел.
-        </div>`;
+    const a = App._calcActivities()[Number(idx)];
+    if (!a) return;
+
+    // Контекст по самой компании: ОКЭД-название (из stat.gov.kz если есть,
+    // иначе из ОКЭД-classifier), класс риска, тариф.
+    const resolved = App._resolveOked ? App._resolveOked() : {};
+    const oked = resolved.oked || '—';
+    const statGovName = (App.statgov && !App.statgov.loading && !App.statgov.error)
+      ? App.statgov.okedPrimaryName : null;
+    const okedName = statGovName || resolved.activity || '—';
+    const riskClass = resolved.riskClass || '—';
+    const tariff = App._resolveTariff(resolved.riskClass);
+    const tariffStr = tariff != null ? Utils.fmtPct(tariff) : '—';
+
+    const isAuto = App._isAutoActivityForOked(resolved.oked);
+    const sourceTag = isAuto
+      ? '<span class="oked-source oked-source--exact">авто по ОКЭД</span>'
+      : '<span class="oked-source oked-source--prefix">выбрано вручную</span>';
+
+    result.classList.add('visible', 'oked-result--found');
+    result.classList.remove('oked-result--missing');
+    result.innerHTML = `
+      <div class="oked-found-line">
+        <span class="oked-label">ОКЭД ${oked}:</span> <strong>${okedName}</strong>
+      </div>
+      <div class="oked-found-line">
+        <span class="oked-label">Класс риска:</span> <strong>${riskClass}</strong>
+        &nbsp;&nbsp;<span class="oked-label">Тариф:</span> <strong>${tariffStr}</strong>
+        &nbsp;&nbsp;${sourceTag}
+      </div>`;
+  },
+
+  // Auto-detect = true, если для текущего ОКЭДа нет manual marker в localStorage
+  // И в окед-маппинге калькулятора этот ОКЭД присутствует.
+  _isAutoActivityForOked(oked) {
+    if (!oked) return false;
+    const okedMap = App._calcOkedMap();
+    if (!okedMap[oked]) return false;
+    return localStorage.getItem('manual_activity_for_oked') !== oked;
+  },
+
+  // Тариф: D12 заявки → popravka.riskRates[класс] → classifier.tariff[ОКЭД]
+  _resolveTariff(riskClass) {
+    const z = App.zayavka || {};
+    if (z.tariff != null && z.tariff !== '') {
+      const t = Number(z.tariff);
+      if (Number.isFinite(t)) return t;
     }
+    if (App.refData.popravka && App.refData.popravka.riskRates && riskClass) {
+      const t = App.refData.popravka.riskRates.get(riskClass);
+      if (Number.isFinite(t)) return t;
+    }
+    if (App.refData.classifier) {
+      const resolved = App._resolveOked ? App._resolveOked() : {};
+      if (resolved.oked) {
+        const entry = App.refData.classifier.find(e => !e.isPrefix && e.okedRaw === String(resolved.oked));
+        if (entry && Number.isFinite(entry.tariff)) return entry.tariff;
+      }
+    }
+    return null;
   },
 
   _getSelectedActivity() {
     const idx = localStorage.getItem('selected_activity_idx');
-    const list = App.refData.calculator || [];
+    const list = App._calcActivities();
     if (idx != null && list[Number(idx)]) {
       return list[Number(idx)];
     }
     return null;
+  },
+
+  // Авто-выбор activity по ОКЭД (если есть маппинг в калькуляторе).
+  // НЕ трогает выбор, если для текущего ОКЭДа уже был ручной (manual_activity_for_oked).
+  _autoSelectActivityByOked() {
+    const select = document.getElementById('activitySelect');
+    if (!select) return;
+    const okedMap = App._calcOkedMap();
+    const list = App._calcActivities();
+    if (!list.length) return;
+
+    const resolved = App._resolveOked ? App._resolveOked() : { oked: null };
+    const oked = resolved.oked;
+    App._lastResolvedOked = oked;
+    if (!oked || !okedMap[oked]) return;
+
+    // Если для этого ОКЭДа уже был ручной выбор — не перезаписываем.
+    if (localStorage.getItem('manual_activity_for_oked') === oked) {
+      // Но если он раньше был auto, сейчас уже не auto — снять метку.
+      App._activityAutoForOked = null;
+      return;
+    }
+
+    const name = okedMap[oked];
+    const idx = list.findIndex(a => a.name === name);
+    if (idx >= 0) {
+      select.value = String(idx);
+      localStorage.setItem('selected_activity_idx', String(idx));
+      App._activityAutoForOked = oked;
+    }
   },
 
   // ===== CACHE MANAGEMENT =====
@@ -1035,6 +1266,7 @@ const App = {
     localStorage.removeItem('ref_affiliated');
     localStorage.removeItem('manual_verdict');
     localStorage.removeItem('selected_activity_idx');
+    localStorage.removeItem('manual_activity_for_oked');
     App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null };
     App._rawNormativBuffer = null;
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated'].forEach(t => App.updateRefStatus(t, false));

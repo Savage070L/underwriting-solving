@@ -120,6 +120,28 @@
           <input type="checkbox" id="nonResident">
           <label for="nonResident">Нерезидент</label>
         </div>
+        <div class="form-group full-width" id="company-okeds-section" style="display:none">
+          <label>
+            ОКЭДы компании
+            <span class="oked-hint">— из реестра stat.gov.kz, по умолчанию активен с наивысшим классом риска</span>
+          </label>
+          <div class="company-okeds-wrap">
+            <table class="company-okeds">
+              <thead>
+                <tr>
+                  <th>Код</th>
+                  <th>Название (классификатор)</th>
+                  <th>Смерт.</th>
+                  <th>Травм.</th>
+                  <th>Класс</th>
+                  <th>Тариф</th>
+                  <th>Тип</th>
+                </tr>
+              </thead>
+              <tbody id="company-okeds-body"></tbody>
+            </table>
+          </div>
+        </div>
         <div class="form-group">
           <label for="okedInput">
             ОКЭД (если не указан в заявке)

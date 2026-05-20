@@ -114,7 +114,9 @@ function parseResultHtml(html, requestedBin) {
 
   const out = {
     bin: null, name: null, registrationDate: null,
-    okedPrimaryCode: null, okedPrimaryName: null, okedSecondaryCode: null,
+    okedPrimaryCode: null, okedPrimaryName: null,
+    okedSecondaryCode: null,         // raw value (для обратной совместимости)
+    okedSecondaryCodes: [],          // распарсенный массив
     krpWithBranchesCode: null, krpWithBranchesName: null,
     krpWithoutBranchesCode: null, krpWithoutBranchesName: null,
     kato: null, legalAddress: null, headFullname: null,
@@ -143,6 +145,14 @@ function parseResultHtml(html, requestedBin) {
       else if (!out.krpWithBranchesName) out.krpWithBranchesName = value;
       else if (!out.krpWithoutBranchesName) out.krpWithoutBranchesName = value;
     }
+  }
+
+  // Разбиваем «Вторичный код ОКЭД» (может быть «02100, 81290, 81300» в одной ячейке).
+  if (out.okedSecondaryCode) {
+    out.okedSecondaryCodes = String(out.okedSecondaryCode)
+      .split(/[\s,;/]+/)
+      .map(s => s.trim())
+      .filter(s => /^\d{4,5}$/.test(s));
   }
 
   return out;
