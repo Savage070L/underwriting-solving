@@ -22,36 +22,42 @@
       </div>
       <div class="upload-grid">
         <div class="upload-zone" id="zone-popravka" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('popravka', event)">×</button>
           <div class="uz-icon">📊</div>
           <div class="uz-label">Поправочные коэффициенты</div>
           <div class="uz-status" id="status-popravka">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('popravka', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-normativ" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('normativ', event)">×</button>
           <div class="uz-icon">📈</div>
           <div class="uz-label">Норматив</div>
           <div class="uz-status" id="status-normativ">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('normativ', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-ku" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('ku', event)">×</button>
           <div class="uz-icon">📉</div>
           <div class="uz-label">КУ по классам</div>
           <div class="uz-status" id="status-ku">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('ku', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-calculator" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('calculator', event)">×</button>
           <div class="uz-icon">🔢</div>
           <div class="uz-label">Калькулятор рентабельности</div>
           <div class="uz-status" id="status-calculator">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('calculator', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-classifier" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('classifier', event)">×</button>
           <div class="uz-icon">🗂️</div>
           <div class="uz-label">Классификатор ОКЭД</div>
           <div class="uz-status" id="status-classifier">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('classifier', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-affiliated" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить" onclick="App.clearOneRef('affiliated', event)">×</button>
           <div class="uz-icon">👥</div>
           <div class="uz-label">Аффилированные лица</div>
           <div class="uz-status" id="status-affiliated">Не загружен</div>
@@ -68,12 +74,14 @@
       </div>
       <div class="upload-grid-main">
         <div class="upload-zone-main" id="zone-zayavka" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('zayavka', event)">×</button>
           <div class="uz-icon">📋</div>
           <div class="uz-label">Заявка на андеррайтинг</div>
           <div class="uz-status" id="status-zayavka">Загрузите .xlsm файл</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadZayavka(this.files[0])">
         </div>
         <div class="upload-zone-main" id="zone-claims" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('claims', event)">×</button>
           <div class="uz-icon">📑</div>
           <div class="uz-label">История убытков</div>
           <div class="uz-status" id="status-claims">Загрузите .xls файл</div>
@@ -92,7 +100,12 @@
 
     <!-- ============ Шаг 1: Параметры страхования ============ -->
     <div class="section">
-      <div class="section-title">1. Параметры страхования</div>
+      <div class="section-title">
+        1. Параметры страхования
+        <button class="btn-refresh" onclick="App.refreshAll()" title="Перечитать stat.gov.kz, БИН-лукап и пересобрать данные">
+          🔄 Обновить данные
+        </button>
+      </div>
       <div class="section-sub">Введите/скорректируйте параметры — на их основе будут пересчитаны показатели в аналитике.</div>
       <div class="form-grid">
         <div class="form-group">
@@ -214,19 +227,6 @@
       <div class="section-sub">После анализа выберите вердикт и сгенерируйте пакет документов.</div>
       <div class="form-grid">
         <div class="form-group full-width">
-          <label for="verdict">
-            Решение по риску
-            <span class="verdict-hint" id="verdict-hint"></span>
-          </label>
-          <select id="verdict" onchange="App.onVerdictChange()">
-            <option value="auto">— Авто (по коэффициенту) —</option>
-            <option value="accept_standard">Принятие со стандартным коэффициентом</option>
-            <option value="accept_adjusted">Принятие с повышенным/пониженным коэффициентом</option>
-            <option value="reject">Отклонение в соответствии со степенью риска</option>
-            <option value="defer">Отложение страхования на определенный срок</option>
-          </select>
-        </div>
-        <div class="form-group full-width">
           <label for="riskText">Описание / анализ рисков (свободный текст)</label>
           <div class="ai-buttons-row">
             <button type="button" class="btn-ai btn-ai--chatgpt" onclick="App.copyAskAiPrompt('chatgpt', this)" title="Открыть ChatGPT с веб-поиском">
@@ -243,6 +243,19 @@
             </button>
           </div>
           <textarea id="riskText" placeholder="Опишите основную деятельность страхователя, условия работы, особенности..."></textarea>
+        </div>
+        <div class="form-group full-width">
+          <label for="verdict">
+            Решение по риску
+            <span class="verdict-hint" id="verdict-hint"></span>
+          </label>
+          <select id="verdict" onchange="App.onVerdictChange()">
+            <option value="auto">— Авто (по коэффициенту) —</option>
+            <option value="accept_standard">Принятие со стандартным коэффициентом</option>
+            <option value="accept_adjusted">Принятие с повышенным/пониженным коэффициентом</option>
+            <option value="reject">Отклонение в соответствии со степенью риска</option>
+            <option value="defer">Отложение страхования на определенный срок</option>
+          </select>
         </div>
       </div>
       <div class="organ-banner" id="organ-banner" style="display:none"></div>

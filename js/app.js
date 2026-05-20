@@ -53,7 +53,16 @@ const App = {
     if (!select || !hint) return;
     const v = select.value;
     if (v === 'auto') {
-      hint.textContent = '— определяется по коэффициенту при скачивании';
+      // Покажем что предложит auto-логика на текущих данных
+      const z = App.zayavka;
+      if (z && z.coeff != null) {
+        const decision = Utils.determineDecision(z.coeff, z.coeffDown);
+        const predicted = Utils.resolveVerdict('auto', decision);
+        const label = Utils.VERDICT_LABELS[predicted] || '';
+        hint.textContent = `— авто: «${label}»`;
+      } else {
+        hint.textContent = '— определяется по коэффициенту при скачивании';
+      }
       hint.classList.remove('manual');
     } else {
       hint.textContent = '— ручной выбор андеррайтера';
@@ -115,6 +124,8 @@ const App = {
           break;
         }
       }
+      // Сохраняем имя файла, чтобы показывать его и после перезагрузки.
+      localStorage.setItem(`ref_${type}_name`, file.name);
       App.updateRefStatus(type, true, file.name);
       App.updateRefBadge();
       App.updateButtons();
@@ -122,6 +133,76 @@ const App = {
       console.error(`Error loading ${type}:`, e);
       App.showMsg(`Ошибка загрузки ${file.name}: ${e.message}`, 'error');
     }
+  },
+
+  // Очищает один справочник (по типу) — для кнопки ❌ на карточке.
+  clearOneRef(type, ev) {
+    if (ev) ev.stopPropagation();
+    const keys = {
+      popravka: 'ref_popravka',
+      normativ: 'ref_normativ_raw',
+      ku: 'ref_ku',
+      calculator: 'ref_calculator',
+      classifier: 'ref_classifier',
+      affiliated: 'ref_affiliated',
+    };
+    if (!keys[type]) return;
+    localStorage.removeItem(keys[type]);
+    localStorage.removeItem(`ref_${type}_name`);
+    App.refData[type] = null;
+    if (type === 'normativ') App._rawNormativBuffer = null;
+    if (type === 'calculator') {
+      localStorage.removeItem('selected_activity_idx');
+      App.populateActivityDropdown();
+    }
+    App.updateRefStatus(type, false);
+    App.updateRefBadge();
+    App.renderCompanyOkeds();
+    App.onOkedChange();
+    App.showMsg(`Справочник «${type}» очищен.`, 'success');
+  },
+
+  // Принудительное обновление: пересобирает stat.gov.kz, BIN-данные,
+  // превью и таблицу ОКЭДов. Полезно после ручных изменений или
+  // если расширение было только что установлено/обновлено.
+  refreshAll() {
+    const bin = App.zayavka?.bin;
+    if (!bin) {
+      App.showMsg('Сначала загрузите заявку.', 'error');
+      return;
+    }
+    App.showMsg('Обновляем данные…', 'success');
+    App.autoLookupStatGov(bin);
+    App.autoLookupBIN(bin);
+    App.showPreview();
+    App.renderCompanyOkeds();
+    App.onOkedChange();
+    App.updateVerdictHint();
+  },
+
+  // Удаляет файл по кейсу (заявка ИЛИ история убытков).
+  clearCaseFile(which, ev) {
+    if (ev) ev.stopPropagation();
+    if (which === 'zayavka') {
+      App.zayavka = null;
+      App.statgov = null;
+      App.binData = { legalAddress: null, govParticipation: null };
+      const zoneZ = document.getElementById('zone-zayavka');
+      if (zoneZ) zoneZ.classList.remove('loaded');
+      document.getElementById('status-zayavka').textContent = 'Загрузите .xlsm файл';
+      document.getElementById('preview-panel')?.classList.remove('visible');
+      document.getElementById('bin-status').innerHTML = '';
+    } else if (which === 'claims') {
+      App.claims = null;
+      const zoneC = document.getElementById('zone-claims');
+      if (zoneC) zoneC.classList.remove('loaded');
+      document.getElementById('status-claims').textContent = 'Загрузите .xls файл';
+      document.getElementById('analytics-cta')?.classList.remove('visible');
+      document.getElementById('analytics-inline')?.classList.remove('is-open');
+    }
+    App._persistCase();
+    App.updateButtons();
+    App.showMsg('Файл удалён.', 'success');
   },
 
   // ===== CASE-FILE PERSISTENCE =====
@@ -164,14 +245,14 @@ const App = {
         const zoneZ = document.getElementById('zone-zayavka');
         if (zoneZ) zoneZ.classList.add('loaded');
         const statusZ = document.getElementById('status-zayavka');
-        if (statusZ && p.fileNames?.zayavka) statusZ.textContent = p.fileNames.zayavka + ' (из кэша)';
+        if (statusZ && p.fileNames?.zayavka) statusZ.textContent = p.fileNames.zayavka.replace(/\s*\(из кэша\)$/, '');
       }
       if (p.claims) {
         App.claims = p.claims;
         const zoneC = document.getElementById('zone-claims');
         if (zoneC) zoneC.classList.add('loaded');
         const statusC = document.getElementById('status-claims');
-        if (statusC && p.fileNames?.claims) statusC.textContent = p.fileNames.claims + ' (из кэша)';
+        if (statusC && p.fileNames?.claims) statusC.textContent = p.fileNames.claims.replace(/\s*\(из кэша\)$/, '');
         document.getElementById('analytics-cta')?.classList.add('visible');
       }
       if (p.binData) App.binData = p.binData;
@@ -258,6 +339,7 @@ const App = {
 
       App._persistCase();
       App.updateButtons();
+      App.updateVerdictHint();
     } catch (e) {
       console.error('Error loading zayavka:', e);
       App.showMsg(`Ошибка загрузки заявки: ${e.message}`, 'error');
@@ -1399,6 +1481,7 @@ const App = {
   // ===== CACHE MANAGEMENT =====
   restoreCache() {
     try {
+      const nameOf = (t) => localStorage.getItem(`ref_${t}_name`) || 'Загружен';
       // Popravka
       const popravkaStr = localStorage.getItem('ref_popravka');
       if (popravkaStr) {
@@ -1407,7 +1490,7 @@ const App = {
           riskRates: new Map(obj.riskRates),
           adjustmentCoeffs: obj.adjustmentCoeffs,
         };
-        App.updateRefStatus('popravka', true, 'из кэша');
+        App.updateRefStatus('popravka', true, nameOf('popravka'));
       }
 
       // Normativ raw buffer
@@ -1415,21 +1498,21 @@ const App = {
       if (normativBase64) {
         App._rawNormativBuffer = App._base64ToArrayBuffer(normativBase64);
         App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer);
-        App.updateRefStatus('normativ', true, 'из кэша');
+        App.updateRefStatus('normativ', true, nameOf('normativ'));
       }
 
       // KU
       const kuStr = localStorage.getItem('ref_ku');
       if (kuStr) {
         App.refData.ku = JSON.parse(kuStr);
-        App.updateRefStatus('ku', true, 'из кэша');
+        App.updateRefStatus('ku', true, nameOf('ku'));
       }
 
       // Calculator
       const calcStr = localStorage.getItem('ref_calculator');
       if (calcStr) {
         App.refData.calculator = JSON.parse(calcStr);
-        App.updateRefStatus('calculator', true, 'из кэша');
+        App.updateRefStatus('calculator', true, nameOf('calculator'));
         App.populateActivityDropdown();
       }
 
@@ -1437,14 +1520,14 @@ const App = {
       const classifierStr = localStorage.getItem('ref_classifier');
       if (classifierStr) {
         App.refData.classifier = JSON.parse(classifierStr);
-        App.updateRefStatus('classifier', true, 'из кэша');
+        App.updateRefStatus('classifier', true, nameOf('classifier'));
       }
 
       // Affiliated persons list
       const affiliatedStr = localStorage.getItem('ref_affiliated');
       if (affiliatedStr) {
         App.refData.affiliated = JSON.parse(affiliatedStr);
-        App.updateRefStatus('affiliated', true, 'из кэша');
+        App.updateRefStatus('affiliated', true, nameOf('affiliated'));
       }
 
       App.updateRefBadge();
@@ -1462,6 +1545,8 @@ const App = {
     localStorage.removeItem('ref_affiliated');
     localStorage.removeItem('manual_verdict');
     localStorage.removeItem('selected_activity_idx');
+    ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated']
+      .forEach(t => localStorage.removeItem(`ref_${t}_name`));
     localStorage.removeItem('manual_activity_for_oked');
     App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null };
     App._rawNormativBuffer = null;
