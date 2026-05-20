@@ -1056,6 +1056,7 @@ const ExcelReader = {
   },
 
   // Лист3: Код 1С | Сайт | Вид деятельности | Смерть | Травма | Класс риска | Тариф
+  // okedMap[OKED] = { activityName, deathRate, injuryRate, riskClass, tariff, okedName }
   _readCalculatorV2(wb) {
     const ws = wb.Sheets['Лист3'];
     if (!ws) return null;
@@ -1068,12 +1069,23 @@ const ExcelReader = {
       const row = data[i] || [];
       const lc = row.map(lowerOf);
       const okedC = lc.findIndex(s => s.includes('код') && s.includes('1с'));
+      const okedNameC = lc.findIndex(s => s === 'сайт' || s.includes('наименование'));
       const activityC = lc.findIndex(s => s.includes('вид') && s.includes('деятельност'));
       const deathC = lc.findIndex(s => s.includes('смерт'));
       const injuryC = lc.findIndex(s => s.includes('травм'));
+      const clsC = lc.findIndex(s => s.includes('класс') && (s.includes('риск') || s === 'класс'));
+      const tariffC = lc.findIndex(s => s.includes('тариф') || s.includes('ставк'));
       if (okedC >= 0 && activityC >= 0 && deathC >= 0 && injuryC >= 0) {
         headerIdx = i;
-        cols = { oked: okedC, activity: activityC, death: deathC, injury: injuryC };
+        cols = {
+          oked: okedC,
+          okedName: okedNameC >= 0 ? okedNameC : null,
+          activity: activityC,
+          death: deathC,
+          injury: injuryC,
+          cls: clsC >= 0 ? clsC : null,
+          tariff: tariffC >= 0 ? tariffC : null,
+        };
         break;
       }
     }
@@ -1091,17 +1103,29 @@ const ExcelReader = {
       const name = String(activityRaw).trim();
       if (!okedStr || !name) continue;
 
-      let deathRate = row[cols.death];
-      let injuryRate = row[cols.injury];
-      if (typeof deathRate === 'string' && /нет|—|-/.test(deathRate)) deathRate = 0;
-      else deathRate = Number(deathRate) || 0;
-      if (typeof injuryRate === 'string' && /нет|—|-/.test(injuryRate)) injuryRate = 0;
-      else injuryRate = Number(injuryRate) || 0;
+      const parseRate = (v) => {
+        if (typeof v === 'string' && /нет|—|-/.test(v)) return 0;
+        return Number(v) || 0;
+      };
+      const deathRate = parseRate(row[cols.death]);
+      const injuryRate = parseRate(row[cols.injury]);
+      const riskClass = cols.cls != null ? (parseInt(row[cols.cls], 10) || null) : null;
+      let tariff = cols.tariff != null ? parseFloat(String(row[cols.tariff] || '').replace(',', '.')) : null;
+      if (!Number.isFinite(tariff)) tariff = null;
+      // Если тариф похож на проценты (> 0.1), нормализуем в долю.
+      if (tariff != null && tariff > 0.1) tariff = tariff / 100;
 
       if (!activitiesMap.has(name)) {
         activitiesMap.set(name, { name, deathRate, injuryRate });
       }
-      okedMap[okedStr] = name;
+      okedMap[okedStr] = {
+        activityName: name,
+        deathRate,
+        injuryRate,
+        riskClass,
+        tariff,
+        okedName: cols.okedName != null ? String(row[cols.okedName] || '').trim() : null,
+      };
     }
     if (activitiesMap.size === 0) return null;
     return { activities: Array.from(activitiesMap.values()), okedMap };

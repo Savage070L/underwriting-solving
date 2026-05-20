@@ -930,22 +930,22 @@ const App = {
       items.push({ code: c, kind: 'secondary' });
     }
     const okedMap = App._calcOkedMap ? App._calcOkedMap() : {};
-    const activities = App._calcActivities ? App._calcActivities() : [];
     const classifier = App.refData.classifier || [];
     return items.map(it => {
+      // Калькулятор (Лист3) даёт смерть/травму/класс/тариф per-OKED — приоритет.
+      const calc = okedMap[it.code]; // объект { activityName, deathRate, injuryRate, riskClass, tariff }
+      // Классификатор — fallback по имени деятельности и тарифу.
       const clsLookup = Utils.lookupOked(it.code, classifier);
       const classifierEntry = classifier.find(e => !e.isPrefix && e.okedRaw === it.code);
-      const calcIdx = okedMap[it.code];
-      const activity = calcIdx != null ? activities[calcIdx] : null;
       return {
         code: it.code,
         kind: it.kind,
-        name: clsLookup?.name || null,
-        riskClass: clsLookup?.cls ?? null,
-        deathRate: activity?.deathRate ?? null,
-        injuryRate: activity?.injuryRate ?? null,
-        tariff: classifierEntry?.tariff ?? null,
-        activityName: activity?.name || null,
+        name: clsLookup?.name || calc?.okedName || null,
+        riskClass: (calc?.riskClass != null ? calc.riskClass : null) ?? clsLookup?.cls ?? null,
+        deathRate: calc?.deathRate ?? null,
+        injuryRate: calc?.injuryRate ?? null,
+        tariff: (calc?.tariff != null ? calc.tariff : null) ?? classifierEntry?.tariff ?? null,
+        activityName: calc?.activityName || null,
       };
     });
   },
@@ -1191,7 +1191,9 @@ const App = {
       return;
     }
 
-    const name = okedMap[oked];
+    // okedMap[oked] — это объект { activityName, ... } после миграции на Лист3
+    const entry = okedMap[oked];
+    const name = (entry && typeof entry === 'object') ? entry.activityName : entry; // обр. совм. со строкой
     const idx = list.findIndex(a => a.name === name);
     if (idx >= 0) {
       select.value = String(idx);
