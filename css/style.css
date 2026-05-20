@@ -177,12 +177,6 @@ header p {
 }
 .btn-refresh-wide:active { transform: translateY(0); }
 .btn-refresh-wide .ba-icon { font-size: 1.2rem; }
-.btn-refresh-wide .ba-hint {
-  margin-left: auto;
-  font-weight: 400;
-  font-size: 0.78rem;
-  opacity: 0.85;
-}
 .upload-zone-main:hover {
   background: #f8f9ff;
 }

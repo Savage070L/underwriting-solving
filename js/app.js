@@ -162,22 +162,32 @@ const App = {
     App.showMsg(`Справочник «${type}» очищен.`, 'success');
   },
 
-  // Принудительное обновление: пересобирает stat.gov.kz, BIN-данные,
-  // превью и таблицу ОКЭДов. Полезно после ручных изменений или
-  // если расширение было только что установлено/обновлено.
+  // Принудительное обновление: пересобирает stat.gov.kz, BIN-лукап, normativ
+  // (с учётом текущего периода), превью, таблицу ОКЭДов, тариф и verdict-hint.
+  // Excel-файлы (заявка, история убытков, справочники) уже распарсены и лежат в
+  // памяти — их «обновление из источника» возможно только повторной загрузкой
+  // через ❌ + drop, поэтому здесь обновляем только производные данные.
   refreshAll() {
     const bin = App.zayavka?.bin;
     if (!bin) {
       App.showMsg('Сначала загрузите заявку.', 'error');
       return;
     }
-    App.showMsg('Обновляем данные…', 'success');
+    // Re-read normativ с учётом текущего периода (если буфер сохранён)
+    const effectiveDate = App.zayavka.periodFrom || App.zayavka.docDate;
+    if (App._rawNormativBuffer && effectiveDate) {
+      App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
+    }
+    // Re-fetch внешних источников
     App.autoLookupStatGov(bin);
     App.autoLookupBIN(bin);
+    // Перерендер UI
     App.showPreview();
     App.renderCompanyOkeds();
     App.onOkedChange();
     App.updateVerdictHint();
+    App.updateButtons();
+    App.showMsg('Данные обновлены: stat.gov.kz, БИН-лукап, превью, ОКЭДы, тариф.', 'success');
   },
 
   // Удаляет файл по кейсу (заявка ИЛИ история убытков).
