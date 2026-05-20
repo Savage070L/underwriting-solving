@@ -252,7 +252,14 @@ const App = {
         const zoneC = document.getElementById('zone-claims');
         if (zoneC) zoneC.classList.add('loaded');
         const statusC = document.getElementById('status-claims');
-        if (statusC && p.fileNames?.claims) statusC.textContent = p.fileNames.claims.replace(/\s*\(из кэша\)$/, '');
+        if (statusC && p.fileNames?.claims) {
+          // Очистим хвосты «(из кэша)» и «(N НС за 3 года)», пересоберём текст
+          const baseName = p.fileNames.claims
+            .replace(/\s*\(из кэша\)$/, '')
+            .replace(/\s*\(\d+\s*НС\s*за\s*\d+\s*года?\)\s*$/i, '');
+          const total = App.claims?.totalClaims || 0;
+          statusC.textContent = `${baseName} (${total} НС за 3 года)`.trim();
+        }
         document.getElementById('analytics-cta')?.classList.add('visible');
       }
       if (p.binData) App.binData = p.binData;

@@ -123,23 +123,23 @@ header p {
 }
 .uz-delete {
   position: absolute;
-  top: 4px;
+  top: 6px;
   right: 6px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid #d0d5dd;
+  background: transparent;
+  border: none;
   border-radius: 4px;
-  color: #98a2b3;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  opacity: 0.4;
+  transition: opacity 0.15s, transform 0.15s;
   z-index: 2;
+  padding: 0;
 }
 .upload-zone:hover .uz-delete,
 .upload-zone-main:hover .uz-delete,
@@ -148,26 +148,40 @@ header p {
   opacity: 1;
 }
 .uz-delete:hover {
-  background: #fee4e2;
-  color: #d92d20;
-  border-color: #fda29b;
+  transform: scale(1.15);
 }
-.btn-refresh {
-  margin-left: auto;
-  padding: 6px 12px;
-  background: #f0f2f5;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: #344054;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.btn-refresh:hover {
-  background: #4361ee;
+
+/* Полноширочная кнопка «Обновить данные» — стиль как у btn-analytics */
+.btn-refresh-wide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+  border: none;
+  border-radius: 8px;
   color: white;
-  border-color: #4361ee;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  box-shadow: 0 2px 4px rgba(67, 97, 238, 0.2);
+}
+.btn-refresh-wide:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(67, 97, 238, 0.3);
+  opacity: 0.95;
+}
+.btn-refresh-wide:active { transform: translateY(0); }
+.btn-refresh-wide .ba-icon { font-size: 1.2rem; }
+.btn-refresh-wide .ba-hint {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.78rem;
+  opacity: 0.85;
 }
 .upload-zone-main:hover {
   background: #f8f9ff;
