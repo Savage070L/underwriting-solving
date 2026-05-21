@@ -953,13 +953,20 @@ const ExcelReader = {
       headerIdx = 0; // fallback
     }
 
-    // Шаг 2: находим последнюю строку с данными ≤ docDate (или самую последнюю)
+    // Шаг 2: находим последнюю строку с данными ≤ docDate (или самую последнюю).
+    //
+    // Файл Норматив датируется первым числом месяца («1/5/26» = срез на 01.05.2026,
+    // данные на конец апреля). Раньше использовалось `rowDate < targetMonth` —
+    // это отрезало строку «1/5/26» при docDate в мае, из-за чего после загрузки
+    // майского файла данные «не обновлялись». Используем `≤` (по год+месяц,
+    // чтобы избежать timezone-сдвига SheetJS cellDates).
     let bestRow = null;
     let bestDate = null;
-    const targetMonth = docDate
+    let bestYM = -Infinity;
+    const targetYM = docDate
       ? (() => {
           const t = Utils.parseExcelDate(docDate);
-          return t ? new Date(t.getFullYear(), t.getMonth(), 1) : null;
+          return t ? t.getFullYear() * 12 + t.getMonth() : null;
         })()
       : null;
 
@@ -971,14 +978,14 @@ const ExcelReader = {
       if (!(rowDate instanceof Date)) rowDate = Utils.parseExcelDate(rowDate);
       if (!rowDate) continue;
 
-      if (targetMonth) {
-        if (rowDate < targetMonth) {
-          if (!bestDate || rowDate > bestDate) { bestDate = rowDate; bestRow = row; }
+      const rowYM = rowDate.getFullYear() * 12 + rowDate.getMonth();
+      if (targetYM != null) {
+        if (rowYM <= targetYM) {
+          if (rowYM > bestYM) { bestYM = rowYM; bestDate = rowDate; bestRow = row; }
         }
       } else {
         // Без docDate — самая последняя строка с данными
-        bestRow = row;
-        bestDate = rowDate;
+        if (rowYM > bestYM) { bestYM = rowYM; bestRow = row; bestDate = rowDate; }
       }
     }
 
