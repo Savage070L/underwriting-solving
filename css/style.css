@@ -170,6 +170,82 @@ header p {
   transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
   box-shadow: 0 2px 4px rgba(67, 97, 238, 0.2);
 }
+
+/* Manual input card (alternative to заявка upload) */
+.manual-input-card {
+  margin-top: 14px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+}
+.manual-input-head { margin-bottom: 12px; }
+.manual-input-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+.manual-input-sub {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+.manual-input-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .manual-input-grid { grid-template-columns: 1fr 1fr; }
+}
+.manual-input-hint {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+.manual-input-hint.manual-input-hint--ok { color: #047857; }
+.manual-input-hint.manual-input-hint--err { color: #b91c1c; }
+.manual-input-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.btn-manual-apply {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+.btn-manual-apply:hover { transform: translateY(-1px); opacity: 0.95; box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3); }
+.btn-manual-apply:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Disabled / computed inputs in manual card */
+.manual-input-grid input:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+  border-color: #cbd5e1;
+}
+.manual-field-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  background: #e0f2fe;
+  color: #0369a1;
+  border-radius: 8px;
+  vertical-align: middle;
+  text-transform: lowercase;
+}
 .btn-refresh-wide:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(67, 97, 238, 0.3);

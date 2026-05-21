@@ -283,9 +283,26 @@ const App = {
       if (p.binData) App.binData = p.binData;
       if (App.zayavka) {
         App._fillDateInputs();
+        // Восстановить значения в форме ручного ввода, если кейс был создан вручную
+        if (App.zayavka._manual) {
+          const binEl = document.getElementById('manualBin');
+          const wEl = document.getElementById('manualWorkers');
+          const fEl = document.getElementById('manualFot');
+          const aEl = document.getElementById('manualAvgSalary');
+          if (binEl) binEl.value = App.zayavka.bin || '';
+          if (wEl) wEl.value = App.zayavka.workers || '';
+          const fotVal = App.zayavka.fot != null ? App.zayavka.fot : App.zayavka.insuranceSum;
+          if (fEl) fEl.value = fotVal != null ? App._toInputNumber(fotVal) : '';
+          if (aEl) aEl.value = App.zayavka.avgSalary != null ? App._toInputNumber(App.zayavka.avgSalary) : '';
+          App._manualPrimary = App.zayavka._manualPrimary || 'fot';
+          App._syncManualFields();
+          App._updateManualHint();
+        }
         App.showPreview();
         // Если БИН уже известен — попытаться (фоном) перезагрузить statgov из расширения.
         if (App.zayavka.bin) App.autoLookupStatGov(App.zayavka.bin);
+        // Пересчёт премии для manual режима (тариф мог измениться в справочниках)
+        App._recalcManualPremium();
       }
     } catch (e) { console.warn('Restore case failed:', e); }
   },
@@ -370,6 +387,276 @@ const App = {
     } catch (e) {
       console.error('Error loading zayavka:', e);
       App.showMsg(`Ошибка загрузки заявки: ${e.message}`, 'error');
+    }
+  },
+
+  // ===== MANUAL ZAYAVKA INPUT (без файла) =====
+  // Пользователь вводит БИН + кол-во работников + ФОТ годовой ИЛИ среднюю ЗП.
+  // Из БИНа автоподтягиваются: наименование, ОКЭДы, КРП, КФС, КАТО, адрес, гос.участие.
+  // ОКЭД → класс риска → тариф → премия = ФОТ × тариф.
+
+  // Какое из двух полей (fot|avg) ввёл пользователь — определяет, какое второе
+  // блокируется и заполняется посчитанным значением. null = оба пустые.
+  _manualPrimary: null,
+
+  // Округление до 2 знаков (тиыны) без float-noise. Возвращает Number.
+  _round2(x) {
+    if (!Number.isFinite(x)) return x;
+    return Math.round(x * 100) / 100;
+  },
+
+  // Форматирование Number → строка для type="number" (точка, без лишних нулей)
+  _toInputNumber(x) {
+    if (!Number.isFinite(x)) return '';
+    const r = App._round2(x);
+    return Number.isInteger(r) ? String(r) : r.toFixed(2);
+  },
+
+  // Главный обработчик input для полей ручного ввода.
+  // source: 'bin' | 'workers' | 'fot' | 'avg' — кто триггернул событие.
+  onManualInput(source) {
+    const fotEl = document.getElementById('manualFot');
+    const avgEl = document.getElementById('manualAvgSalary');
+    const wEl = document.getElementById('manualWorkers');
+    if (!fotEl || !avgEl || !wEl) return;
+
+    // Определить primary, исходя из событий пользователя
+    if (source === 'fot') {
+      const v = Number(fotEl.value);
+      App._manualPrimary = (fotEl.value.trim() !== '' && Number.isFinite(v) && v > 0) ? 'fot' : null;
+    } else if (source === 'avg') {
+      const v = Number(avgEl.value);
+      App._manualPrimary = (avgEl.value.trim() !== '' && Number.isFinite(v) && v > 0) ? 'avg' : null;
+    }
+    // Если очистили primary — снять primary, разблокировать оба и очистить второе
+    if (App._manualPrimary === null && source !== 'bin' && source !== 'workers') {
+      fotEl.disabled = false; avgEl.disabled = false;
+      const tagF = document.getElementById('tag-fot');
+      const tagA = document.getElementById('tag-avg');
+      if (tagF) tagF.style.display = 'none';
+      if (tagA) tagA.style.display = 'none';
+      if (source === 'fot') avgEl.value = '';
+      if (source === 'avg') fotEl.value = '';
+    }
+    App._syncManualFields();
+    App._updateManualHint();
+  },
+
+  // Применяет правила mutual-exclusive: блокирует второе поле, выставляет
+  // посчитанное значение если доступны workers.
+  _syncManualFields() {
+    const fotEl = document.getElementById('manualFot');
+    const avgEl = document.getElementById('manualAvgSalary');
+    const wEl = document.getElementById('manualWorkers');
+    const tagF = document.getElementById('tag-fot');
+    const tagA = document.getElementById('tag-avg');
+    if (!fotEl || !avgEl || !wEl) return;
+
+    const workers = Number(wEl.value);
+    const okWorkers = Number.isFinite(workers) && workers > 0;
+    const fotVal = Number(fotEl.value);
+    const avgVal = Number(avgEl.value);
+
+    if (App._manualPrimary === 'fot' && Number.isFinite(fotVal) && fotVal > 0) {
+      avgEl.disabled = true;
+      fotEl.disabled = false;
+      if (tagF) tagF.style.display = 'none';
+      if (okWorkers) {
+        avgEl.value = App._toInputNumber(fotVal / workers / 12);
+        if (tagA) tagA.style.display = '';
+      } else {
+        avgEl.value = '';
+        if (tagA) tagA.style.display = 'none';
+      }
+    } else if (App._manualPrimary === 'avg' && Number.isFinite(avgVal) && avgVal > 0) {
+      fotEl.disabled = true;
+      avgEl.disabled = false;
+      if (tagA) tagA.style.display = 'none';
+      if (okWorkers) {
+        fotEl.value = App._toInputNumber(avgVal * workers * 12);
+        if (tagF) tagF.style.display = '';
+      } else {
+        fotEl.value = '';
+        if (tagF) tagF.style.display = 'none';
+      }
+    } else {
+      // Нет primary — оба активны и без меток
+      fotEl.disabled = false;
+      avgEl.disabled = false;
+      if (tagF) tagF.style.display = 'none';
+      if (tagA) tagA.style.display = 'none';
+    }
+  },
+
+  // Обновляет нижнюю подсказку (зелёная/красная/нейтральная).
+  _updateManualHint() {
+    const hint = document.getElementById('manual-hint');
+    if (!hint) return;
+    const bin = (document.getElementById('manualBin')?.value || '').trim();
+    const workers = Number(document.getElementById('manualWorkers')?.value);
+    const fot = Number(document.getElementById('manualFot')?.value);
+    const avg = Number(document.getElementById('manualAvgSalary')?.value);
+    const okBin = /^\d{12}$/.test(bin);
+    const okWorkers = Number.isFinite(workers) && workers > 0;
+    const hasFot = Number.isFinite(fot) && fot > 0;
+    const hasAvg = Number.isFinite(avg) && avg > 0;
+    const primary = App._manualPrimary;
+    const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
+
+    let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
+    let cls = '';
+    if (okBin && okWorkers && effFot > 0) {
+      const fmtRu = (x) => App._round2(x).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const source = primary === 'fot' || (hasFot && primary == null)
+        ? 'указан напрямую'
+        : `= ${fmtRu(avg)} ₸ × ${workers} × 12 мес.`;
+      msg = `Готово к применению: ФОТ = ${fmtRu(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
+      cls = 'manual-input-hint--ok';
+    } else {
+      const missing = [];
+      if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
+      if (!okWorkers) missing.push('кол-во работников > 0');
+      if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
+      if (missing.length) {
+        msg = 'Не хватает: ' + missing.join(', ') + '.';
+        cls = 'manual-input-hint--err';
+      }
+    }
+    hint.textContent = msg;
+    hint.classList.remove('manual-input-hint--ok', 'manual-input-hint--err');
+    if (cls) hint.classList.add(cls);
+  },
+
+  applyManualZayavka() {
+    const bin = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
+    const workersStr = document.getElementById('manualWorkers')?.value;
+    const fotStr = document.getElementById('manualFot')?.value;
+    const avgStr = document.getElementById('manualAvgSalary')?.value;
+
+    if (!/^\d{12}$/.test(bin)) {
+      App.showMsg('Введите корректный БИН (12 цифр).', 'error');
+      return;
+    }
+    const workers = Number(workersStr);
+    if (!Number.isFinite(workers) || workers <= 0) {
+      App.showMsg('Введите количество работников (целое число > 0).', 'error');
+      return;
+    }
+    // ФОТ и avg — точная арифметика без округления до целых.
+    // Тиыны (2 знака после запятой) сохраняются для всех денежных полей.
+    let fotRaw = Number(fotStr);
+    const avgRaw = Number(avgStr);
+    const primary = App._manualPrimary; // 'fot' | 'avg' | null
+    let fot;
+    let avgSalary = null;
+    if (primary === 'avg') {
+      if (!Number.isFinite(avgRaw) || avgRaw <= 0) {
+        App.showMsg('Введите среднюю зарплату > 0.', 'error');
+        return;
+      }
+      avgSalary = App._round2(avgRaw);
+      fot = App._round2(avgSalary * workers * 12);
+    } else {
+      // primary='fot' или null — приоритет полю ФОТ
+      if (!Number.isFinite(fotRaw) || fotRaw <= 0) {
+        if (Number.isFinite(avgRaw) && avgRaw > 0) {
+          avgSalary = App._round2(avgRaw);
+          fot = App._round2(avgSalary * workers * 12);
+        } else {
+          App.showMsg('Заполните ФОТ годовой или среднюю зарплату.', 'error');
+          return;
+        }
+      } else {
+        fot = App._round2(fotRaw);
+        // Производная средняя ЗП (для отображения и аналитики)
+        avgSalary = App._round2(fot / workers / 12);
+      }
+    }
+
+    const today = new Date();
+    const { from, to } = App._computePeriodFromDocDate(today);
+
+    App.zayavka = {
+      _manual: true,
+      _manualPrimary: primary, // запомнить, чтобы корректно восстановить на reload
+      insurerName: '',
+      bin,
+      region: '',
+      docDate: today,
+      insuranceType: Utils.INSURANCE_TYPE,
+      activity: '',
+      riskClass: null,
+      tariff: null,
+      insuranceSum: fot, // с тиынами
+      workers: Math.round(workers),
+      coeff: 1,
+      coeffDown: 0,
+      premiumBase: null,
+      premiumWithCoeff: null,
+      paymentOrder: 'Единовременно',
+      govParticipation: '',
+      periodFrom: from,
+      periodTo: to,
+      oked: '',
+      // Доп. поля — для UI/аналитики, не используются напрямую генераторами
+      fot: fot,
+      avgSalary: avgSalary,
+    };
+
+    // Пересчитать норматив на дату договора (если справочник загружен)
+    if (App._rawNormativBuffer) {
+      App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, from);
+    }
+
+    // Подставить даты в инпуты периода страхования
+    App._fillDateInputs();
+
+    // Пометить «карточку заявки» как загруженную (ручной ввод тоже считается)
+    const zone = document.getElementById('zone-zayavka');
+    if (zone) zone.classList.add('loaded');
+    const statusZ = document.getElementById('status-zayavka');
+    if (statusZ) statusZ.textContent = `Ручной ввод — БИН ${bin}`;
+
+    // Запустить автолукапы (БИН-Worker + stat.gov.kz + statsnet).
+    // Эти вызовы async, но они сами синхронно вызывают showPreview/renderCompanyOkeds.
+    App.autoLookupBIN(bin);
+    App.autoLookupStatGov(bin);
+    App.autoLookupStatsnet(bin);
+
+    // Первый показ превью (statgov ещё loading)
+    App.showPreview();
+    App.onOkedChange(); // запустит _recalcManualPremium
+    App._persistCase();
+    App.updateButtons();
+    App.updateVerdictHint();
+    App.showMsg('Данные приняты. Идёт поиск по реестрам — премия пересчитается автоматически.', 'success');
+  },
+
+  // Пересчитывает тариф/премию для зайавки в ручном режиме.
+  // Вызывается из onOkedChange (которая срабатывает после autoLookupStatGov,
+  // загрузки classifier/popravka, и ручных изменений в #okedInput).
+  // Точная арифметика: премия = страх.сумма × тариф округляется только до тиынов.
+  _recalcManualPremium() {
+    const z = App.zayavka;
+    if (!z || !z._manual) return;
+    const resolved = App._resolveOked();
+    const tariff = App._resolveTariff(resolved.riskClass);
+    let changed = false;
+    if (resolved.oked && z.oked !== resolved.oked) { z.oked = resolved.oked; changed = true; }
+    if (resolved.riskClass != null && z.riskClass !== resolved.riskClass) { z.riskClass = resolved.riskClass; changed = true; }
+    if (resolved.activity && z.activity !== resolved.activity) { z.activity = resolved.activity; changed = true; }
+    if (Number.isFinite(tariff) && Number.isFinite(z.insuranceSum)) {
+      const base = App._round2(z.insuranceSum * tariff);
+      const coeffEff = (z.coeffDown != null && z.coeffDown !== 0) ? (1 - z.coeffDown) : 1;
+      const withCoeff = App._round2(base * (z.coeff || 1) * coeffEff);
+      if (z.tariff !== tariff) { z.tariff = tariff; changed = true; }
+      if (z.premiumBase !== base) { z.premiumBase = base; changed = true; }
+      if (z.premiumWithCoeff !== withCoeff) { z.premiumWithCoeff = withCoeff; changed = true; }
+    }
+    if (changed) {
+      App.showPreview();
+      App.updateButtons();
+      App._persistCase();
     }
   },
 
@@ -1439,6 +1726,8 @@ const App = {
     App._autoSelectActivityByOked();
     App._renderActivityHint();
     App.renderCompanyOkeds();
+    // Для ручного режима пересчитать премию (после resolved ОКЭД/класса)
+    App._recalcManualPremium();
   },
 
   // ===== ACTIVITY DROPDOWN =====

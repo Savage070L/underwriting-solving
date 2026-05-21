@@ -89,6 +89,42 @@
         </div>
       </div>
 
+      <!-- Manual input alternative — без заявки: БИН + ФОТ/ЗП + работники → остальное парсится автоматически -->
+      <div class="manual-input-card">
+        <div class="manual-input-head">
+          <div class="manual-input-title">Или введите вручную (без заявки)</div>
+          <div class="manual-input-sub">БИН → реестр stat.gov.kz даст наименование, ОКЭД, КРП, адрес и пр. ФОТ × тариф = страховая премия.</div>
+        </div>
+        <div class="manual-input-grid">
+          <div class="form-group">
+            <label for="manualBin">БИН / ИИН</label>
+            <input type="text" id="manualBin" inputmode="numeric" maxlength="12" placeholder="12 цифр" oninput="App.onManualInput('bin')">
+          </div>
+          <div class="form-group">
+            <label for="manualWorkers">Количество работников</label>
+            <input type="number" id="manualWorkers" min="1" step="1" placeholder="например: 25" oninput="App.onManualInput('workers')">
+          </div>
+          <div class="form-group">
+            <label for="manualFot">
+              ФОТ годовой, ₸
+              <span class="manual-field-tag" id="tag-fot" style="display:none">посчитано</span>
+            </label>
+            <input type="number" id="manualFot" min="0" step="0.01" placeholder="например: 36 000 000" oninput="App.onManualInput('fot')">
+          </div>
+          <div class="form-group">
+            <label for="manualAvgSalary">
+              Средняя зарплата, ₸/мес
+              <span class="manual-field-tag" id="tag-avg" style="display:none">посчитано</span>
+            </label>
+            <input type="number" id="manualAvgSalary" min="0" step="0.01" placeholder="ИЛИ заполните вместо ФОТ" oninput="App.onManualInput('avg')">
+          </div>
+        </div>
+        <div class="manual-input-hint" id="manual-hint">Заполните БИН, количество работников и хотя бы одно из: ФОТ или среднюю ЗП.</div>
+        <div class="manual-input-actions">
+          <button class="btn-manual-apply" id="btn-manual-apply" onclick="App.applyManualZayavka()">Применить</button>
+        </div>
+      </div>
+
       <!-- Preview panel -->
       <div class="preview-panel" id="preview-panel">
         <div class="preview-grid" id="preview-grid"></div>
