@@ -73,6 +73,63 @@ const App = {
     }
   },
 
+  // Проверка БИН на присутствие в реестре аффилированных лиц.
+  // Возвращает entry {id, name} или null.
+  _isAffiliatedBin(bin) {
+    if (!bin || !App.refData.affiliated) return null;
+    const clean = String(bin).trim().replace(/\s+/g, '');
+    return App.refData.affiliated.find(e => e.id === clean) || null;
+  },
+
+  // Сводка по «эффективным» финансовым параметрам с учётом всех overrides:
+  //   - аффилированное лицо: страх.сумма = 85 000 × работники × 12, организация = «СД»
+  //   - молодая компания / НС: скидка не применяется (через _effectiveCoeffInfo)
+  // Используется в showPreview и в _collectData — единый источник правды.
+  _effectiveFinancials(z) {
+    if (!z) return null;
+    const aff = App._isAffiliatedBin(z.bin);
+    const isAffiliated = !!aff;
+
+    // Страховая сумма (с overridом для аффилированных)
+    let insuranceSum = z.insuranceSum;
+    if (isAffiliated && Number.isFinite(z.workers) && z.workers > 0) {
+      insuranceSum = App._round2(Utils.AFFILIATED_AVG_SALARY * z.workers * 12);
+    }
+
+    // Тариф из текущего ОКЭДа / справочника
+    const resolved = App._resolveOked ? App._resolveOked() : { riskClass: z.riskClass, oked: z.oked };
+    const tariff = App._resolveTariff(resolved.riskClass);
+
+    // Базовая премия = страх.сумма × тариф (если оба известны), иначе из z
+    let premiumBase = z.premiumBase;
+    if (Number.isFinite(insuranceSum) && Number.isFinite(tariff)) {
+      premiumBase = App._round2(insuranceSum * tariff);
+    }
+
+    // Эффективный коэффициент (учёт young/НС)
+    const _z2 = { ...z, insuranceSum, premiumBase };
+    const effCoeff = App._effectiveCoeffInfo(_z2);
+
+    // Орган: для аффилированных всегда СД, иначе по правилам
+    const assetsTenge = App.refData.normativ?.fullAssetsTenge || 0;
+    const organ = Utils.determineOrgan(insuranceSum, resolved.riskClass, assetsTenge, isAffiliated);
+
+    return {
+      isAffiliated,
+      affiliatedEntry: aff,
+      insuranceSum,
+      tariff,
+      premiumBase,
+      premiumWithCoeff: effCoeff.premiumWithCoeff,
+      coeffDown: effCoeff.coeffDown,
+      noDiscountReason: effCoeff.noDiscountReason,
+      ageYears: effCoeff.ageYears,
+      avgSalary: isAffiliated ? Utils.AFFILIATED_AVG_SALARY : App._effectiveAvgSalary(z),
+      organ,
+      docPackage: Utils.determineDocPackage(organ),
+    };
+  },
+
   // Эффективные значения коэффициента и премии-с-поправкой с учётом правил:
   //  - НС за последние 3 года → скидка не применяется
   //  - Возраст компании < 3 лет → скидка не применяется (даже при отсутствии НС)
@@ -627,6 +684,8 @@ const App = {
 
   // Применяет правила mutual-exclusive: блокирует второе поле, выставляет
   // посчитанное значение если доступны workers.
+  // Для аффилированных лиц: оба поля заблокированы, avg=85 000 (фикс. ставка),
+  // ФОТ автоматически = 85 000 × работники × 12.
   _syncManualFields() {
     const fotEl = document.getElementById('manualFot');
     const avgEl = document.getElementById('manualAvgSalary');
@@ -639,6 +698,27 @@ const App = {
     const okWorkers = Number.isFinite(workers) && workers > 0;
     const fotVal = App._parseMoney(fotEl.value);
     const avgVal = App._parseMoney(avgEl.value);
+    const binStr = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
+    const aff = App._isAffiliatedBin(binStr);
+
+    if (aff) {
+      // Affiliated: фиксируем avg=85 000, ФОТ авто-считается из работников
+      avgEl.value = App._formatMoney(Utils.AFFILIATED_AVG_SALARY);
+      avgEl.disabled = true;
+      fotEl.disabled = true;
+      if (tagA) { tagA.style.display = ''; tagA.textContent = 'фикс. 85 000 ₸/мес'; }
+      if (okWorkers) {
+        fotEl.value = App._formatMoney(Utils.AFFILIATED_AVG_SALARY * workers * 12);
+        if (tagF) { tagF.style.display = ''; tagF.textContent = 'посчитано'; }
+      } else {
+        fotEl.value = '';
+        if (tagF) tagF.style.display = 'none';
+      }
+      App._manualPrimary = 'avg'; // условно — для согласованности при apply
+      return;
+    }
+    // Сбросить «фикс. 85 000» подпись на «посчитано», если БИН перестал быть аффилированным
+    if (tagA) tagA.textContent = 'посчитано';
 
     if (App._manualPrimary === 'fot' && Number.isFinite(fotVal) && fotVal > 0) {
       avgEl.disabled = true;
@@ -672,38 +752,54 @@ const App = {
   },
 
   // Обновляет нижнюю подсказку (зелёная/красная/нейтральная).
+  // Для аффилированных лиц — другая подсказка: фикс. ставка, пакет СД.
   _updateManualHint() {
     const hint = document.getElementById('manual-hint');
     if (!hint) return;
     const bin = (document.getElementById('manualBin')?.value || '').trim();
+    const cleanBin = bin.replace(/\s+/g, '');
     const workers = Number(document.getElementById('manualWorkers')?.value);
     const fot = App._readMoneyInput('manualFot');
     const avg = App._readMoneyInput('manualAvgSalary');
-    const okBin = /^\d{12}$/.test(bin);
+    const okBin = /^\d{12}$/.test(cleanBin);
     const okWorkers = Number.isFinite(workers) && workers > 0;
     const hasFot = Number.isFinite(fot) && fot > 0;
     const hasAvg = Number.isFinite(avg) && avg > 0;
     const primary = App._manualPrimary;
-    const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
+    const aff = okBin ? App._isAffiliatedBin(cleanBin) : null;
 
     let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
     let cls = '';
-    if (okBin && okWorkers && effFot > 0) {
-      const source = primary === 'fot' || (hasFot && primary == null)
-        ? 'указан напрямую'
-        : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
-      msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
-      cls = 'manual-input-hint--ok';
-    } else {
-      const missing = [];
-      if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
-      if (!okWorkers) missing.push('кол-во работников > 0');
-      if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
-      if (missing.length) {
-        msg = 'Не хватает: ' + missing.join(', ') + '.';
+
+    if (aff) {
+      if (!okWorkers) {
+        msg = `⚠ Аффилированное лицо «${aff.name || cleanBin}» — укажите количество работников. Применится фиксированная ставка ${App._formatMoney(Utils.AFFILIATED_AVG_SALARY)} ₸/мес, пакет документов: СД.`;
         cls = 'manual-input-hint--err';
+      } else {
+        const fixedFot = Utils.AFFILIATED_AVG_SALARY * workers * 12;
+        msg = `АФФИЛИРОВАННОЕ ЛИЦО «${aff.name || cleanBin}»: фикс. ставка ${App._formatMoney(Utils.AFFILIATED_AVG_SALARY)} ₸/мес × ${workers} × 12 = ${App._formatMoney(fixedFot)} ₸. Пакет документов: СД (АР · Заключение · СЗ на Правление · СЗ на СД).`;
+        cls = 'manual-input-hint--ok';
+      }
+    } else {
+      const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
+      if (okBin && okWorkers && effFot > 0) {
+        const source = primary === 'fot' || (hasFot && primary == null)
+          ? 'указан напрямую'
+          : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
+        msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
+        cls = 'manual-input-hint--ok';
+      } else {
+        const missing = [];
+        if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
+        if (!okWorkers) missing.push('кол-во работников > 0');
+        if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
+        if (missing.length) {
+          msg = 'Не хватает: ' + missing.join(', ') + '.';
+          cls = 'manual-input-hint--err';
+        }
       }
     }
+
     hint.textContent = msg;
     hint.classList.remove('manual-input-hint--ok', 'manual-input-hint--err');
     if (cls) hint.classList.add(cls);
@@ -723,14 +819,18 @@ const App = {
       App.showMsg('Введите количество работников (целое число > 0).', 'error');
       return;
     }
-    // ФОТ и avg — точная арифметика без округления до целых.
-    // Тиыны (2 знака после запятой) сохраняются для всех денежных полей.
+    // Для аффилированных лиц — фикс. ставка 85 000 ₸/мес × работники × 12;
+    // ФОТ и средняя ЗП из формы игнорируются.
+    const aff = App._isAffiliatedBin(bin);
     const fotRaw = App._readMoneyInput('manualFot');
     const avgRaw = App._readMoneyInput('manualAvgSalary');
     const primary = App._manualPrimary; // 'fot' | 'avg' | null
     let fot;
     let avgSalary = null;
-    if (primary === 'avg') {
+    if (aff) {
+      avgSalary = Utils.AFFILIATED_AVG_SALARY;
+      fot = App._round2(avgSalary * workers * 12);
+    } else if (primary === 'avg') {
       if (!Number.isFinite(avgRaw) || avgRaw <= 0) {
         App.showMsg('Введите среднюю зарплату > 0.', 'error');
         return;
@@ -940,9 +1040,8 @@ const App = {
     if (sg?.sectorName) sec3.push(['Наименование сектора экономики', sg.sectorName]);
     sec3.push(['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)']);
 
-    // Эффективные значения с учётом 3-летнего возраста + НС.
-    // Скидка (понижающий коэффициент) не применяется если есть НС или возраст < 3 лет.
-    const effInfo = App._effectiveCoeffInfo(z);
+    // Эффективные финансы с учётом overrides (аффилирован, young, НС).
+    const effFin = App._effectiveFinancials(z);
 
     // ========== СЕКЦИЯ 4: Параметры договора ==========
     const sec4 = [
@@ -951,14 +1050,20 @@ const App = {
       ['Период страхования', (z.periodFrom && z.periodTo)
         ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}` : '—'],
       ['Работники', Utils.fmtInteger(z.workers)],
-      ['Страховая сумма', Utils.fmtMoney(z.insuranceSum)],
-      ['Премия', Utils.fmtMoney(z.premiumBase)],
-      ['Премия с поправкой', Utils.fmtMoney(effInfo.premiumWithCoeff)],
+      ['Страховая сумма', Utils.fmtMoney(effFin.insuranceSum)],
+      ['Премия', Utils.fmtMoney(effFin.premiumBase)],
+      ['Премия с поправкой', Utils.fmtMoney(effFin.premiumWithCoeff)],
       ['Порядок оплаты', z.paymentOrder],
     ];
-    if (effInfo.noDiscountReason === 'young_company') {
-      sec4.push(['⚠ Скидка не применяется', `компания младше 3 лет (возраст ≈ ${effInfo.ageYears.toFixed(1)} г.)`]);
-    } else if (effInfo.noDiscountReason === 'claims') {
+    if (effFin.isAffiliated) {
+      sec4.push([
+        'ℹ Аффилированное лицо',
+        `ставка ${Utils.fmtMoney(Utils.AFFILIATED_AVG_SALARY)}/мес, пакет СД (страх. сумма = ${Utils.fmtMoney(effFin.insuranceSum)})`,
+      ]);
+    }
+    if (effFin.noDiscountReason === 'young_company') {
+      sec4.push(['⚠ Скидка не применяется', `компания младше 3 лет (возраст ≈ ${effFin.ageYears.toFixed(1)} г.)`]);
+    } else if (effFin.noDiscountReason === 'claims') {
       sec4.push(['⚠ Скидка не применяется', 'были НС за последние 3 года']);
     }
 
@@ -1609,28 +1714,22 @@ const App = {
     // согласован с тем, что показывает UI.
     z.docDate = effectiveDocDate;
 
-    // Скидка (понижающий поправочный коэффициент) не применяется, если:
-    //   1. У страхователя были НС за последние 3 года (claimsCount > 0)
-    //   2. Компания младше 3 лет на момент начала договора
-    // Логика централизована в App._effectiveCoeffInfo(z) — используется в showPreview и здесь.
-    // Подменяем z.periodFrom/docDate на эффективные даты для расчёта возраста.
+    // Эффективные финансы и организация — централизованно через _effectiveFinancials.
+    // Для аффилированных лиц: страх.сумма = 85 000 × работники × 12, орган = СД.
+    // Для молодых компаний (< 3 лет) или с НС: скидка не применяется.
     const _zWithDates = { ...z, periodFrom, docDate: effectiveDocDate };
-    const effInfo = App._effectiveCoeffInfo(_zWithDates);
-    const effectiveCoeffDown = effInfo.coeffDown;
-    const premiumWithCoeff = effInfo.premiumWithCoeff;
-    const noDiscountReason = effInfo.noDiscountReason;
+    const effFin = App._effectiveFinancials(_zWithDates);
+    const effectiveCoeffDown = effFin.coeffDown;
+    const premiumWithCoeff = effFin.premiumWithCoeff;
+    const noDiscountReason = effFin.noDiscountReason;
+    const effectiveInsuranceSum = effFin.insuranceSum;
+    const effectivePremiumBase = effFin.premiumBase;
+    const forcedOrgan = effFin.organ; // 'sd' для аффилированных, иначе из правил
+    const isAffiliated = effFin.isAffiliated;
+    const affiliatedEntry = effFin.affiliatedEntry;
     const regDateRaw = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov.registrationDate : null;
     const ageRefDate = periodFrom || effectiveDocDate || new Date();
-
-    // Check if страхователь is affiliated (BIN/IIN match)
-    let isAffiliated = false;
-    let affiliatedEntry = null;
-    if (z.bin && App.refData.affiliated) {
-      const cleanBin = String(z.bin).trim().replace(/\s+/g, '');
-      affiliatedEntry = App.refData.affiliated.find(e => e.id === cleanBin) || null;
-      isAffiliated = !!affiliatedEntry;
-    }
 
     // Payment schedule (form takes priority over zayavka D19)
     const formOrder = document.getElementById('paymentOrder')?.value || 'Единовременно';
@@ -1685,6 +1784,11 @@ const App = {
       nonResident: document.getElementById('nonResident').checked,
       isAffiliated,
       affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,
+      // Эффективные финансы (overrides для аффилированных): перетирают z.insuranceSum / premiumBase
+      insuranceSum: effectiveInsuranceSum,
+      premiumBase: effectivePremiumBase,
+      // Орган: 'sd' для аффилированных, иначе по правилам
+      organ: forcedOrgan,
       paymentOrder: paymentOrderEff,
       paymentFrequency: paymentFreqEff,
       paymentTranches: paymentTranches ? paymentTranches.map(d => d.toISOString()) : null,
@@ -1739,17 +1843,15 @@ const App = {
     const btnSzPr = document.getElementById('btnSzPravlenie');
     const btnSzSd = document.getElementById('btnSzSd');
 
-    // Determine organ from current data
+    // Determine organ from current data — учитывает affiliated override.
+    // Используем _effectiveFinancials, чтобы для аффилированных всегда был СД,
+    // а страх. сумма пересчитана от 85 000 × работники × 12.
     let organ = null;
     let pkg = ['ar', 'zakl'];
     if (hasZayavka) {
-      const assets = App.refData.normativ?.fullAssetsTenge || 0;
-      organ = Utils.determineOrgan(
-        App.zayavka.insuranceSum,
-        App.zayavka.riskClass,
-        assets,
-      );
-      pkg = Utils.determineDocPackage(organ);
+      const effFin = App._effectiveFinancials(App.zayavka);
+      organ = effFin.organ;
+      pkg = effFin.docPackage;
     }
 
     if (btnProto) btnProto.disabled = !hasZayavka || !pkg.includes('protocol');
@@ -1765,10 +1867,13 @@ const App = {
     // Update organ-banner with determined body
     const banner = document.getElementById('organ-banner');
     if (banner) {
+      const isAff = hasZayavka && App._isAffiliatedBin(App.zayavka.bin);
       if (organ && organ !== 'standard') {
         banner.style.display = 'block';
         banner.className = 'organ-banner organ-banner--' + organ;
-        const descr = Utils.describeOrgan(organ);
+        const descr = isAff
+          ? `Совет директоров (аффилированное лицо — пакет СД независимо от страх. суммы)`
+          : Utils.describeOrgan(organ);
         const pkgNames = pkg.map(p => ({
           ar: 'АР', zakl: 'Заключение', protocol: 'Протокол',
           sz_pravlenie: 'СЗ на Правление', sz_sd: 'СЗ на СД',

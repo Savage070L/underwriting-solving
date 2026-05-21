@@ -15,6 +15,11 @@ const Utils = {
   LIMIT_AS_HIGH: 10000000000,          // 10 млрд верхняя граница АС
   LIMIT_SD_ASSETS_RATIO: 0.25,         // 25 % от активов — порог СД
 
+  // Аффилированные лица: фиксированная ставка средней ЗП (₸/мес).
+  // Страховая сумма = AFFILIATED_AVG_SALARY × работники × 12.
+  // Пакет документов — всегда СД (Совет директоров), независимо от страх. суммы.
+  AFFILIATED_AVG_SALARY: 85000,
+
   // Совет директоров (адресат СЗ на СД)
   SD_CHAIR_ROLE: 'Председатель Совета директоров',
   SD_CHAIR_NAME: 'М.К. Альжанов',
@@ -260,10 +265,12 @@ const Utils = {
   },
 
   // Determine which collegial body approves this risk.
-  // Signature: determineOrgan(insuranceSum, riskClass?, companyAssets?)
+  // Signature: determineOrgan(insuranceSum, riskClass?, companyAssets?, isAffiliated?)
+  // - 4 args → если isAffiliated=true, всегда 'sd' (для аффилированных лиц)
   // - 3 args → full logic: sd / pravlenie / as / standard
   // - 1 arg → legacy 3-billion threshold for backward compat
-  determineOrgan(insuranceSum, riskClass, companyAssets) {
+  determineOrgan(insuranceSum, riskClass, companyAssets, isAffiliated) {
+    if (isAffiliated) return 'sd';
     if (riskClass != null || companyAssets != null) {
       return Utils.determineOrganNew(insuranceSum, riskClass, companyAssets);
     }
