@@ -95,7 +95,7 @@ const Utils = {
     const dd = String(date.getDate()).padStart(2, '0');
     const month = Utils.RUSSIAN_MONTHS[date.getMonth()];
     const yyyy = date.getFullYear();
-    return `«${dd}» ${month} ${yyyy}г.`;
+    return `«${dd}» ${month} ${yyyy}г.`;
   },
 
   // Format date as DD.MM.YYYYг.
@@ -416,6 +416,49 @@ const Utils = {
     const months = (to.getFullYear() - from.getFullYear()) * 12 +
       (to.getMonth() - from.getMonth());
     return months || 12;
+  },
+
+  // Парсит дату регистрации компании из строки. Поддержка форматов:
+  //   "01.02.2003"  — DD.MM.YYYY (stat.gov.kz Russian)
+  //   "2003-02-01"  — ISO
+  //   Date object
+  parseCompanyRegDate(raw) {
+    if (!raw) return null;
+    if (raw instanceof Date) return isNaN(raw) ? null : raw;
+    const s = String(raw).trim();
+    // DD.MM.YYYY
+    let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (m) {
+      const d = new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+      return isNaN(d) ? null : d;
+    }
+    // YYYY-MM-DD
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) {
+      const d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+      return isNaN(d) ? null : d;
+    }
+    // Generic Date parse fallback
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  },
+
+  // Возвращает возраст компании в годах от refDate (по умолчанию — сегодня).
+  // null, если дата регистрации некорректна.
+  companyAgeYears(regDateRaw, refDate) {
+    const reg = Utils.parseCompanyRegDate(regDateRaw);
+    if (!reg) return null;
+    const ref = refDate ? new Date(refDate) : new Date();
+    if (isNaN(ref)) return null;
+    return (ref - reg) / (365.25 * 24 * 3600 * 1000);
+  },
+
+  // Молодая компания (< 3 лет) — скидка не применяется даже при отсутствии НС.
+  // Returns true|false|null (null если дата неизвестна).
+  isYoungCompany(regDateRaw, refDate) {
+    const age = Utils.companyAgeYears(regDateRaw, refDate);
+    if (age == null) return null;
+    return age < 3;
   },
 
   // Format company name properly: "Жасыл ел тараз тоо" → "ТОО «Жасыл Ел-Тараз»"

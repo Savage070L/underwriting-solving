@@ -73,6 +73,64 @@ const App = {
     }
   },
 
+  // Эффективные значения коэффициента и премии-с-поправкой с учётом правил:
+  //  - НС за последние 3 года → скидка не применяется
+  //  - Возраст компании < 3 лет → скидка не применяется (даже при отсутствии НС)
+  // Возвращает { coeffDown, premiumWithCoeff, noDiscountReason, ageYears }.
+  _effectiveCoeffInfo(z) {
+    if (!z) return { coeffDown: 0, premiumWithCoeff: 0, noDiscountReason: null, ageYears: null };
+    const claimsCount = App.claims ? App.claims.totalClaims : 0;
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov : null;
+    const regDateRaw = sg?.registrationDate || null;
+    const refDate = z.periodFrom || z.docDate || new Date();
+    const ageYears = Utils.companyAgeYears(regDateRaw, refDate);
+    const isYoung = ageYears != null && ageYears < 3;
+    const noDiscountReason = (claimsCount > 0)
+      ? 'claims'
+      : (isYoung ? 'young_company' : null);
+    const coeffDown = noDiscountReason ? 0 : (z.coeffDown || 0);
+    const premiumWithCoeff = (noDiscountReason && z.premiumBase)
+      ? z.premiumBase
+      : (z.premiumWithCoeff != null ? z.premiumWithCoeff : z.premiumBase);
+    return { coeffDown, premiumWithCoeff, noDiscountReason, ageYears };
+  },
+
+  // Эффективная средняя зарплата (₸/мес): из z.avgSalary (manual режим),
+  // иначе из ФОТ годового / работников / 12. null если данных нет.
+  _effectiveAvgSalary(z) {
+    if (!z) return null;
+    if (Number.isFinite(z.avgSalary) && z.avgSalary > 0) return z.avgSalary;
+    const fot = z.fot != null ? z.fot : z.insuranceSum;
+    if (Number.isFinite(fot) && fot > 0 && Number.isFinite(z.workers) && z.workers > 0) {
+      return fot / z.workers / 12;
+    }
+    return null;
+  },
+
+  // Обновляет alert «средняя зарплата ниже 85 000 ₸» (для андеррайтера).
+  // Порог пока информационный — без эффекта на расчёты.
+  AVG_SALARY_THRESHOLD: 85000,
+  _updateAvgSalaryAlert() {
+    const el = document.getElementById('avg-salary-alert');
+    if (!el) return;
+    const z = App.zayavka;
+    const avg = App._effectiveAvgSalary(z);
+    if (avg == null || avg >= App.AVG_SALARY_THRESHOLD) {
+      el.classList.remove('visible');
+      el.innerHTML = '';
+      return;
+    }
+    const fmt = (x) => App._formatMoney(x);
+    el.classList.add('visible');
+    el.innerHTML =
+      `<div class="asa-icon">⚠</div>` +
+      `<div class="asa-body">` +
+        `<div class="asa-title">Средняя зарплата ниже ${fmt(App.AVG_SALARY_THRESHOLD)} ₸</div>` +
+        `<div class="asa-desc">Расчётная средняя ЗП ≈ <b>${fmt(avg)} ₸/мес</b>. Это ниже информационного порога <b>${fmt(App.AVG_SALARY_THRESHOLD)} ₸</b> — обратите внимание андеррайтера.</div>` +
+      `</div>`;
+  },
+
   // ===== UNIVERSAL DERIVED-STATE REFRESH =====
   // Прогоняет всю цепочку зависимостей: ОКЭД→классификатор→тариф→премия,
   // превью, таблица ОКЭДов компании, кнопки (орган зависит от активов),
@@ -90,6 +148,8 @@ const App = {
     App.updateButtons();
     // 4. Verdict-hint
     App.updateVerdictHint();
+    // 4b. Alert «средняя ЗП ниже 85 000 ₸» (информационный для андеррайтера)
+    App._updateAvgSalaryAlert();
     // 5. Обновить snapshot аналитики, чтобы при повторном открытии
     //    standalone-окна / iframe — данные были свежие.
     if (App.claims && App.claims.analytics) {
@@ -205,8 +265,39 @@ const App = {
     App.showMsg(`Справочник «${type}» очищен.`, 'success');
   },
 
+  // Сбрасывает «надпись над договором» состояния формы: номер документа,
+  // описание рисков, вердикт, нерезидент, порядок оплаты, ручной ОКЭД.
+  // Период страхования re-вычисляется из docDate (если есть).
+  _resetFormState() {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('docNumber', '');
+    set('riskText', '');
+    set('okedInput', '');
+    set('paymentOrder', 'Единовременно');
+    set('paymentFrequency', 'month');
+    const nr = document.getElementById('nonResident');
+    if (nr) nr.checked = false;
+    const verdictSel = document.getElementById('verdict');
+    if (verdictSel) verdictSel.value = 'auto';
+    localStorage.removeItem('manual_verdict');
+    localStorage.removeItem('manual_activity_for_oked');
+    // Период — если есть зайавка с docDate, пересчитываем; иначе очищаем
+    if (App.zayavka?.docDate) {
+      const { from, to } = App._computePeriodFromDocDate(App.zayavka.docDate);
+      App.zayavka.periodFrom = from;
+      App.zayavka.periodTo = to;
+      App._fillDateInputs();
+    } else {
+      set('periodFrom', '');
+      set('periodTo', '');
+    }
+    App.onOkedChange();
+    App.onPaymentChange();
+    App.updateVerdictHint();
+  },
+
   // Принудительное обновление: re-парсит normativ из буфера на текущую дату,
-  // re-fetch БИН-лукап + stat.gov.kz, прогоняет _refreshDerivedData.
+  // re-fetch БИН-лукап + stat.gov.kz, СБРАСЫВАЕТ форму, прогоняет _refreshDerivedData.
   // Работает в т.ч. без зайавки — обновляет всё, что можем.
   refreshAll() {
     // Re-read normativ с учётом текущего периода (если буфер сохранён)
@@ -216,6 +307,8 @@ const App = {
     if (App._rawNormativBuffer) {
       App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
     }
+    // Сброс формы (вердикт, описание, доп. поля) — пользователь явно жмёт «обновить»
+    App._resetFormState();
     // Re-fetch внешних источников (если БИН известен)
     const bin = App.zayavka?.bin;
     if (bin) {
@@ -225,8 +318,8 @@ const App = {
     App._refreshDerivedData();
     App.showMsg(
       bin
-        ? 'Данные обновлены: справочники, stat.gov.kz, БИН-лукап, превью, ОКЭДы, тариф, премия.'
-        : 'Справочники применены ко всем зависимым UI-компонентам.',
+        ? 'Данные обновлены и форма сброшена: справочники, stat.gov.kz, БИН-лукап, превью, ОКЭДы, тариф, премия.'
+        : 'Справочники применены, форма сброшена.',
       'success'
     );
   },
@@ -365,6 +458,9 @@ const App = {
     if (!file) return;
     try {
       const buf = await App._readFile(file);
+      // Сбрасываем форму перед загрузкой новой зайавки — чтобы вердикт, описание,
+      // нерезидент, способ оплаты и др. не «утекали» с предыдущего кейса.
+      App._resetFormState();
       App.zayavka = ExcelReader.readZayavka(buf);
 
       // Период страхования всегда: F3 + 1 день → F3 + 1 год.
@@ -702,6 +798,11 @@ const App = {
     // Подставить даты в инпуты периода страхования
     App._fillDateInputs();
 
+    // Сбросить состояние формы предыдущего кейса (вердикт, описание, нерезидент и пр.).
+    // Делаем ПОСЛЕ присвоения App.zayavka, чтобы _resetFormState мог пересчитать
+    // период из новой docDate.
+    App._resetFormState();
+
     // Пометить «карточку заявки» как загруженную (ручной ввод тоже считается)
     const zone = document.getElementById('zone-zayavka');
     if (zone) zone.classList.add('loaded');
@@ -717,6 +818,7 @@ const App = {
     // Первый показ превью (statgov ещё loading)
     App.showPreview();
     App.onOkedChange(); // запустит _recalcManualPremium
+    App._updateAvgSalaryAlert();
     App._persistCase();
     App.updateButtons();
     App.updateVerdictHint();
@@ -838,6 +940,10 @@ const App = {
     if (sg?.sectorName) sec3.push(['Наименование сектора экономики', sg.sectorName]);
     sec3.push(['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)']);
 
+    // Эффективные значения с учётом 3-летнего возраста + НС.
+    // Скидка (понижающий коэффициент) не применяется если есть НС или возраст < 3 лет.
+    const effInfo = App._effectiveCoeffInfo(z);
+
     // ========== СЕКЦИЯ 4: Параметры договора ==========
     const sec4 = [
       ['Регион', z.region || '—'],
@@ -847,9 +953,14 @@ const App = {
       ['Работники', Utils.fmtInteger(z.workers)],
       ['Страховая сумма', Utils.fmtMoney(z.insuranceSum)],
       ['Премия', Utils.fmtMoney(z.premiumBase)],
-      ['Премия с поправкой', Utils.fmtMoney(z.premiumWithCoeff)],
+      ['Премия с поправкой', Utils.fmtMoney(effInfo.premiumWithCoeff)],
       ['Порядок оплаты', z.paymentOrder],
     ];
+    if (effInfo.noDiscountReason === 'young_company') {
+      sec4.push(['⚠ Скидка не применяется', `компания младше 3 лет (возраст ≈ ${effInfo.ageYears.toFixed(1)} г.)`]);
+    } else if (effInfo.noDiscountReason === 'claims') {
+      sec4.push(['⚠ Скидка не применяется', 'были НС за последние 3 года']);
+    }
 
     const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     const renderItems = (rows) => rows.map(([l, v]) => {
@@ -994,12 +1105,19 @@ const App = {
   },
 
   // Ручной триггер statsnet-лукапа (кнопка рядом с dropdown «Вид деятельности»).
+  // Принудительно перетирает ручной выбор: пользователь явно нажал «найти отрасль»,
+  // значит хочет применить результат statsnet поверх любого предыдущего выбора.
+  // Если результат окажется ошибочным — пользователь снова вручную выберет нужный.
   async manualStatsnetLookup(btn) {
     const bin = App.zayavka?.bin;
     if (!bin) {
       App.showMsg('Сначала загрузите заявку — нужен БИН.', 'error');
       return;
     }
+    // Снять маркер «ручной выбор для этого ОКЭДа», чтобы _applyStatsnetIndustry
+    // не короткозамкнул и применил найденную «Отрасль».
+    localStorage.removeItem('manual_activity_for_oked');
+    App._activityAutoForOked = null;
     if (btn) {
       btn.disabled = true;
       const orig = btn.textContent;
@@ -1007,7 +1125,7 @@ const App = {
       try {
         await App.autoLookupStatsnet(bin);
         if (App.statsnet?.found && App.statsnet?.industry) {
-          App.showMsg(`Отрасль найдена: «${App.statsnet.industry}»`, 'success');
+          App.showMsg(`Отрасль найдена: «${App.statsnet.industry}» — применено`, 'success');
         } else if (App.statsnet?.error) {
           App.showMsg(App.statsnet.error, 'error');
         } else {
@@ -1491,16 +1609,19 @@ const App = {
     // согласован с тем, что показывает UI.
     z.docDate = effectiveDocDate;
 
-    // If there were any claims (НС > 0), discount does not apply
-    const claimsCount = App.claims ? App.claims.totalClaims : 0;
-    const effectiveCoeffDown = claimsCount > 0 ? 0 : z.coeffDown;
-
-    // Recalculate premium with adjusted coefficient if needed
-    let premiumWithCoeff = z.premiumWithCoeff;
-    if (claimsCount > 0 && z.premiumBase) {
-      // No discount — premium stays at base
-      premiumWithCoeff = z.premiumBase;
-    }
+    // Скидка (понижающий поправочный коэффициент) не применяется, если:
+    //   1. У страхователя были НС за последние 3 года (claimsCount > 0)
+    //   2. Компания младше 3 лет на момент начала договора
+    // Логика централизована в App._effectiveCoeffInfo(z) — используется в showPreview и здесь.
+    // Подменяем z.periodFrom/docDate на эффективные даты для расчёта возраста.
+    const _zWithDates = { ...z, periodFrom, docDate: effectiveDocDate };
+    const effInfo = App._effectiveCoeffInfo(_zWithDates);
+    const effectiveCoeffDown = effInfo.coeffDown;
+    const premiumWithCoeff = effInfo.premiumWithCoeff;
+    const noDiscountReason = effInfo.noDiscountReason;
+    const regDateRaw = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov.registrationDate : null;
+    const ageRefDate = periodFrom || effectiveDocDate || new Date();
 
     // Check if страхователь is affiliated (BIN/IIN match)
     let isAffiliated = false;
@@ -1528,7 +1649,9 @@ const App = {
     // считаем наиболее достоверным. Заявка / pk.uchet.kz — fallback.
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
-    const insurerName = (sg && sg.name) || z.insurerName;
+    // Fallback на «(наименование не определено)» — иначе в СЗ строки вроде
+    // «сделки с компанией – ${companyName}» дают «– .» при пустом name.
+    const insurerName = (sg && sg.name) || z.insurerName || '(наименование не определено)';
     const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '-';
     const headFullname = (sg && sg.headFullname) || null;
 
@@ -1569,6 +1692,8 @@ const App = {
       periodFrom,
       periodTo,
       coeffDown: effectiveCoeffDown,
+      noDiscountReason, // 'claims' | 'young_company' | null
+      companyAgeYears: Utils.companyAgeYears(regDateRaw, ageRefDate),
       premiumWithCoeff,
       tariff,
       claims: App.claims,

@@ -252,6 +252,37 @@ header p {
 .btn-manual-apply:hover { transform: translateY(-1px); opacity: 0.95; box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3); }
 .btn-manual-apply:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+/* Alert: средняя ЗП < 85 000 ₸ (информационный для андеррайтера) */
+.avg-salary-alert {
+  display: none;
+  margin-top: 14px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 2px solid #f59e0b;
+  border-radius: 10px;
+  gap: 14px;
+  align-items: flex-start;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
+}
+.avg-salary-alert.visible { display: flex; }
+.avg-salary-alert .asa-icon {
+  font-size: 1.7rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.avg-salary-alert .asa-body { flex: 1; }
+.avg-salary-alert .asa-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 4px;
+}
+.avg-salary-alert .asa-desc {
+  font-size: 0.83rem;
+  color: #78350f;
+  line-height: 1.5;
+}
+
 /* Disabled / computed inputs in manual card */
 .manual-input-grid input:disabled {
   background: #f1f5f9;

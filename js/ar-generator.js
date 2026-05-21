@@ -217,9 +217,11 @@ const ARGenerator = {
     };
 
     // Column widths sum to COL_TOTAL (≈ 9638)
-    const SIG_COL_NAME = 6038;
+    // Дата «« «DD» месяц YYYYг. » + NBSP внутри занимает до 1800 twips в TNR 8pt —
+    // даём 2038 twips, чтобы строка не переносилась даже для длинных месяцев («сентября»).
+    const SIG_COL_NAME = 5400;
     const SIG_COL_LINE = 2200;
-    const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE; // 1400
+    const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE;
 
     const sigRow = (nameText) => new TableRow({
       children: [

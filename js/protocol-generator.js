@@ -66,8 +66,10 @@ const ProtocolGenerator = {
     const day = String(docDate.getDate()).padStart(2, '0');
     const monthNom = ProtocolGenerator.MONTHS_NOM[docDate.getMonth()];
     const year = docDate.getFullYear();
-    const dateLine = `«${day}» ${monthNom} ${year} г.`;
-    const dateDot = `${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г.`;
+    // NBSP ( ) между числом, месяцем, годом и «г.» — чтобы дата подписи
+    // не переносилась по словам в узкой колонке табличного подписного блока.
+    const dateLine = `«${day}» ${monthNom} ${year} г.`;
+    const dateDot = `${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г.`;
 
     const companyName = Utils.formatCompanyName(data.insurerName);
     const docNumber = data.docNumber || '13';
@@ -203,7 +205,10 @@ const ProtocolGenerator = {
     // ============================================
     // ПОДПИСНОЙ БЛОК (8pt) — без красной строки
     // ============================================
-    const SIG_COL_NAME = 6038;
+    // Подбор ширин: длинная строка вроде «Заместитель председателя Правления, член Правления – Кныкова А.У.»
+    // ≈ 4100 twips в TNR 8pt → 5400 для имени даёт запас; «« «10» сентября 2026 г. » ≈ 1800 →
+    // даём 2038 twips дате, чтобы она помещалась в одну строку. NBSP в dateLine — дополнительная страховка.
+    const SIG_COL_NAME = 5400;
     const SIG_COL_LINE = 2200;
     const SIG_COL_DATE = COL_TOTAL - SIG_COL_NAME - SIG_COL_LINE;
     const noBorderStyle = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
