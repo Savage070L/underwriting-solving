@@ -1316,8 +1316,10 @@ const App = {
   // (только если пользователь не сделал ручной выбор для этого ОКЭДа).
   async autoLookupStatsnet(bin) {
     App.statsnet = { loading: true };
+    App._renderActivityDiagnostics(); // показать «⏳ идёт поиск»
     if (typeof StatGovClient === 'undefined') {
       App.statsnet = { error: 'Расширение не подключено', loading: false };
+      App._renderActivityDiagnostics();
       return;
     }
     try {
@@ -1331,6 +1333,8 @@ const App = {
       App.statsnet = { error: e.message, loading: false };
     }
     App.showPreview();
+    // Перерисовать диагностику — теперь известен результат statsnet
+    App._renderActivityDiagnostics();
   },
 
   // Сравнение «Отрасль» из statsnet с категориями калькулятора.
@@ -2179,6 +2183,112 @@ const App = {
     App._renderActivityHint();
   },
 
+  // Диагностика выбора «Вид деятельности» — лог под dropdown.
+  // Объясняет ОПЕРАТОРУ:
+  //   1. что сказал statsnet (найдена ли отрасль для текущего БИНа)
+  //   2. что есть в таблице калькулятора по текущему ОКЭДу
+  //   3. что в итоге выбрано и почему именно так
+  // Особенно полезно когда auto-detect не сработал — видно, в чём причина.
+  _renderActivityDiagnostics() {
+    const el = document.getElementById('activity-diagnostics');
+    if (!el) return;
+    const bin = App.zayavka?.bin || '—';
+    const resolved = App._resolveOked ? App._resolveOked() : {};
+    const oked = resolved.oked || '';
+    const okedMap = App._calcOkedMap();
+    const calcLoaded = !!App.refData?.calculator;
+    const select = document.getElementById('activitySelect');
+    const selIdx = select?.value;
+    const activities = App._calcActivities();
+    const selActivity = (selIdx !== '' && selIdx != null) ? activities[Number(selIdx)] : null;
+
+    // --- 1. statsnet ---
+    const sn = App.statsnet || null;
+    let snLine, snCls;
+    if (!sn) {
+      snLine = '— ещё не запускался (нажмите «🔎 Найти отрасль через statsnet»)';
+      snCls = 'ad-value--muted';
+    } else if (sn.loading) {
+      snLine = '⏳ идёт поиск (statsnet.co через background-вкладку)…';
+      snCls = 'ad-value--muted';
+    } else if (sn.error) {
+      snLine = `⚠ ${sn.error}`;
+      snCls = 'ad-value--warn';
+    } else if (sn.found === false) {
+      snLine = `⚠ по БИН ${bin} отрасль не найдена в statsnet.co`;
+      snCls = 'ad-value--warn';
+    } else if (sn.found && sn.industry) {
+      // Был ли match с категориями калькулятора?
+      const match = App._findActivityByIndustry ? App._findActivityByIndustry(sn.industry) : null;
+      if (match) {
+        snLine = `✓ найдено «${sn.industry}» → совпало с категорией №${match.idx + 1} «${match.name}» (${match.kind}, score ${match.score.toFixed(2)})`;
+        snCls = 'ad-value--ok';
+      } else {
+        snLine = `✓ найдено «${sn.industry}», но НЕ совпало ни с одной из ${activities.length} категорий калькулятора — нужен ручной выбор`;
+        snCls = 'ad-value--warn';
+      }
+    } else {
+      snLine = '—';
+      snCls = 'ad-value--muted';
+    }
+
+    // --- 2. Таблица (калькулятор Лист3 — okedMap) ---
+    let tableLine, tableCls;
+    if (!calcLoaded) {
+      tableLine = '⚠ калькулятор рентабельности не загружен — загрузите справочник';
+      tableCls = 'ad-value--err';
+    } else if (!oked) {
+      tableLine = '— ОКЭД не определён (загрузите заявку или укажите вручную)';
+      tableCls = 'ad-value--muted';
+    } else if (okedMap[oked]) {
+      const entry = okedMap[oked];
+      const name = (entry && typeof entry === 'object') ? entry.activityName : entry;
+      const idx = activities.findIndex(a => a.name === name);
+      tableLine = `✓ по ОКЭД ${oked} → «${name}»${idx >= 0 ? ` (категория №${idx + 1})` : ' (категория не нашлась в списке Лист2)'}`;
+      tableCls = 'ad-value--ok';
+    } else {
+      // Нет в okedMap — ищем по префиксу для подсказки
+      const prefixHits = Object.keys(okedMap).filter(k => k.startsWith(String(oked).slice(0, 2))).slice(0, 3);
+      tableLine = `⚠ для ОКЭД ${oked} нет маппинга в калькуляторе (Лист3)`;
+      if (prefixHits.length) {
+        tableLine += `. Близкие ОКЭДы с маппингом: ${prefixHits.join(', ')}`;
+      }
+      tableCls = 'ad-value--warn';
+    }
+
+    // --- 3. Итог — что в итоге в dropdown ---
+    let resultLine, resultCls, reasonLine;
+    if (!selActivity) {
+      resultLine = '✗ не выбрано';
+      resultCls = 'ad-value--err';
+      if (!calcLoaded) reasonLine = 'Причина: калькулятор не загружен.';
+      else if (!oked) reasonLine = 'Причина: ОКЭД не определён.';
+      else if (!okedMap[oked]) reasonLine = `Причина: ОКЭД ${oked} отсутствует в маппинге калькулятора, statsnet ${(sn?.found ? 'не дал совпадения' : 'не нашёл отрасль')} — выберите вид деятельности вручную.`;
+      else reasonLine = 'Причина: не выбрано (хотя маппинг по ОКЭДу есть — кликните «Применить» или сбросьте ручную метку).';
+    } else {
+      const isManual = oked && localStorage.getItem('manual_activity_for_oked') === oked;
+      const fromStatsnetMatch = (sn?.found && sn.industry && App._findActivityByIndustry?.(sn.industry)?.idx === Number(selIdx));
+      let source;
+      if (isManual) source = 'ручной выбор';
+      else if (App._activityAutoForOked === oked) source = fromStatsnetMatch ? 'auto из statsnet-match' : 'auto по ОКЭД';
+      else if (fromStatsnetMatch) source = 'из statsnet-match';
+      else source = 'из последнего сохранённого выбора';
+      resultLine = `✓ «${selActivity.name}» <span class="ad-hint">(источник: ${source})</span>`;
+      resultCls = 'ad-value--ok';
+    }
+
+    const row = (label, value, cls) =>
+      `<div class="ad-row"><span class="ad-label">${label}</span><span class="ad-value ${cls || ''}">${value}</span></div>`;
+
+    el.classList.add('visible');
+    el.innerHTML =
+      `<div class="ad-title">🔍 Диагностика выбора деятельности</div>` +
+      row('statsnet:', snLine, snCls) +
+      row('таблица:', tableLine, tableCls) +
+      row('итог:', resultLine, resultCls) +
+      (reasonLine ? `<div class="ad-hint">${reasonLine}</div>` : '');
+  },
+
   _renderActivityHint() {
     const select = document.getElementById('activitySelect');
     const result = document.getElementById('activity-result');
@@ -2187,6 +2297,8 @@ const App = {
     if (idx === '' || idx == null) {
       result.classList.remove('visible', 'oked-result--found');
       result.innerHTML = '';
+      // Диагностика всё равно рендерится — оператор должен видеть «почему не выбрано»
+      App._renderActivityDiagnostics();
       return;
     }
     const a = App._calcActivities()[Number(idx)];
@@ -2229,6 +2341,8 @@ const App = {
         &nbsp;&nbsp;<span class="oked-label">Тариф:</span> <strong>${tariffStr}</strong>
         &nbsp;&nbsp;${sourceTag}
       </div>`;
+    // Параллельно рисуем диагностику (statsnet/таблица/итог)
+    App._renderActivityDiagnostics();
   },
 
   // Auto-detect = true, если для текущего ОКЭДа нет manual marker в localStorage

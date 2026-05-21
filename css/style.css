@@ -736,6 +736,50 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   opacity: 0.8;
 }
 
+/* === Activity diagnostics — лог под «Вид деятельности» === */
+.activity-diagnostics {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #475569;
+}
+.activity-diagnostics.visible { display: block; }
+.ad-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.ad-row {
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px dashed #e2e8f0;
+}
+.ad-row:first-of-type { border-top: none; }
+.ad-label {
+  font-weight: 600;
+  color: #64748b;
+}
+.ad-value { color: #334155; }
+.ad-value--ok { color: #047857; }
+.ad-value--warn { color: #b45309; }
+.ad-value--err { color: #b91c1c; }
+.ad-value--muted { color: #94a3b8; font-style: italic; }
+.ad-hint {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
 /* === Verdict card — заметный блок выбора решения по риску === */
 .verdict-card {
   position: relative;
