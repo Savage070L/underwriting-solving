@@ -24,7 +24,10 @@ const App = {
     App.restoreCache();
     App._restoreCase();
     App.restoreVerdict();
-    App.updateButtons();
+    // Финальный прогон зависимостей: после восстановления справочников и
+    // кейса убедимся, что превью, кнопки и аналитика отражают актуальное
+    // состояние (включая возможные изменения справочников между сессиями).
+    App._refreshDerivedData();
   },
 
   // ===== VERDICT SELECTOR =====
@@ -70,6 +73,44 @@ const App = {
     }
   },
 
+  // ===== UNIVERSAL DERIVED-STATE REFRESH =====
+  // Прогоняет всю цепочку зависимостей: ОКЭД→классификатор→тариф→премия,
+  // превью, таблица ОКЭДов компании, кнопки (орган зависит от активов),
+  // verdict-hint, snapshot аналитики (для inline iframe и standalone window).
+  // Вызывается из loadRef / clearOneRef / refreshAll / restoreCache —
+  // чтобы любая смена справочника или внешнего источника немедленно
+  // отображалась в UI без перезагрузки страницы.
+  _refreshDerivedData() {
+    // 1. ОКЭД-chain (вызывает _autoSelectActivityByOked, _renderActivityHint,
+    //    renderCompanyOkeds, _recalcManualPremium для manual-режима).
+    App.onOkedChange();
+    // 2. Превью (если есть зайавка)
+    if (App.zayavka) App.showPreview();
+    // 3. Кнопки (выбор организации зависит от normativ.fullAssetsTenge)
+    App.updateButtons();
+    // 4. Verdict-hint
+    App.updateVerdictHint();
+    // 5. Обновить snapshot аналитики, чтобы при повторном открытии
+    //    standalone-окна / iframe — данные были свежие.
+    if (App.claims && App.claims.analytics) {
+      try {
+        localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
+      } catch (e) { console.warn('Snapshot refresh failed:', e); }
+    }
+    // 6. Если inline-iframe аналитики открыт — перезагрузить его.
+    App._refreshInlineAnalytics();
+  },
+
+  // Принудительно перезагружает iframe inline-аналитики (если открыт).
+  _refreshInlineAnalytics() {
+    const container = document.getElementById('analytics-inline');
+    if (!container || !container.classList.contains('is-open')) return;
+    if (!App.claims || !App.claims.analytics) return;
+    const iframe = document.getElementById('analytics-iframe');
+    if (!iframe) return;
+    iframe.src = 'analytics.html#inline=1&t=' + Date.now();
+  },
+
   // ===== REFERENCE FILE LOADING =====
   async loadRef(type, file) {
     if (!file) return;
@@ -97,17 +138,12 @@ const App = {
           const effDate = App.zayavka
             ? (App.zayavka.periodFrom || App.zayavka.docDate) : null;
           App.refData.normativ = ExcelReader.readNormativ(buf, effDate);
-          // Перерисовать превью и кнопки (могут зависеть от активов компании)
-          if (App.zayavka) App.showPreview();
-          App.updateButtons();
           break;
         }
         case 'ku': {
           const result = ExcelReader.readKuPoKlassam(buf);
           App.refData.ku = result;
           localStorage.setItem('ref_ku', JSON.stringify(result));
-          // Превью и документы используют ku.lossRatioWith / Without — перерисуем
-          if (App.zayavka) App.showPreview();
           break;
         }
         case 'calculator': {
@@ -121,8 +157,6 @@ const App = {
           const result = ExcelReader.readOkedClassifier(buf);
           App.refData.classifier = result;
           localStorage.setItem('ref_classifier', JSON.stringify(result));
-          App.onOkedChange(); // re-lookup if ОКЭД already entered
-          App.renderCompanyOkeds();
           break;
         }
         case 'affiliated': {
@@ -136,7 +170,9 @@ const App = {
       localStorage.setItem(`ref_${type}_name`, file.name);
       App.updateRefStatus(type, true, file.name);
       App.updateRefBadge();
-      App.updateButtons();
+      // Прогон всей цепочки зависимостей — новый файл сразу отражается в UI.
+      App._refreshDerivedData();
+      App.showMsg(`Справочник «${file.name}» загружен и применён.`, 'success');
     } catch (e) {
       console.error(`Error loading ${type}:`, e);
       App.showMsg(`Ошибка загрузки ${file.name}: ${e.message}`, 'error');
@@ -165,37 +201,34 @@ const App = {
     }
     App.updateRefStatus(type, false);
     App.updateRefBadge();
-    App.renderCompanyOkeds();
-    App.onOkedChange();
+    App._refreshDerivedData();
     App.showMsg(`Справочник «${type}» очищен.`, 'success');
   },
 
-  // Принудительное обновление: пересобирает stat.gov.kz, BIN-лукап, normativ
-  // (с учётом текущего периода), превью, таблицу ОКЭДов, тариф и verdict-hint.
-  // Excel-файлы (заявка, история убытков, справочники) уже распарсены и лежат в
-  // памяти — их «обновление из источника» возможно только повторной загрузкой
-  // через ❌ + drop, поэтому здесь обновляем только производные данные.
+  // Принудительное обновление: re-парсит normativ из буфера на текущую дату,
+  // re-fetch БИН-лукап + stat.gov.kz, прогоняет _refreshDerivedData.
+  // Работает в т.ч. без зайавки — обновляет всё, что можем.
   refreshAll() {
-    const bin = App.zayavka?.bin;
-    if (!bin) {
-      App.showMsg('Сначала загрузите заявку.', 'error');
-      return;
-    }
     // Re-read normativ с учётом текущего периода (если буфер сохранён)
-    const effectiveDate = App.zayavka.periodFrom || App.zayavka.docDate;
-    if (App._rawNormativBuffer && effectiveDate) {
+    const effectiveDate = App.zayavka
+      ? (App.zayavka.periodFrom || App.zayavka.docDate)
+      : null;
+    if (App._rawNormativBuffer) {
       App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
     }
-    // Re-fetch внешних источников
-    App.autoLookupStatGov(bin);
-    App.autoLookupBIN(bin);
-    // Перерендер UI
-    App.showPreview();
-    App.renderCompanyOkeds();
-    App.onOkedChange();
-    App.updateVerdictHint();
-    App.updateButtons();
-    App.showMsg('Данные обновлены: stat.gov.kz, БИН-лукап, превью, ОКЭДы, тариф.', 'success');
+    // Re-fetch внешних источников (если БИН известен)
+    const bin = App.zayavka?.bin;
+    if (bin) {
+      App.autoLookupStatGov(bin);
+      App.autoLookupBIN(bin);
+    }
+    App._refreshDerivedData();
+    App.showMsg(
+      bin
+        ? 'Данные обновлены: справочники, stat.gov.kz, БИН-лукап, превью, ОКЭДы, тариф, премия.'
+        : 'Справочники применены ко всем зависимым UI-компонентам.',
+      'success'
+    );
   },
 
   // Удаляет файл по кейсу (заявка ИЛИ история убытков).
@@ -289,11 +322,13 @@ const App = {
           const wEl = document.getElementById('manualWorkers');
           const fEl = document.getElementById('manualFot');
           const aEl = document.getElementById('manualAvgSalary');
+          const dEl = document.getElementById('manualDocDate');
           if (binEl) binEl.value = App.zayavka.bin || '';
           if (wEl) wEl.value = App.zayavka.workers || '';
           const fotVal = App.zayavka.fot != null ? App.zayavka.fot : App.zayavka.insuranceSum;
-          if (fEl) fEl.value = fotVal != null ? App._toInputNumber(fotVal) : '';
-          if (aEl) aEl.value = App.zayavka.avgSalary != null ? App._toInputNumber(App.zayavka.avgSalary) : '';
+          if (fEl) fEl.value = fotVal != null ? App._formatMoney(fotVal) : '';
+          if (aEl) aEl.value = App.zayavka.avgSalary != null ? App._formatMoney(App.zayavka.avgSalary) : '';
+          if (dEl) dEl.value = App.zayavka.docDate ? App._dateToInputValue(App.zayavka.docDate) : '';
           App._manualPrimary = App.zayavka._manualPrimary || 'fot';
           App._syncManualFields();
           App._updateManualHint();
@@ -405,15 +440,67 @@ const App = {
     return Math.round(x * 100) / 100;
   },
 
-  // Форматирование Number → строка для type="number" (точка, без лишних нулей)
+  // Парсит ввод денежной суммы. Принимает "1 234 567,89", "1234567.89", "1234567" и т.п.
+  // Пробелы (включая  ), запятая как десятичный разделитель допустимы.
+  _parseMoney(s) {
+    if (s == null) return NaN;
+    const t = String(s).replace(/\s/g, '').replace(/[ ]/g, '').replace(',', '.').replace(/[^\d.\-]/g, '');
+    if (!t) return NaN;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : NaN;
+  },
+
+  // Форматирует число → "1 234 567,89" (русская локаль, две дроби).
+  _formatMoney(n) {
+    if (!Number.isFinite(n)) return '';
+    return App._round2(n).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  // Форматирование Number для подстановки в money-input (text-input): "1 234 567,89"
   _toInputNumber(x) {
     if (!Number.isFinite(x)) return '';
-    const r = App._round2(x);
-    return Number.isInteger(r) ? String(r) : r.toFixed(2);
+    return App._formatMoney(x);
+  },
+
+  // Чтение money-input с парсингом
+  _readMoneyInput(id) {
+    const el = document.getElementById(id);
+    if (!el) return NaN;
+    return App._parseMoney(el.value);
+  },
+
+  // Форматирование на blur — переписывает значение в "1 234 567,89"
+  onManualMoneyBlur(field) {
+    const id = field === 'fot' ? 'manualFot' : 'manualAvgSalary';
+    const el = document.getElementById(id);
+    if (!el || el.disabled) return;
+    const num = App._parseMoney(el.value);
+    if (Number.isFinite(num) && num > 0) {
+      el.value = App._formatMoney(num);
+    } else if (el.value.trim() === '') {
+      // Пусто — оставляем
+    }
+  },
+
+  // Сброс всех полей ручного ввода + очистка zayavka, если он был manual
+  resetManualForm() {
+    const ids = ['manualBin', 'manualDocDate', 'manualWorkers', 'manualFot', 'manualAvgSalary'];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) { el.value = ''; el.disabled = false; } });
+    const tagF = document.getElementById('tag-fot');
+    const tagA = document.getElementById('tag-avg');
+    if (tagF) tagF.style.display = 'none';
+    if (tagA) tagA.style.display = 'none';
+    App._manualPrimary = null;
+    // Если активная зайавка была manual — снимаем её
+    if (App.zayavka && App.zayavka._manual) {
+      App.clearCaseFile('zayavka');
+    }
+    App._updateManualHint();
+    App.showMsg('Поля ручного ввода очищены.', 'success');
   },
 
   // Главный обработчик input для полей ручного ввода.
-  // source: 'bin' | 'workers' | 'fot' | 'avg' — кто триггернул событие.
+  // source: 'bin' | 'workers' | 'fot' | 'avg' | 'date' — кто триггернул событие.
   onManualInput(source) {
     const fotEl = document.getElementById('manualFot');
     const avgEl = document.getElementById('manualAvgSalary');
@@ -422,14 +509,14 @@ const App = {
 
     // Определить primary, исходя из событий пользователя
     if (source === 'fot') {
-      const v = Number(fotEl.value);
+      const v = App._parseMoney(fotEl.value);
       App._manualPrimary = (fotEl.value.trim() !== '' && Number.isFinite(v) && v > 0) ? 'fot' : null;
     } else if (source === 'avg') {
-      const v = Number(avgEl.value);
+      const v = App._parseMoney(avgEl.value);
       App._manualPrimary = (avgEl.value.trim() !== '' && Number.isFinite(v) && v > 0) ? 'avg' : null;
     }
     // Если очистили primary — снять primary, разблокировать оба и очистить второе
-    if (App._manualPrimary === null && source !== 'bin' && source !== 'workers') {
+    if (App._manualPrimary === null && (source === 'fot' || source === 'avg')) {
       fotEl.disabled = false; avgEl.disabled = false;
       const tagF = document.getElementById('tag-fot');
       const tagA = document.getElementById('tag-avg');
@@ -454,15 +541,15 @@ const App = {
 
     const workers = Number(wEl.value);
     const okWorkers = Number.isFinite(workers) && workers > 0;
-    const fotVal = Number(fotEl.value);
-    const avgVal = Number(avgEl.value);
+    const fotVal = App._parseMoney(fotEl.value);
+    const avgVal = App._parseMoney(avgEl.value);
 
     if (App._manualPrimary === 'fot' && Number.isFinite(fotVal) && fotVal > 0) {
       avgEl.disabled = true;
       fotEl.disabled = false;
       if (tagF) tagF.style.display = 'none';
       if (okWorkers) {
-        avgEl.value = App._toInputNumber(fotVal / workers / 12);
+        avgEl.value = App._formatMoney(fotVal / workers / 12);
         if (tagA) tagA.style.display = '';
       } else {
         avgEl.value = '';
@@ -473,7 +560,7 @@ const App = {
       avgEl.disabled = false;
       if (tagA) tagA.style.display = 'none';
       if (okWorkers) {
-        fotEl.value = App._toInputNumber(avgVal * workers * 12);
+        fotEl.value = App._formatMoney(avgVal * workers * 12);
         if (tagF) tagF.style.display = '';
       } else {
         fotEl.value = '';
@@ -494,8 +581,8 @@ const App = {
     if (!hint) return;
     const bin = (document.getElementById('manualBin')?.value || '').trim();
     const workers = Number(document.getElementById('manualWorkers')?.value);
-    const fot = Number(document.getElementById('manualFot')?.value);
-    const avg = Number(document.getElementById('manualAvgSalary')?.value);
+    const fot = App._readMoneyInput('manualFot');
+    const avg = App._readMoneyInput('manualAvgSalary');
     const okBin = /^\d{12}$/.test(bin);
     const okWorkers = Number.isFinite(workers) && workers > 0;
     const hasFot = Number.isFinite(fot) && fot > 0;
@@ -506,11 +593,10 @@ const App = {
     let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
     let cls = '';
     if (okBin && okWorkers && effFot > 0) {
-      const fmtRu = (x) => App._round2(x).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const source = primary === 'fot' || (hasFot && primary == null)
         ? 'указан напрямую'
-        : `= ${fmtRu(avg)} ₸ × ${workers} × 12 мес.`;
-      msg = `Готово к применению: ФОТ = ${fmtRu(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
+        : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
+      msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
       cls = 'manual-input-hint--ok';
     } else {
       const missing = [];
@@ -530,8 +616,7 @@ const App = {
   applyManualZayavka() {
     const bin = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
     const workersStr = document.getElementById('manualWorkers')?.value;
-    const fotStr = document.getElementById('manualFot')?.value;
-    const avgStr = document.getElementById('manualAvgSalary')?.value;
+    const dateStr = document.getElementById('manualDocDate')?.value || '';
 
     if (!/^\d{12}$/.test(bin)) {
       App.showMsg('Введите корректный БИН (12 цифр).', 'error');
@@ -544,8 +629,8 @@ const App = {
     }
     // ФОТ и avg — точная арифметика без округления до целых.
     // Тиыны (2 знака после запятой) сохраняются для всех денежных полей.
-    let fotRaw = Number(fotStr);
-    const avgRaw = Number(avgStr);
+    const fotRaw = App._readMoneyInput('manualFot');
+    const avgRaw = App._readMoneyInput('manualAvgSalary');
     const primary = App._manualPrimary; // 'fot' | 'avg' | null
     let fot;
     let avgSalary = null;
@@ -573,8 +658,14 @@ const App = {
       }
     }
 
-    const today = new Date();
-    const { from, to } = App._computePeriodFromDocDate(today);
+    // Дата заявки — из поля или сегодня. Парсим yyyy-mm-dd как локальную дату.
+    let docDate;
+    if (dateStr) {
+      const [yy, mm, dd] = dateStr.split('-').map(Number);
+      if (yy && mm && dd) docDate = new Date(yy, mm - 1, dd);
+    }
+    if (!docDate || isNaN(docDate)) docDate = new Date();
+    const { from, to } = App._computePeriodFromDocDate(docDate);
 
     App.zayavka = {
       _manual: true,
@@ -582,7 +673,7 @@ const App = {
       insurerName: '',
       bin,
       region: '',
-      docDate: today,
+      docDate,
       insuranceType: Utils.INSURANCE_TYPE,
       activity: '',
       riskClass: null,

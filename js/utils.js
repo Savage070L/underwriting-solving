@@ -279,12 +279,15 @@ const Utils = {
     return 'standard';
   },
 
-  // Get decision text in Russian
+  // Get decision text in Russian, с правильным предлогом
+  //   standard → «со стандартным» (после согласной "с" перед группой "ст-" — «со»)
+  //   lowered  → «с пониженным»
+  //   raised   → «с повышенным»
   getDecisionText(decision) {
     switch (decision) {
-      case 'lowered': return 'пониженным коэффициентом';
-      case 'raised': return 'повышенным коэффициентом';
-      default: return 'стандартным коэффициентом';
+      case 'lowered': return 'с пониженным коэффициентом';
+      case 'raised': return 'с повышенным коэффициентом';
+      default: return 'со стандартным коэффициентом';
     }
   },
 

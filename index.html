@@ -91,6 +91,9 @@
 
       <!-- Manual input alternative — без заявки: БИН + ФОТ/ЗП + работники → остальное парсится автоматически -->
       <div class="manual-input-card">
+        <button class="btn-manual-reset" type="button" title="Сбросить все поля ручного ввода" onclick="App.resetManualForm()">
+          ✕ Сбросить
+        </button>
         <div class="manual-input-head">
           <div class="manual-input-title">Или введите вручную (без заявки)</div>
           <div class="manual-input-sub">БИН → реестр stat.gov.kz даст наименование, ОКЭД, КРП, адрес и пр. ФОТ × тариф = страховая премия.</div>
@@ -101,6 +104,10 @@
             <input type="text" id="manualBin" inputmode="numeric" maxlength="12" placeholder="12 цифр" oninput="App.onManualInput('bin')">
           </div>
           <div class="form-group">
+            <label for="manualDocDate">Дата заявки</label>
+            <input type="date" id="manualDocDate" oninput="App.onManualInput('date')">
+          </div>
+          <div class="form-group">
             <label for="manualWorkers">Количество работников</label>
             <input type="number" id="manualWorkers" min="1" step="1" placeholder="например: 25" oninput="App.onManualInput('workers')">
           </div>
@@ -109,14 +116,16 @@
               ФОТ годовой, ₸
               <span class="manual-field-tag" id="tag-fot" style="display:none">посчитано</span>
             </label>
-            <input type="number" id="manualFot" min="0" step="0.01" placeholder="например: 36 000 000" oninput="App.onManualInput('fot')">
+            <input type="text" id="manualFot" inputmode="decimal" placeholder="например: 36 000 000,00"
+                   oninput="App.onManualInput('fot')" onblur="App.onManualMoneyBlur('fot')">
           </div>
           <div class="form-group">
             <label for="manualAvgSalary">
               Средняя зарплата, ₸/мес
               <span class="manual-field-tag" id="tag-avg" style="display:none">посчитано</span>
             </label>
-            <input type="number" id="manualAvgSalary" min="0" step="0.01" placeholder="ИЛИ заполните вместо ФОТ" oninput="App.onManualInput('avg')">
+            <input type="text" id="manualAvgSalary" inputmode="decimal" placeholder="ИЛИ заполните вместо ФОТ"
+                   oninput="App.onManualInput('avg')" onblur="App.onManualMoneyBlur('avg')">
           </div>
         </div>
         <div class="manual-input-hint" id="manual-hint">Заполните БИН, количество работников и хотя бы одно из: ФОТ или среднюю ЗП.</div>

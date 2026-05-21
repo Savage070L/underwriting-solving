@@ -315,7 +315,7 @@ const ARGenerator = {
     } else if (verdict === 'defer') {
       executionLine = '- Отложить страхование на определенный срок.';
     } else {
-      executionLine = `- Принять на страхование риск с ${Utils.getDecisionText(decision)}.`;
+      executionLine = `- Принять на страхование риск ${Utils.getDecisionText(decision)}.`;
     }
     const executionParagraphs = [
       new Paragraph({ children: [] }),

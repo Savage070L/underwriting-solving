@@ -41,12 +41,20 @@ const SZGenerator = {
       : 'Председателю Совета директоров';
     const fixedRecipientName = isPravlenie ? 'Амерходжаеву Г.Т.' : Utils.SD_CHAIR_NAME;
 
+    // Формулировки для СЗ — с учётом аффилированности (data.isAffiliated)
+    const isAff = !!data.isAffiliated;
     const subject = isPravlenie
-      ? 'О вынесении на рассмотрение Правления решения о заключении сделки (договора ОСРНС)'
-      : 'О заключении c аффилированным лицом (договор ОСРНС)';
+      ? (isAff
+          ? 'О вынесении на рассмотрение Правления решения о заключении сделки с аффилированным лицом (договор ОСРНС)'
+          : 'О вынесении на рассмотрение Правления решения о заключении сделки (договор ОСРНС)')
+      : (isAff
+          ? 'О заключении с аффилированным лицом договора ОСРНС'
+          : 'О заключении договора ОСРНС');
 
     const projectDecision = isPravlenie
-      ? `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей сделки с компанией – ${companyName}.`
+      ? (isAff
+          ? `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с аффилированным лицом с компанией – ${companyName}.`
+          : `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей сделки с компанией – ${companyName}.`)
       : `Заключить договор обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
 
     const approverRole = isPravlenie ? Utils.UPRAV_DIR_ROLE : Utils.PRAVLENIE_CHAIR_ROLE;
@@ -162,10 +170,9 @@ const SZGenerator = {
       }),
       emptyP(),
 
-      // Title centered + date right (one line)
+      // Title centered (without date)
       new Paragraph({
-        tabStops: [{ type: TabStopType.RIGHT, position: tabRight }],
-        children: [trB('Служебная записка'), tr('\t'), tr(dateDot)],
+        children: [trB('Служебная записка')],
         alignment: AlignmentType.CENTER,
       }),
       emptyP(),
@@ -180,10 +187,12 @@ const SZGenerator = {
       // Signatures
       sigLine(Utils.DAIP_DIRECTOR_ROLE, Utils.DAIP_DIRECTOR_NAME),
       emptyP(),
+      emptyP(), // дополнительный отступ после «Директор ДАиП … Джелкобаев Т.К.»
       new Paragraph({
         children: [trB('Согласовано:')],
         alignment: AlignmentType.JUSTIFIED,
       }),
+      emptyP(), // дополнительный отступ после «Согласовано:» перед ролью утверждающего
       sigLine(approverRole, approverName),
     ];
 
