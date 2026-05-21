@@ -50,27 +50,66 @@ const App = {
     App.updateVerdictHint();
   },
 
+  // Иконки + цветовое кодирование решения. В auto-режиме иконка/цвет —
+  // прогноз решения, чтобы оператору сразу было видно, что предложит система.
+  VERDICT_ICONS: {
+    accept_standard: '✓',
+    accept_adjusted: '⚖',
+    reject: '✗',
+    defer: '⏸',
+    auto: '🤖',
+  },
+
   updateVerdictHint() {
     const select = document.getElementById('verdict');
     const hint = document.getElementById('verdict-hint');
-    if (!select || !hint) return;
+    const badge = document.getElementById('verdict-badge');
+    const card = document.getElementById('verdict-card');
+    const iconEl = document.getElementById('verdict-icon');
+    if (!select || !hint || !card) return;
     const v = select.value;
+
+    let state = v;            // класс для цветового стиля (.verdict-state--*)
+    let badgeText = '';       // лейбл бэйджа справа
+    let hintText = '';        // подсказка под селектом
+    let icon = App.VERDICT_ICONS[v] || '⚖';
+
     if (v === 'auto') {
-      // Покажем что предложит auto-логика на текущих данных
       const z = App.zayavka;
       if (z && z.coeff != null) {
         const decision = Utils.determineDecision(z.coeff, z.coeffDown);
         const predicted = Utils.resolveVerdict('auto', decision);
         const label = Utils.VERDICT_LABELS[predicted] || '';
-        hint.textContent = `— авто: «${label}»`;
+        state = predicted; // цвет = предсказанному решению
+        icon = App.VERDICT_ICONS[predicted] || '⚖';
+        badgeText = '🤖 АВТО → ' + (predicted === 'accept_standard' ? 'СТАНДАРТ'
+          : predicted === 'accept_adjusted' ? 'С КОЭФФИЦИЕНТОМ'
+          : predicted === 'reject' ? 'ОТКЛОНИТЬ'
+          : predicted === 'defer' ? 'ОТЛОЖИТЬ' : '');
+        hintText = `Авто-решение: «${label}». Можно переопределить вручную в списке выше.`;
       } else {
-        hint.textContent = '— определяется по коэффициенту при скачивании';
+        state = 'auto';
+        icon = '🤖';
+        badgeText = '🤖 АВТО';
+        hintText = 'Решение будет вычислено автоматически по коэффициенту, когда заявка будет загружена и тариф рассчитан.';
       }
-      hint.classList.remove('manual');
     } else {
-      hint.textContent = '— ручной выбор андеррайтера';
-      hint.classList.add('manual');
+      const label = Utils.VERDICT_LABELS[v] || '';
+      badgeText = '✋ РУЧНОЙ';
+      hintText = `Ручной выбор андеррайтера: «${label}».`;
     }
+
+    // Обнулить старые state-классы и поставить актуальный
+    card.className = card.className
+      .split(' ')
+      .filter(c => !c.startsWith('verdict-state--'))
+      .join(' ')
+      .trim();
+    card.classList.add('verdict-state--' + state);
+
+    if (badge) badge.textContent = badgeText;
+    if (iconEl) iconEl.textContent = icon;
+    hint.textContent = hintText;
   },
 
   // Проверка БИН на присутствие в реестре аффилированных лиц.

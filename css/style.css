@@ -736,16 +736,142 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   opacity: 0.8;
 }
 
-/* Verdict hint label */
-.verdict-hint {
-  font-size: 0.7rem;
-  font-weight: 400;
-  color: #98a2b3;
-  margin-left: 6px;
+/* === Verdict card — заметный блок выбора решения по риску === */
+.verdict-card {
+  position: relative;
+  padding: 18px 20px;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transition: border-color .2s, background .25s, box-shadow .25s;
 }
-.verdict-hint.manual {
-  color: #b54708;
+.verdict-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
 }
+.verdict-card-icon {
+  font-size: 1.7rem;
+  line-height: 1;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  flex-shrink: 0;
+  transition: background .2s;
+}
+.verdict-card-title { flex: 1; min-width: 0; }
+.verdict-card-label {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+.verdict-card-sub {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+.verdict-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #e2e8f0;
+  color: #475569;
+  white-space: nowrap;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.verdict-select {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.verdict-select:focus {
+  outline: none;
+  border-color: #4361ee;
+  box-shadow: 0 0 0 4px rgba(67, 97, 238, 0.15);
+}
+.verdict-card-hint {
+  margin-top: 12px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #475569;
+  line-height: 1.45;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border-left: 4px solid #cbd5e1;
+}
+
+/* State variants — каждое решение имеет свой цвет, чтобы было сразу видно */
+.verdict-card.verdict-state--accept_standard {
+  border-color: #10b981;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.18);
+}
+.verdict-card.verdict-state--accept_standard .verdict-card-icon { background: #d1fae5; }
+.verdict-card.verdict-state--accept_standard .verdict-card-badge { background: #10b981; color: #fff; }
+.verdict-card.verdict-state--accept_standard .verdict-card-hint { border-left-color: #10b981; background: rgba(16, 185, 129, 0.08); color: #065f46; }
+.verdict-card.verdict-state--accept_standard .verdict-select { border-color: #10b981; }
+
+.verdict-card.verdict-state--accept_adjusted {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.20);
+}
+.verdict-card.verdict-state--accept_adjusted .verdict-card-icon { background: #fef3c7; }
+.verdict-card.verdict-state--accept_adjusted .verdict-card-badge { background: #f59e0b; color: #fff; }
+.verdict-card.verdict-state--accept_adjusted .verdict-card-hint { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.10); color: #92400e; }
+.verdict-card.verdict-state--accept_adjusted .verdict-select { border-color: #f59e0b; }
+
+.verdict-card.verdict-state--reject {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.22);
+}
+.verdict-card.verdict-state--reject .verdict-card-icon { background: #fee2e2; }
+.verdict-card.verdict-state--reject .verdict-card-badge { background: #ef4444; color: #fff; }
+.verdict-card.verdict-state--reject .verdict-card-hint { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.08); color: #991b1b; }
+.verdict-card.verdict-state--reject .verdict-select { border-color: #ef4444; }
+
+.verdict-card.verdict-state--defer {
+  border-color: #6366f1;
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.20);
+}
+.verdict-card.verdict-state--defer .verdict-card-icon { background: #e0e7ff; }
+.verdict-card.verdict-state--defer .verdict-card-badge { background: #6366f1; color: #fff; }
+.verdict-card.verdict-state--defer .verdict-card-hint { border-left-color: #6366f1; background: rgba(99, 102, 241, 0.08); color: #3730a3; }
+.verdict-card.verdict-state--defer .verdict-select { border-color: #6366f1; }
+
+.verdict-card.verdict-state--auto {
+  border-color: #4361ee;
+  background: linear-gradient(135deg, #eef4ff 0%, #dbeafe 100%);
+  box-shadow: 0 4px 14px rgba(67, 97, 238, 0.18);
+}
+.verdict-card.verdict-state--auto .verdict-card-icon { background: #dbeafe; }
+.verdict-card.verdict-state--auto .verdict-card-badge { background: #4361ee; color: #fff; }
+.verdict-card.verdict-state--auto .verdict-card-hint { border-left-color: #4361ee; background: rgba(67, 97, 238, 0.08); color: #1e3a8a; }
+.verdict-card.verdict-state--auto .verdict-select { border-color: #4361ee; }
 
 /* ОКЭД input — hint and lookup result */
 .oked-hint {

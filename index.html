@@ -297,18 +297,23 @@
           </div>
           <textarea id="riskText" placeholder="Опишите основную деятельность страхователя, условия работы, особенности..."></textarea>
         </div>
-        <div class="form-group full-width">
-          <label for="verdict">
-            Решение по риску
-            <span class="verdict-hint" id="verdict-hint"></span>
-          </label>
-          <select id="verdict" onchange="App.onVerdictChange()">
+        <div class="form-group full-width verdict-card" id="verdict-card">
+          <div class="verdict-card-header">
+            <div class="verdict-card-icon" id="verdict-icon">⚖</div>
+            <div class="verdict-card-title">
+              <div class="verdict-card-label">Решение по риску</div>
+              <div class="verdict-card-sub">Ключевое решение андеррайтера — определяет текст всех документов</div>
+            </div>
+            <div class="verdict-card-badge" id="verdict-badge"></div>
+          </div>
+          <select id="verdict" class="verdict-select" onchange="App.onVerdictChange()">
             <option value="auto">— Авто (по коэффициенту) —</option>
             <option value="accept_standard">Принятие со стандартным коэффициентом</option>
             <option value="accept_adjusted">Принятие с повышенным/пониженным коэффициентом</option>
             <option value="reject">Отклонение в соответствии со степенью риска</option>
             <option value="defer">Отложение страхования на определенный срок</option>
           </select>
+          <div class="verdict-card-hint" id="verdict-hint"></div>
         </div>
       </div>
       <div class="organ-banner" id="organ-banner" style="display:none"></div>
