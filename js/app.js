@@ -361,6 +361,31 @@ const App = {
     App.showMsg(`Справочник «${type}» очищен.`, 'success');
   },
 
+  // Сброс только «Вид деятельности»: снимает выбор из dropdown, удаляет ручную
+  // метку manual_activity_for_oked, перезапускает auto-detect по ОКЭДу.
+  resetActivity() {
+    localStorage.removeItem('selected_activity_idx');
+    localStorage.removeItem('manual_activity_for_oked');
+    App._activityAutoForOked = null;
+    const select = document.getElementById('activitySelect');
+    if (select) select.value = '';
+    App._autoSelectActivityByOked();
+    App._renderActivityHint();
+    App.showMsg('Вид деятельности сброшен — выбор пересчитается по ОКЭДу.', 'success');
+  },
+
+  // Сброс только третьего блока: описание рисков (свободный текст) + вердикт.
+  // Не трогает заявку, период, ОКЭД и пр. — только пользовательский ввод этого блока.
+  resetSection3() {
+    const riskEl = document.getElementById('riskText');
+    if (riskEl) riskEl.value = '';
+    const verdictSel = document.getElementById('verdict');
+    if (verdictSel) verdictSel.value = 'auto';
+    localStorage.removeItem('manual_verdict');
+    App.updateVerdictHint();
+    App.showMsg('Описание рисков и решение сброшены.', 'success');
+  },
+
   // Сбрасывает «надпись над договором» состояния формы: номер документа,
   // описание рисков, вердикт, нерезидент, порядок оплаты, ручной ОКЭД.
   // Период страхования re-вычисляется из docDate (если есть).

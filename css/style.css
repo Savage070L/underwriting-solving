@@ -995,6 +995,25 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
 .btn-clear:hover {
   color: #667085;
 }
+/* Inline-вариант для кнопки рядом со statsnet (не растягивается на всю ширину) */
+.btn-clear--inline {
+  margin-left: 8px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #b91c1c;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.btn-clear--inline:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
 
 /* BIN lookup status */
 .bin-status {

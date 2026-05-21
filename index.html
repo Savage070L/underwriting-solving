@@ -203,6 +203,9 @@
             <button type="button" class="btn-find-industry" onclick="App.manualStatsnetLookup(this)" title="Открыть Яндекс → statsnet.co, найти «Отрасль» и применить">
               🔎 Найти отрасль через statsnet
             </button>
+            <button type="button" class="btn-clear btn-clear--inline" onclick="App.resetActivity()" title="Сбросить выбор вида деятельности и снять ручную метку">
+              ✕ Сбросить
+            </button>
           </label>
           <select id="activitySelect" onchange="App.onActivityChange()">
             <option value="">— загрузите справочник «Калькулятор рентабельности» —</option>
@@ -276,7 +279,10 @@
 
     <!-- ============ Шаг 3: Решение и генерация документов ============ -->
     <div class="section">
-      <div class="section-title">3. Решение и генерация документов</div>
+      <div class="section-title">
+        3. Решение и генерация документов
+        <button class="btn-clear" onclick="App.resetSection3()" title="Сбросить описание рисков и вернуть решение к «Авто»">✕ Сбросить</button>
+      </div>
       <div class="section-sub">После анализа выберите вердикт и сгенерируйте пакет документов.</div>
       <div class="form-grid">
         <div class="form-group full-width">
