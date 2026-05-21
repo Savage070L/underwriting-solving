@@ -308,12 +308,25 @@ const ARGenerator = {
       secTable,
     ];
 
-    // Execution section — branches by verdict
+    // Execution section — branches by verdict.
+    // Текст исполнения должен соответствовать тому, что выбрал пользователь
+    // в чек-боксах «Принятие Андеррайтингового решения». Поэтому привязываемся
+    // к verdict, а не к auto-decision (которое падает в 'standard' при coeffDown=0).
     let executionLine;
     if (verdict === 'reject') {
       executionLine = '- Отклонить риск в соответствии со степенью риска.';
     } else if (verdict === 'defer') {
       executionLine = '- Отложить страхование на определенный срок.';
+    } else if (verdict === 'accept_standard') {
+      executionLine = '- Принять на страхование риск со стандартным коэффициентом.';
+    } else if (verdict === 'accept_adjusted') {
+      // Если знаем направление по коэффициенту — конкретизируем («с пониженным»
+      // или «с повышенным»). Иначе используем generic-формулировку из чек-бокса.
+      if (autoDecision === 'lowered' || autoDecision === 'raised') {
+        executionLine = `- Принять на страхование риск ${Utils.getDecisionText(autoDecision)}.`;
+      } else {
+        executionLine = '- Принять на страхование риск с повышенным или пониженным коэффициентом.';
+      }
     } else {
       executionLine = `- Принять на страхование риск ${Utils.getDecisionText(decision)}.`;
     }
