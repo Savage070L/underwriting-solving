@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Генератор АР и Заключений</title>
+  <title>Андеррайтинговое решение по ОСРНС</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Генератор андеррайтинговых документов</h1>
-      <p>Standard Life — все данные обрабатываются локально</p>
+      <h1>Андеррайтинговое решение по ОСРНС</h1>
     </header>
 
     <!-- Reference files (uploaded once, cached) — раскрывающийся раздел -->
@@ -98,8 +97,7 @@
           ✕ Сбросить
         </button>
         <div class="manual-input-head">
-          <div class="manual-input-title">Или введите вручную (без заявки)</div>
-          <div class="manual-input-sub">БИН → реестр stat.gov.kz даст наименование, ОКЭД, КРП, адрес и пр. ФОТ × тариф = страховая премия.</div>
+          <div class="manual-input-title">Ввод данных по БИН (без файла заявки)</div>
         </div>
         <div class="manual-input-grid">
           <div class="form-group">
@@ -145,9 +143,6 @@
       <!-- Alert: средняя ЗП < 85 000 ₸ (информационный для андеррайтера) -->
       <div class="avg-salary-alert" id="avg-salary-alert"></div>
 
-      <!-- BIN lookup status (auto, no manual input) -->
-      <div class="bin-status" id="bin-status"></div>
-
       <!-- Принудительное обновление данных: re-fetch statgov + БИН + пересборка -->
       <button class="btn-refresh-wide" onclick="App.refreshAll()" title="Перечитать stat.gov.kz, БИН-лукап и пересобрать данные">
         <span class="ba-icon">🔄</span>
@@ -158,7 +153,6 @@
     <!-- ============ Шаг 1: Параметры страхования ============ -->
     <div class="section">
       <div class="section-title">1. Параметры страхования</div>
-      <div class="section-sub">Введите/скорректируйте параметры — на их основе будут пересчитаны показатели в аналитике.</div>
       <div class="form-grid">
         <div class="checkbox-group form-group">
           <input type="checkbox" id="nonResident">
@@ -167,7 +161,6 @@
         <div class="form-group full-width" id="company-okeds-section" style="display:none">
           <label>
             ОКЭДы компании
-            <span class="oked-hint">— из реестра stat.gov.kz, по умолчанию активен с наивысшим классом риска</span>
           </label>
           <div class="company-okeds-wrap">
             <table class="company-okeds">
@@ -189,7 +182,7 @@
         <div class="form-group">
           <label for="okedInput">
             ОКЭД (если не указан в заявке)
-            <span class="oked-hint" id="oked-hint">— пусто, используется ОКЭД из заявки</span>
+            <span class="oked-hint" id="oked-hint"></span>
           </label>
           <input type="text" id="okedInput" placeholder="например: 07101" oninput="App.onOkedChange()">
           <div class="oked-lookup-result" id="oked-result"></div>
@@ -197,7 +190,7 @@
         <div class="form-group full-width">
           <label for="activitySelect" class="activity-label-row">
             <span>Вид деятельности (для оценки рисков смерти/травмы)
-              <span class="oked-hint" id="activity-hint">— список из калькулятора рентабельности (Лист2)</span>
+              <span class="oked-hint" id="activity-hint"></span>
             </span>
             <button type="button" class="btn-find-industry" onclick="App.manualStatsnetLookup(this)" title="Открыть Яндекс → statsnet.co, найти «Отрасль» и применить">
               🔎 Найти отрасль через statsnet
@@ -238,14 +231,12 @@
         <div class="form-group">
           <label for="periodFrom">
             Период страхования с
-            <span class="oked-hint">— по умолчанию F3 + 1 день, можно изменить</span>
           </label>
           <input type="date" id="periodFrom">
         </div>
         <div class="form-group">
           <label for="periodTo">
             Период страхования по
-            <span class="oked-hint">— по умолчанию +1 год, можно изменить</span>
           </label>
           <input type="date" id="periodTo">
         </div>
@@ -255,7 +246,6 @@
     <!-- ============ Шаг 2: Аналитика — пересчёт на основе введённых параметров ============ -->
     <div class="section">
       <div class="section-title">2. Аналитика убытков и риска</div>
-      <div class="section-sub">Показатели пересчитываются по введённым выше параметрам. Откройте перед принятием решения.</div>
       <div class="analytics-cta" id="analytics-cta">
         <div class="analytics-cta-row">
           <button class="btn-analytics btn-analytics--inline" onclick="App.toggleInlineAnalytics()">
@@ -281,9 +271,8 @@
     <div class="section">
       <div class="section-title">
         3. Решение и генерация документов
-        <button class="btn-clear" onclick="App.resetSection3()" title="Сбросить описание рисков и вернуть решение к «Авто»">✕ Сбросить</button>
+        <button class="btn-clear btn-clear--danger" onclick="App.resetSection3()" title="Сбросить описание рисков и вернуть решение к «Авто»">✕ Сбросить</button>
       </div>
-      <div class="section-sub">После анализа выберите вердикт и сгенерируйте пакет документов.</div>
       <div class="form-grid">
         <div class="form-group full-width">
           <label for="riskText">Описание / анализ рисков (свободный текст)</label>
@@ -308,7 +297,6 @@
             <div class="verdict-card-icon" id="verdict-icon">⚖</div>
             <div class="verdict-card-title">
               <div class="verdict-card-label">Решение по риску</div>
-              <div class="verdict-card-sub">Ключевое решение андеррайтера — определяет текст всех документов</div>
             </div>
             <div class="verdict-card-badge" id="verdict-badge"></div>
           </div>
@@ -326,7 +314,6 @@
             <span class="doc-number-icon">📄</span>
             <span class="doc-number-text">
               <span class="doc-number-title">Номер документа</span>
-              <span class="doc-number-sub">— войдёт в шапку АР, Заключения, протокола и служебных записок</span>
             </span>
           </label>
           <input type="text" id="docNumber" class="doc-number-input" placeholder="Например: 13">

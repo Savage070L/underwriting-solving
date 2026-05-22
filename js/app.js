@@ -125,9 +125,10 @@ const App = {
         hintText = 'Решение будет вычислено автоматически по коэффициенту, когда заявка будет загружена и тариф рассчитан.';
       }
     } else {
-      const label = Utils.VERDICT_LABELS[v] || '';
+      // Ручной выбор — bottom-плашка избыточна (значение уже в selectе и в бейдже).
+      // Скрываем её, чтобы UI был чище.
       badgeText = '✋ РУЧНОЙ';
-      hintText = `Ручной выбор андеррайтера: «${label}».`;
+      hintText = '';
     }
 
     // Обнулить старые state-классы и поставить актуальный
@@ -141,6 +142,8 @@ const App = {
     if (badge) badge.textContent = badgeText;
     if (iconEl) iconEl.textContent = icon;
     hint.textContent = hintText;
+    // Скрыть hint-блок, если текст пустой (ручной выбор)
+    hint.style.display = hintText ? '' : 'none';
   },
 
   // Проверка БИН на присутствие в реестре аффилированных лиц.
@@ -486,7 +489,6 @@ const App = {
       if (zoneZ) zoneZ.classList.remove('loaded');
       document.getElementById('status-zayavka').textContent = 'Загрузите .xlsm файл';
       document.getElementById('preview-panel')?.classList.remove('visible');
-      document.getElementById('bin-status').innerHTML = '';
     } else if (which === 'claims') {
       App.claims = null;
       const zoneC = document.getElementById('zone-claims');
@@ -599,7 +601,6 @@ const App = {
     document.getElementById('analytics-cta')?.classList.remove('visible');
     document.getElementById('analytics-inline')?.classList.remove('is-open');
     document.getElementById('preview-panel')?.classList.remove('visible');
-    document.getElementById('bin-status').innerHTML = '';
     App.updateButtons();
     App.showMsg('Файлы кейса очищены.', 'success');
   },
@@ -846,18 +847,18 @@ const App = {
     let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
     let cls = '';
 
-    // Подсказка идентична для аффилированных и обычных — премию вводит сам
-    // пользователь. Для аффилированных меняется только пакет документов (СД).
+    // Success-сообщение «Готово к применению: ФОТ = …» убрано — оно избыточно,
+    // т.к. рассчитанные значения уже видны в полях ФОТ/ср.ЗП. Оставляем только
+    // ошибки (что не хватает) и note про аффилированность.
     const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
     if (okBin && okWorkers && effFot > 0) {
-      const source = primary === 'fot' || (hasFot && primary == null)
-        ? 'указан напрямую'
-        : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
-      const affNote = aff
-        ? ` ⚠ Аффилированное лицо «${aff.name || cleanBin}» — пакет документов будет СД (АР · Заключение · СЗ на Правление · СЗ на СД).`
-        : '';
-      msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.${affNote}`;
-      cls = 'manual-input-hint--ok';
+      if (aff) {
+        msg = `⚠ Аффилированное лицо «${aff.name || cleanBin}» — пакет документов будет СД (АР · Заключение · СЗ на Правление · СЗ на СД).`;
+        cls = 'manual-input-hint--ok';
+      } else {
+        msg = '';
+        cls = '';
+      }
     } else {
       const missing = [];
       if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
@@ -1096,26 +1097,33 @@ const App = {
       </div>`;
     }
 
-    // НС: количество, разбивка по годам/страховщикам, сумма
-    let nsLine = 'НС не было';
-    let nsDetails = '';
+    // НС: header + разбивка по годам в multi-line HTML формате.
+    let nsHtml = 'НС не было';
     if (App.claims && App.claims.totalClaims > 0) {
       const total = App.claims.totalClaims;
       const byYear = App.claims.analytics?.byYear || [];
-      const byInsurer = App.claims.analytics?.byInsurer || [];
       const sumTotal = App.claims.analytics?.sumTotal3y || 0;
       const fmtTg = (v) => Utils.fmtMoney(v);
-      nsLine = `${total} НС за последние 3 года, сумма ${fmtTg(sumTotal)}`;
-      const byYearStr = byYear.map(b => `${b.year}: ${b.cases} НС (${fmtTg(b.sum)})`).join('; ');
-      const byInsurerStr = byInsurer.map(b => `${b.insurer}: ${b.cases} НС (${fmtTg(b.sum)})`).join('; ');
-      const parts = [];
-      if (byYearStr) parts.push(`по годам — ${byYearStr}`);
-      if (byInsurerStr) parts.push(`по страховщикам — ${byInsurerStr}`);
-      if (parts.length) nsDetails = parts.join('. ');
+      const header = `За последние 3 года — <strong>${total} НС</strong> (сумма: ${fmtTg(sumTotal)})`;
+      const yearLines = byYear
+        .sort((a, b) => a.year - b.year)
+        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
+        .join('');
+      nsHtml = `<div class="pi-claims-header">${header}</div>${yearLines}`;
     }
 
     // ========== ОСНОВНАЯ ИНФОРМАЦИЯ (всегда видна) ==========
-    const sgGov = App.binData.govParticipation || z.govParticipation || '(поиск...)';
+    // Юридический адрес — ТОЛЬКО из stat.gov.kz (statgov). Без fallback на
+    // pk.uchet.kz — это другой источник с другим форматом, и пользователь
+    // хочет видеть только данные из официального реестра.
+    const statgovLoading = App.statgov?.loading === true;
+    const statgovDone = App.statgov && !App.statgov.loading;
+    const legalAddress = sg?.legalAddress
+      || (statgovLoading ? '(поиск в stat.gov.kz...)' : '—');
+    // Гос. участие — статгов не отдаёт, единственный источник pk.uchet.kz worker.
+    const binLoading = App.binData?.loading === true;
+    const sgGov = App.binData.govParticipation || z.govParticipation
+      || (binLoading ? '(поиск...)' : '—');
     const premiumWithCoeffDisplay = (effFin.noDiscountReason || !effFin.coeffDown || effFin.premiumWithCoeff === effFin.premiumBase)
       ? '—'
       : Utils.fmtMoney(effFin.premiumWithCoeff);
@@ -1124,7 +1132,7 @@ const App = {
       ['БИН', z.bin],
       ['Наименование', insurerName],
       sg?.registrationDate ? ['Дата регистрации', sg.registrationDate] : null,
-      ['Юридический адрес', sg?.legalAddress || App.binData.legalAddress || '(поиск...)'],
+      ['Юридический адрес', legalAddress],
       ['Гос. участие', sgGov],
       ['Класс риска', effClass || '—'],
       ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
@@ -1136,7 +1144,7 @@ const App = {
       ['Период страхования', (z.periodFrom && z.periodTo)
         ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}` : '—'],
       ['Порядок оплаты', z.paymentOrder || '—'],
-      ['Страховые случаи', nsDetails ? `${nsLine}. ${nsDetails}` : nsLine],
+      ['Страховые случаи', nsHtml],
     ].filter(Boolean);
 
     // ========== ПОДРОБНОСТИ (скрыты по умолчанию) ==========
@@ -1160,31 +1168,40 @@ const App = {
     const BIG_FIELDS = new Set(['Наименование', 'Юридический адрес', 'Страховые случаи',
       'Наименование КРП (с учётом филиалов)', 'Наименование КРП (без учёта филиалов)',
       'Наименование КФС', 'Наименование сектора экономики']);
+    // SVG-иконка «copy» (двойные прямоугольники) — кладём inline для консистентности
+    const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     const renderItems = (rows) => rows.map(([l, v]) => {
       const display = (v == null || v === '') ? '—' : v;
+      // Спец-кейс: «Страховые случаи» рендерится как HTML-блок (multi-line)
+      // без кнопки копирования (она бы скопировала html-теги).
+      if (l === 'Страховые случаи') {
+        return `<div class="preview-item preview-item--big preview-item--claims">
+          <span class="pi-label">${l}</span>
+          <div class="pi-claims-block">${display}</div>
+        </div>`;
+      }
       const canCopy = display !== '—' && display !== '(поиск...)';
       const copyBtn = canCopy
-        ? `<button class="pi-copy" title="Скопировать" onclick="App.copyToClipboard('${escAttr(display)}', this)">⧉</button>`
+        ? `<button class="pi-copy" title="Скопировать" onclick="App.copyToClipboard('${escAttr(display)}', this)">${COPY_ICON}</button>`
         : '';
       const cls = ['preview-item'];
       if (MONEY_FIELDS.has(l)) cls.push('preview-item--money');
       if (BIG_FIELDS.has(l)) cls.push('preview-item--big');
       return `<div class="${cls.join(' ')}">
         <span class="pi-label">${l}</span>
-        <span class="pi-value">${display}</span>
-        ${canCopy ? copyBtn : ''}
+        <span class="pi-value-row">
+          <span class="pi-value">${display}</span>
+          ${copyBtn}
+        </span>
       </div>`;
     }).join('');
 
-    // Бейджи affiliated / no-discount
+    // Бейджи no-discount: остался только young_company (возраст компании
+    // не виден в основной информации). «Скидка не применяется из-за НС» убрано —
+    // эта инфа очевидна из блока «Страховые случаи».
     const badges = [];
-    if (effFin.isAffiliated) {
-      badges.push(`<div class="pi-banner pi-banner--info">ℹ Аффилированное лицо — пакет документов СД (АР · Заключение · СЗ на Правление · СЗ на СД) независимо от страх. суммы</div>`);
-    }
     if (effFin.noDiscountReason === 'young_company') {
       badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: компания младше 3 лет (возраст ≈ ${effFin.ageYears.toFixed(1)} г.)</div>`);
-    } else if (effFin.noDiscountReason === 'claims') {
-      badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: были НС за последние 3 года</div>`);
     }
 
     // Статус-плашка stat.gov.kz (loading/error/not-found)
@@ -1201,27 +1218,34 @@ const App = {
     // Состояние раскрытия только для «Подробностей» (ОКЭДы теперь всегда видны)
     const detailsOpen = localStorage.getItem('preview_details_open') === '1';
 
+    // ОКЭДы и Подробности объединены в один сворачиваемый блок «Подробности»
+    const okedsCount = companyOkeds.length || (effOked ? 1 : 0);
+    const okedsSubBlock = `
+      <div class="pi-subsection">
+        <div class="pi-subsection-title">ОКЭДы и виды деятельности <span class="pi-count">${okedsCount}</span></div>
+        ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
+      </div>`;
+    const detailsSubBlock = detailRows.length ? `
+      <div class="pi-subsection">
+        <div class="pi-subsection-title">Реквизиты <span class="pi-count">${detailRows.length}</span></div>
+        <div class="pi-subsection-grid">${renderItems(detailRows)}</div>
+      </div>` : '';
+    const collapsibleTotal = okedsCount + detailRows.length;
+
     grid.innerHTML =
       badges.join('') +
       `<div class="preview-section">
         <div class="preview-section-title">Основная информация</div>
         ${renderItems(mainRows)}
       </div>` +
-      `<div class="preview-section" id="preview-okeds-section">
-        <div class="preview-section-title">
-          ОКЭДы и виды деятельности
-          <span class="pi-count">${companyOkeds.length || (effOked ? 1 : 0)}</span>
-        </div>
-        ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
-      </div>` +
-      (detailRows.length ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
+      (collapsibleTotal > 0 ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
         <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewDetails()">
           <span class="section-chevron">▸</span>
-          Подробности (руководитель, КРП, КФС, КАТО, сектор, дата заявки)
-          <span class="pi-count">${detailRows.length}</span>
+          Подробности (ОКЭДы, руководитель, КРП, КФС, КАТО, сектор, дата заявки)
+          <span class="pi-count">${collapsibleTotal}</span>
         </div>
         <div class="preview-collapsible-body">
-          ${renderItems(detailRows)}
+          ${okedsSubBlock}${detailsSubBlock}
         </div>
       </div>` : '') +
       sgStatus;
@@ -1542,11 +1566,11 @@ const App = {
   WORKER_URL: 'https://bin-lookup.toibaev-kuanysh-617.workers.dev',
 
   async autoLookupBIN(bin) {
-    const statusEl = document.getElementById('bin-status');
-    statusEl.innerHTML = '<span class="bin-loading">Поиск по БИН ' + bin + '...</span>';
-
-    // Reset
-    App.binData = { legalAddress: null, govParticipation: null };
+    // Loading-флаг: чтобы preview мог показать «(поиск...)» только пока запрос
+    // реально в полёте. По завершении (успех/ошибка) переключается в false —
+    // и preview покажет «—» / «не определено» если данных не нашлось.
+    App.binData = { legalAddress: null, govParticipation: null, loading: true };
+    App.showPreview();
 
     try {
       const resp = await fetch(App.WORKER_URL + '?bin=' + bin);
@@ -1571,21 +1595,9 @@ const App = {
       }
     } catch (e) {
       console.warn('BIN lookup failed:', e.message);
+    } finally {
+      App.binData.loading = false;
     }
-
-    // Update status display
-    const parts = [];
-    if (App.binData.legalAddress) {
-      parts.push('<span class="bin-ok">Адрес: ' + App.binData.legalAddress + '</span>');
-    } else {
-      parts.push('<span class="bin-warn">Адрес не найден (проверьте Worker URL)</span>');
-    }
-    if (App.binData.govParticipation !== null) {
-      parts.push('<span class="bin-ok">Гос. участие: ' + App.binData.govParticipation + '</span>');
-    } else {
-      parts.push('<span class="bin-warn">Гос. участие: не определено</span>');
-    }
-    statusEl.innerHTML = parts.join('<br>');
 
     // Refresh preview with new data
     App.showPreview();
@@ -1613,9 +1625,9 @@ const App = {
     const periodToInput = document.getElementById('periodTo')?.value;
     const periodFrom = periodFromInput ? new Date(periodFromInput) : z.periodFrom;
     const periodTo = periodToInput ? new Date(periodToInput) : z.periodTo;
-    // Имя и адрес — приоритет statgov
+    // Имя и адрес — ТОЛЬКО из statgov (без fallback на pk.uchet.kz)
     const insurerName = (sg && sg.name) || z.insurerName || '';
-    const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '';
+    const legalAddress = (sg && sg.legalAddress) || '';
 
     return {
       generatedAt: new Date().toISOString(),
@@ -1877,14 +1889,14 @@ const App = {
       paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
     }
 
-    // Источник имени, юр. адреса, региона и деятельности: stat.gov.kz (реестр)
-    // считаем наиболее достоверным. Заявка / pk.uchet.kz — fallback.
+    // Источник имени, юр. адреса, региона и деятельности: ТОЛЬКО stat.gov.kz
+    // (реестр считается единственно достоверным). pk.uchet.kz больше не fallback.
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
     // Fallback на «(наименование не определено)» — иначе в СЗ строки вроде
     // «сделки с компанией – ${companyName}» дают «– .» при пустом name.
     const insurerName = (sg && sg.name) || z.insurerName || '(наименование не определено)';
-    const legalAddress = (sg && sg.legalAddress) || App.binData.legalAddress || '-';
+    const legalAddress = (sg && sg.legalAddress) || '-';
     const headFullname = (sg && sg.headFullname) || null;
 
     // Регион: заявка E3 → первая часть юр. адреса из stat.gov.kz.
@@ -2005,17 +2017,13 @@ const App = {
         banner.style.display = 'block';
         banner.className = 'organ-banner organ-banner--' + organ;
         const descr = isAff
-          ? `Совет директоров (аффилированное лицо — пакет СД независимо от страх. суммы)`
+          ? `Совет директоров (аффилированное лицо)`
           : Utils.describeOrgan(organ);
-        const pkgNames = pkg.map(p => ({
-          ar: 'АР', zakl: 'Заключение', protocol: 'Протокол',
-          sz_pravlenie: 'СЗ на Правление', sz_sd: 'СЗ на СД',
-        }[p])).join(' · ');
-        banner.innerHTML = `<strong>Определён орган:</strong> ${descr}<br><span class="ob-pkg">Пакет документов: ${pkgNames}</span>`;
+        banner.innerHTML = `<strong>Определён орган:</strong> ${descr}`;
       } else if (organ === 'standard' && hasZayavka) {
         banner.style.display = 'block';
         banner.className = 'organ-banner organ-banner--standard';
-        banner.innerHTML = `<strong>Стандартная процедура.</strong> <span class="ob-pkg">Достаточно АР и Заключения</span>`;
+        banner.innerHTML = `<strong>Стандартная процедура.</strong>`;
       } else {
         banner.style.display = 'none';
       }
@@ -2142,16 +2150,14 @@ const App = {
       // Empty — fall back to zayavka
       result.innerHTML = '';
       result.classList.remove('visible', 'oked-result--found', 'oked-result--missing');
-      if (hint) hint.textContent = App.zayavka
-        ? `— пусто, используется ОКЭД из заявки (${App.zayavka.oked || '—'})`
-        : '— пусто, используется ОКЭД из заявки';
+      if (hint) hint.textContent = '';
     } else if (!App.refData.classifier) {
-      if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
+      if (hint) hint.textContent = '';
       result.classList.add('visible', 'oked-result--missing');
       result.classList.remove('oked-result--found');
       result.innerHTML = '<span class="oked-warn">⚠ Загрузите справочник «Классификатор ОКЭД» для поиска класса и деятельности</span>';
     } else {
-      if (hint) hint.textContent = '— ручной ввод, перекрывает значение из заявки';
+      if (hint) hint.textContent = '';
       const found = Utils.lookupOked(code, App.refData.classifier);
       if (found) {
         result.classList.add('visible', 'oked-result--found');
@@ -2321,25 +2327,14 @@ const App = {
       tableCls = 'ad-value--warn';
     }
 
-    // --- 3. Итог — что в итоге в dropdown ---
-    let resultLine, resultCls, reasonLine;
+    // --- 3. Причина почему не выбрано (если не выбрано). «Итог» строка убрана —
+    //        выбранная деятельность видна в самом dropdown выше.
+    let reasonLine = '';
     if (!selActivity) {
-      resultLine = '✗ не выбрано';
-      resultCls = 'ad-value--err';
       if (!calcLoaded) reasonLine = 'Причина: калькулятор не загружен.';
       else if (!oked) reasonLine = 'Причина: ОКЭД не определён.';
       else if (!okedMap[oked]) reasonLine = `Причина: ОКЭД ${oked} отсутствует в маппинге калькулятора, statsnet ${(sn?.found ? 'не дал совпадения' : 'не нашёл отрасль')} — выберите вид деятельности вручную.`;
       else reasonLine = 'Причина: не выбрано (хотя маппинг по ОКЭДу есть — кликните «Применить» или сбросьте ручную метку).';
-    } else {
-      const isManual = oked && localStorage.getItem('manual_activity_for_oked') === oked;
-      const fromStatsnetMatch = (sn?.found && sn.industry && App._findActivityByIndustry?.(sn.industry)?.idx === Number(selIdx));
-      let source;
-      if (isManual) source = 'ручной выбор';
-      else if (App._activityAutoForOked === oked) source = fromStatsnetMatch ? 'auto из statsnet-match' : 'auto по ОКЭД';
-      else if (fromStatsnetMatch) source = 'из statsnet-match';
-      else source = 'из последнего сохранённого выбора';
-      resultLine = `✓ «${selActivity.name}» <span class="ad-hint">(источник: ${source})</span>`;
-      resultCls = 'ad-value--ok';
     }
 
     const row = (label, value, cls) =>
@@ -2350,7 +2345,6 @@ const App = {
       `<div class="ad-title">🔍 Диагностика выбора деятельности</div>` +
       row('statsnet:', snLine, snCls) +
       row('таблица:', tableLine, tableCls) +
-      row('итог:', resultLine, resultCls) +
       (reasonLine ? `<div class="ad-hint">${reasonLine}</div>` : '');
   },
 

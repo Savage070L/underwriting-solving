@@ -38,12 +38,16 @@ header p {
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .section-title {
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 16px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 18px;
+  padding-left: 12px;
+  border-left: 4px solid #4361ee;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  color: #1e293b;
+  line-height: 1.2;
 }
 .section-title .badge {
   font-size: 0.7rem;
@@ -484,8 +488,7 @@ header p {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 4px 28px 4px 0;
-  position: relative;
+  padding: 4px 0;
   min-width: 0;
 }
 .preview-item .pi-label {
@@ -493,6 +496,12 @@ header p {
   font-weight: 500;
   color: #64748b;
   line-height: 1.2;
+}
+.pi-value-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 .preview-item .pi-value {
   font-size: 0.92rem;
@@ -510,34 +519,58 @@ header p {
   grid-column: 1 / -1;
 }
 
-/* Copy button — появляется при наведении на элемент */
+/* Copy button — inline рядом со значением, иконка SVG */
 .pi-copy {
-  position: absolute;
-  top: 6px;
-  right: 0;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-size: 0.78rem;
-  line-height: 1.2;
+  padding: 2px;
+  border-radius: 4px;
   opacity: 0;
-  transition: opacity 0.15s, background .15s, color .15s, border-color .15s;
+  transition: opacity 0.15s, color .15s, background .15s;
 }
-.preview-item:hover .pi-copy { opacity: 1; }
+.preview-item:hover .pi-copy { opacity: 0.7; }
 .pi-copy:hover {
-  background: #eff6ff;
+  opacity: 1 !important;
   color: #1e40af;
-  border-color: #93c5fd;
+  background: #eff6ff;
 }
+.pi-copy svg { display: block; }
 .pi-copy--ok {
   color: #047857 !important;
   background: #d1fae5 !important;
-  border-color: #6ee7b7 !important;
   opacity: 1 !important;
 }
+.pi-copy--ok svg { display: none; }
+.pi-copy--ok::before { content: '✓'; font-weight: 700; font-size: 0.95rem; line-height: 1; }
+
+/* Подсекции внутри сворачиваемых «Подробностей» (ОКЭДы + Реквизиты) */
+.pi-subsection {
+  margin-top: 14px;
+}
+.pi-subsection:first-of-type { margin-top: 0; }
+.pi-subsection-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Сетка для пар label/value внутри подсекции (Реквизиты) */
+.pi-subsection-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 24px;
+}
+.pi-subsection-grid .preview-item--big { grid-column: 1 / -1; }
 
 /* Company ОКЭДы table */
 .company-okeds-wrap {
@@ -959,6 +992,31 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.12) !important;
 }
 
+/* === Блок «Страховые случаи» в превью === */
+.pi-claims-block {
+  margin-top: 4px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.45;
+}
+.pi-claims-header {
+  color: #0c4a6e;
+  margin-bottom: 4px;
+}
+.pi-claims-header strong { font-weight: 700; }
+.pi-claims-year {
+  padding: 2px 0 2px 16px;
+  font-weight: 500;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.88rem;
+}
+.pi-claims-year-num {
+  font-weight: 700;
+  color: #0c4a6e;
+}
+
 /* === Activity diagnostics — лог под «Вид деятельности» === */
 .activity-diagnostics {
   display: none;
@@ -1277,6 +1335,25 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   flex-shrink: 0;
 }
 .btn-clear--inline:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+/* Красный вариант для секционного reset-кнопки (например в section-title секции 3).
+   Сохраняет margin-left:auto (от .btn-clear) для прижатия к правому краю,
+   но получает красный border-look как у .btn-clear--inline. */
+.btn-clear--danger {
+  padding: 5px 12px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #b91c1c;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.btn-clear--danger:hover {
   background: #fef2f2;
   border-color: #fca5a5;
   color: #991b1b;
