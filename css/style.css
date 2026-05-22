@@ -736,6 +736,71 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   opacity: 0.8;
 }
 
+/* === Doc number — обособленный блок под verdict-card === */
+.doc-number-group {
+  margin-top: 4px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+}
+.doc-number-label {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px !important;
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+}
+.doc-number-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+.doc-number-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.doc-number-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+.doc-number-sub {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #64748b;
+  line-height: 1.35;
+}
+.doc-number-input {
+  width: 100%;
+  padding: 10px 14px !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  background: #f8fafc !important;
+  border: 2px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  font-family: inherit;
+}
+.doc-number-input:focus {
+  outline: none !important;
+  border-color: #4361ee !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.12) !important;
+}
+
 /* === Activity diagnostics — лог под «Вид деятельности» === */
 .activity-diagnostics {
   display: none;

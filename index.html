@@ -157,10 +157,6 @@
       <div class="section-title">1. Параметры страхования</div>
       <div class="section-sub">Введите/скорректируйте параметры — на их основе будут пересчитаны показатели в аналитике.</div>
       <div class="form-grid">
-        <div class="form-group">
-          <label for="docNumber">Номер АР / Заключения</label>
-          <input type="text" id="docNumber" placeholder="Например: 13">
-        </div>
         <div class="checkbox-group form-group">
           <input type="checkbox" id="nonResident">
           <label for="nonResident">Нерезидент</label>
@@ -321,6 +317,16 @@
             <option value="defer">Отложение страхования на определенный срок</option>
           </select>
           <div class="verdict-card-hint" id="verdict-hint"></div>
+        </div>
+        <div class="form-group full-width doc-number-group">
+          <label for="docNumber" class="doc-number-label">
+            <span class="doc-number-icon">📄</span>
+            <span class="doc-number-text">
+              <span class="doc-number-title">Номер документа</span>
+              <span class="doc-number-sub">— войдёт в шапку АР, Заключения, протокола и служебных записок</span>
+            </span>
+          </label>
+          <input type="text" id="docNumber" class="doc-number-input" placeholder="Например: 13">
         </div>
       </div>
       <div class="organ-banner" id="organ-banner" style="display:none"></div>
