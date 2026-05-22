@@ -121,7 +121,9 @@ const App = {
   },
 
   // Сводка по «эффективным» финансовым параметрам с учётом всех overrides:
-  //   - аффилированное лицо: страх.сумма = 85 000 × работники × 12, организация = «СД»
+  //   - аффилированное лицо: организация = «СД» (все документы по СД),
+  //     НО страховая сумма/премия НЕ форсируются — берутся как ввёл пользователь
+  //     (или из заявки). Раньше форсировалась ставка 85 000 ₸/мес — отказались.
   //   - молодая компания / НС: скидка не применяется (через _effectiveCoeffInfo)
   // Используется в showPreview и в _collectData — единый источник правды.
   _effectiveFinancials(z) {
@@ -129,11 +131,8 @@ const App = {
     const aff = App._isAffiliatedBin(z.bin);
     const isAffiliated = !!aff;
 
-    // Страховая сумма (с overridом для аффилированных)
-    let insuranceSum = z.insuranceSum;
-    if (isAffiliated && Number.isFinite(z.workers) && z.workers > 0) {
-      insuranceSum = App._round2(Utils.AFFILIATED_AVG_SALARY * z.workers * 12);
-    }
+    // Страховая сумма — как ввёл пользователь / как в заявке
+    const insuranceSum = z.insuranceSum;
 
     // Тариф из текущего ОКЭДа / справочника
     const resolved = App._resolveOked ? App._resolveOked() : { riskClass: z.riskClass, oked: z.oked };
@@ -163,7 +162,7 @@ const App = {
       coeffDown: effCoeff.coeffDown,
       noDiscountReason: effCoeff.noDiscountReason,
       ageYears: effCoeff.ageYears,
-      avgSalary: isAffiliated ? Utils.AFFILIATED_AVG_SALARY : App._effectiveAvgSalary(z),
+      avgSalary: App._effectiveAvgSalary(z),
       organ,
       docPackage: Utils.determineDocPackage(organ),
     };
@@ -748,8 +747,6 @@ const App = {
 
   // Применяет правила mutual-exclusive: блокирует второе поле, выставляет
   // посчитанное значение если доступны workers.
-  // Для аффилированных лиц: оба поля заблокированы, avg=85 000 (фикс. ставка),
-  // ФОТ автоматически = 85 000 × работники × 12.
   _syncManualFields() {
     const fotEl = document.getElementById('manualFot');
     const avgEl = document.getElementById('manualAvgSalary');
@@ -762,27 +759,10 @@ const App = {
     const okWorkers = Number.isFinite(workers) && workers > 0;
     const fotVal = App._parseMoney(fotEl.value);
     const avgVal = App._parseMoney(avgEl.value);
-    const binStr = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
-    const aff = App._isAffiliatedBin(binStr);
 
-    if (aff) {
-      // Affiliated: фиксируем avg=85 000, ФОТ авто-считается из работников
-      avgEl.value = App._formatMoney(Utils.AFFILIATED_AVG_SALARY);
-      avgEl.disabled = true;
-      fotEl.disabled = true;
-      if (tagA) { tagA.style.display = ''; tagA.textContent = 'фикс. 85 000 ₸/мес'; }
-      if (okWorkers) {
-        fotEl.value = App._formatMoney(Utils.AFFILIATED_AVG_SALARY * workers * 12);
-        if (tagF) { tagF.style.display = ''; tagF.textContent = 'посчитано'; }
-      } else {
-        fotEl.value = '';
-        if (tagF) tagF.style.display = 'none';
-      }
-      App._manualPrimary = 'avg'; // условно — для согласованности при apply
-      return;
-    }
-    // Сбросить «фикс. 85 000» подпись на «посчитано», если БИН перестал быть аффилированным
+    // Сброс подписей на «посчитано» (раньше для аффилированных была «фикс. 85 000»)
     if (tagA) tagA.textContent = 'посчитано';
+    if (tagF) tagF.textContent = 'посчитано';
 
     if (App._manualPrimary === 'fot' && Number.isFinite(fotVal) && fotVal > 0) {
       avgEl.disabled = true;
@@ -835,32 +815,26 @@ const App = {
     let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
     let cls = '';
 
-    if (aff) {
-      if (!okWorkers) {
-        msg = `⚠ Аффилированное лицо «${aff.name || cleanBin}» — укажите количество работников. Применится фиксированная ставка ${App._formatMoney(Utils.AFFILIATED_AVG_SALARY)} ₸/мес, пакет документов: СД.`;
-        cls = 'manual-input-hint--err';
-      } else {
-        const fixedFot = Utils.AFFILIATED_AVG_SALARY * workers * 12;
-        msg = `АФФИЛИРОВАННОЕ ЛИЦО «${aff.name || cleanBin}»: фикс. ставка ${App._formatMoney(Utils.AFFILIATED_AVG_SALARY)} ₸/мес × ${workers} × 12 = ${App._formatMoney(fixedFot)} ₸. Пакет документов: СД (АР · Заключение · СЗ на Правление · СЗ на СД).`;
-        cls = 'manual-input-hint--ok';
-      }
+    // Подсказка идентична для аффилированных и обычных — премию вводит сам
+    // пользователь. Для аффилированных меняется только пакет документов (СД).
+    const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
+    if (okBin && okWorkers && effFot > 0) {
+      const source = primary === 'fot' || (hasFot && primary == null)
+        ? 'указан напрямую'
+        : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
+      const affNote = aff
+        ? ` ⚠ Аффилированное лицо «${aff.name || cleanBin}» — пакет документов будет СД (АР · Заключение · СЗ на Правление · СЗ на СД).`
+        : '';
+      msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.${affNote}`;
+      cls = 'manual-input-hint--ok';
     } else {
-      const effFot = primary === 'fot' ? fot : (primary === 'avg' && okWorkers ? avg * workers * 12 : (hasFot ? fot : (hasAvg && okWorkers ? avg * workers * 12 : 0)));
-      if (okBin && okWorkers && effFot > 0) {
-        const source = primary === 'fot' || (hasFot && primary == null)
-          ? 'указан напрямую'
-          : `= ${App._formatMoney(avg)} ₸ × ${workers} × 12 мес.`;
-        msg = `Готово к применению: ФОТ = ${App._formatMoney(effFot)} ₸ (${source}). Страховая сумма = ФОТ. Премия рассчитается после поиска ОКЭД через stat.gov.kz.`;
-        cls = 'manual-input-hint--ok';
-      } else {
-        const missing = [];
-        if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
-        if (!okWorkers) missing.push('кол-во работников > 0');
-        if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
-        if (missing.length) {
-          msg = 'Не хватает: ' + missing.join(', ') + '.';
-          cls = 'manual-input-hint--err';
-        }
+      const missing = [];
+      if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
+      if (!okWorkers) missing.push('кол-во работников > 0');
+      if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
+      if (missing.length) {
+        msg = 'Не хватает: ' + missing.join(', ') + '.';
+        cls = 'manual-input-hint--err';
       }
     }
 
@@ -883,18 +857,16 @@ const App = {
       App.showMsg('Введите количество работников (целое число > 0).', 'error');
       return;
     }
-    // Для аффилированных лиц — фикс. ставка 85 000 ₸/мес × работники × 12;
-    // ФОТ и средняя ЗП из формы игнорируются.
-    const aff = App._isAffiliatedBin(bin);
+    // ФОТ и avg — точная арифметика без округления до целых.
+    // Тиыны (2 знака после запятой) сохраняются для всех денежных полей.
+    // Для аффилированных лиц особой логики нет — премию вводит пользователь
+    // как обычно. Меняется только пакет документов (см. _effectiveFinancials).
     const fotRaw = App._readMoneyInput('manualFot');
     const avgRaw = App._readMoneyInput('manualAvgSalary');
     const primary = App._manualPrimary; // 'fot' | 'avg' | null
     let fot;
     let avgSalary = null;
-    if (aff) {
-      avgSalary = Utils.AFFILIATED_AVG_SALARY;
-      fot = App._round2(avgSalary * workers * 12);
-    } else if (primary === 'avg') {
+    if (primary === 'avg') {
       if (!Number.isFinite(avgRaw) || avgRaw <= 0) {
         App.showMsg('Введите среднюю зарплату > 0.', 'error');
         return;
@@ -1122,7 +1094,7 @@ const App = {
     if (effFin.isAffiliated) {
       sec4.push([
         'ℹ Аффилированное лицо',
-        `ставка ${Utils.fmtMoney(Utils.AFFILIATED_AVG_SALARY)}/мес, пакет СД (страх. сумма = ${Utils.fmtMoney(effFin.insuranceSum)})`,
+        `пакет документов: СД (АР · Заключение · СЗ на Правление · СЗ на СД) независимо от страх. суммы`,
       ]);
     }
     if (effFin.noDiscountReason === 'young_company') {
