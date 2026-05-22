@@ -1189,8 +1189,7 @@ const App = {
       sgStatus = `<div class="preview-section"><div class="pi-warn">БИН ${App.statgov.bin || ''} не найден в реестре stat.gov.kz.</div></div>`;
     }
 
-    // Состояние раскрытия для блока ОКЭДов и подробностей
-    const okedsOpen = localStorage.getItem('preview_okeds_open') !== '0';
+    // Состояние раскрытия только для «Подробностей» (ОКЭДы теперь всегда видны)
     const detailsOpen = localStorage.getItem('preview_details_open') === '1';
 
     grid.innerHTML =
@@ -1199,15 +1198,12 @@ const App = {
         <div class="preview-section-title">Основная информация</div>
         ${renderItems(mainRows)}
       </div>` +
-      `<div class="preview-section preview-collapsible ${okedsOpen ? 'is-open' : ''}" id="preview-okeds-section">
-        <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewOkeds()">
-          <span class="section-chevron">▸</span>
+      `<div class="preview-section" id="preview-okeds-section">
+        <div class="preview-section-title">
           ОКЭДы и виды деятельности
           <span class="pi-count">${companyOkeds.length || (effOked ? 1 : 0)}</span>
         </div>
-        <div class="preview-collapsible-body">
-          ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
-        </div>
+        ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
       </div>` +
       (detailRows.length ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
         <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewDetails()">
@@ -1222,14 +1218,6 @@ const App = {
       sgStatus;
 
     panel.classList.add('visible');
-  },
-
-  togglePreviewOkeds() {
-    const el = document.getElementById('preview-okeds-section');
-    if (!el) return;
-    const open = !el.classList.contains('is-open');
-    el.classList.toggle('is-open', open);
-    localStorage.setItem('preview_okeds_open', open ? '1' : '0');
   },
 
   togglePreviewDetails() {
