@@ -427,86 +427,117 @@ header p {
   cursor: pointer;
 }
 
-/* Preview panel */
+/* === Preview panel — card-style layout === */
 .preview-panel {
   display: none;
-  background: #fafbfc;
-  border: 1px solid #e4e7ec;
-  border-radius: 8px;
-  padding: 16px;
-  margin-top: 12px;
+  background: linear-gradient(135deg, #fafbfc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
 }
-.preview-panel.visible {
-  display: block;
-}
+.preview-panel.visible { display: block; }
 .preview-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.preview-item {
-  font-size: 0.8rem;
-}
-.preview-item .pi-label {
-  color: #667085;
-  font-weight: 500;
-}
-.preview-item .pi-value {
-  color: #1a1a2e;
-  font-weight: 600;
-}
-.preview-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.pi-copy {
-  background: transparent;
-  border: 1px solid #e4e7ec;
-  color: #667085;
-  cursor: pointer;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  line-height: 1.2;
-  transition: all 0.15s;
-}
-.pi-copy:hover {
-  background: #f0f2f5;
-  color: #344054;
-  border-color: #d0d5dd;
-}
-.pi-copy--ok {
-  color: #027a48 !important;
-  background: #d1fadf;
-  opacity: 1 !important;
-}
+
+/* Section — белая карточка с тонкой рамкой */
 .preview-section {
-  grid-column: 1 / -1;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed #d0d5dd;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 18px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 14px 24px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 .preview-section-title {
   grid-column: 1 / -1;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #344054;
-  margin-bottom: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin: 0 0 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .preview-section .pi-loading,
 .preview-section .pi-warn,
 .preview-section .pi-hint {
   grid-column: 1 / -1;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
 }
 .preview-section .pi-loading { color: #667085; font-style: italic; }
 .preview-section .pi-warn { color: #b54708; }
 .preview-section .pi-hint { color: #667085; font-size: 0.75rem; margin-top: 2px; }
+
+/* Preview item — вертикальный стек: label сверху, value снизу */
+.preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 28px 4px 0;
+  position: relative;
+  min-width: 0;
+}
+.preview-item .pi-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.2;
+}
+.preview-item .pi-value {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.preview-item--money .pi-value {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.95rem;
+  color: #0c4a6e;
+}
+.preview-item--big {
+  grid-column: 1 / -1;
+}
+
+/* Copy button — появляется при наведении на элемент */
+.pi-copy {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  opacity: 0;
+  transition: opacity 0.15s, background .15s, color .15s, border-color .15s;
+}
+.preview-item:hover .pi-copy { opacity: 1; }
+.pi-copy:hover {
+  background: #eff6ff;
+  color: #1e40af;
+  border-color: #93c5fd;
+}
+.pi-copy--ok {
+  color: #047857 !important;
+  background: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+  opacity: 1 !important;
+}
 
 /* Company ОКЭДы table */
 .company-okeds-wrap {

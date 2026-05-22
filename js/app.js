@@ -1154,14 +1154,23 @@ const App = {
     detailRows.push(['Дата заявки', z.docDate ? Utils.fmtDateShort(z.docDate) : '—']);
 
     const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    // Денежные поля — выделить моноширинным шрифтом
+    const MONEY_FIELDS = new Set(['Страховая сумма', 'Страховая премия', 'Премия с поправкой']);
+    // Длинные текстовые поля занимают всю ширину (избегаем колонок с переносами)
+    const BIG_FIELDS = new Set(['Наименование', 'Юридический адрес', 'Страховые случаи',
+      'Наименование КРП (с учётом филиалов)', 'Наименование КРП (без учёта филиалов)',
+      'Наименование КФС', 'Наименование сектора экономики']);
     const renderItems = (rows) => rows.map(([l, v]) => {
       const display = (v == null || v === '') ? '—' : v;
       const canCopy = display !== '—' && display !== '(поиск...)';
       const copyBtn = canCopy
         ? `<button class="pi-copy" title="Скопировать" onclick="App.copyToClipboard('${escAttr(display)}', this)">⧉</button>`
         : '';
-      return `<div class="preview-item">
-        <span class="pi-label">${l}:</span>
+      const cls = ['preview-item'];
+      if (MONEY_FIELDS.has(l)) cls.push('preview-item--money');
+      if (BIG_FIELDS.has(l)) cls.push('preview-item--big');
+      return `<div class="${cls.join(' ')}">
+        <span class="pi-label">${l}</span>
         <span class="pi-value">${display}</span>
         ${canCopy ? copyBtn : ''}
       </div>`;
