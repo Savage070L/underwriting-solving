@@ -736,6 +736,97 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   opacity: 0.8;
 }
 
+/* === Preview — раскрывающиеся подразделы (ОКЭДы, Подробности) === */
+.preview-collapsible .preview-section-title--clickable {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color .15s;
+}
+.preview-collapsible .preview-section-title--clickable:hover { color: #4361ee; }
+.preview-collapsible .section-chevron {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: #98a2b3;
+  transition: transform .2s ease;
+  width: 14px;
+}
+.preview-collapsible.is-open .section-chevron {
+  transform: rotate(90deg);
+  color: #4361ee;
+}
+.preview-collapsible-body {
+  display: none;
+  margin-top: 10px;
+}
+.preview-collapsible.is-open .preview-collapsible-body {
+  display: block;
+  animation: section-expand 0.2s ease;
+}
+.pi-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 10px;
+}
+
+/* ОКЭД-rows (внутри preview-collapsible) */
+.pi-oked-row {
+  display: grid;
+  grid-template-columns: 90px 110px 1fr;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px dashed #e2e8f0;
+  font-size: 0.83rem;
+  align-items: baseline;
+}
+.pi-oked-row:last-child { border-bottom: none; }
+.pi-oked-row--active { background: #f0fdf4; border-radius: 6px; }
+.pi-oked-code { font-weight: 700; color: #1e293b; font-family: ui-monospace, monospace; }
+.pi-oked-kind { font-size: 0.75rem; color: #64748b; }
+.pi-oked-name { color: #334155; }
+.pi-active-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  background: #10b981;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+/* Преview-banners (affiliated / no-discount) */
+.pi-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.pi-banner--info {
+  background: #eff6ff;
+  border-left: 4px solid #3b82f6;
+  color: #1e40af;
+}
+.pi-banner--warn {
+  background: #fffbeb;
+  border-left: 4px solid #f59e0b;
+  color: #92400e;
+}
+.muted { color: #94a3b8; }
+
 /* === Раскрывающийся раздел (Справочники) === */
 .section-title--clickable {
   cursor: pointer;

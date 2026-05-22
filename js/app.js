@@ -1070,69 +1070,88 @@ const App = {
       if (co && co.name) effActivityName = co.name;
     }
 
-    // ========== СЕКЦИЯ 1: Страхователь ==========
+    // Эффективные финансы с учётом overrides (аффилирован, young, НС).
+    const effFin = App._effectiveFinancials(z);
     const insurerName = sg?.name ? Utils.formatCompanyName(sg.name) : Utils.formatCompanyName(z.insurerName);
-    const sec1 = [
+
+    // Сборка всех ОКЭДов компании (primary + secondary) с их названиями.
+    const companyOkeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+    let okedsBlockHtml = '';
+    if (companyOkeds.length > 0) {
+      okedsBlockHtml = companyOkeds.map(o => {
+        const kindLabel = o.kind === 'primary' ? 'основной' : 'вторичный';
+        const isActive = o.code === effOked;
+        const activeBadge = isActive ? ' <span class="pi-active-badge">активный</span>' : '';
+        return `<div class="pi-oked-row${isActive ? ' pi-oked-row--active' : ''}">
+          <span class="pi-oked-code">${o.code}</span>
+          <span class="pi-oked-kind">(${kindLabel})${activeBadge}</span>
+          <span class="pi-oked-name">${o.name || '<em class="muted">нет в классификаторе</em>'}</span>
+        </div>`;
+      }).join('');
+    } else if (effOked) {
+      okedsBlockHtml = `<div class="pi-oked-row pi-oked-row--active">
+        <span class="pi-oked-code">${effOked}</span>
+        <span class="pi-oked-kind">(активный)</span>
+        <span class="pi-oked-name">${effActivityName || '<em class="muted">—</em>'}</span>
+      </div>`;
+    }
+
+    // НС: количество, разбивка по годам/страховщикам, сумма
+    let nsLine = 'НС не было';
+    let nsDetails = '';
+    if (App.claims && App.claims.totalClaims > 0) {
+      const total = App.claims.totalClaims;
+      const byYear = App.claims.analytics?.byYear || [];
+      const byInsurer = App.claims.analytics?.byInsurer || [];
+      const sumTotal = App.claims.analytics?.sumTotal3y || 0;
+      const fmtTg = (v) => Utils.fmtMoney(v);
+      nsLine = `${total} НС за последние 3 года, сумма ${fmtTg(sumTotal)}`;
+      const byYearStr = byYear.map(b => `${b.year}: ${b.cases} НС (${fmtTg(b.sum)})`).join('; ');
+      const byInsurerStr = byInsurer.map(b => `${b.insurer}: ${b.cases} НС (${fmtTg(b.sum)})`).join('; ');
+      const parts = [];
+      if (byYearStr) parts.push(`по годам — ${byYearStr}`);
+      if (byInsurerStr) parts.push(`по страховщикам — ${byInsurerStr}`);
+      if (parts.length) nsDetails = parts.join('. ');
+    }
+
+    // ========== ОСНОВНАЯ ИНФОРМАЦИЯ (всегда видна) ==========
+    const sgGov = App.binData.govParticipation || z.govParticipation || '(поиск...)';
+    const premiumWithCoeffDisplay = (effFin.noDiscountReason || !effFin.coeffDown || effFin.premiumWithCoeff === effFin.premiumBase)
+      ? '—'
+      : Utils.fmtMoney(effFin.premiumWithCoeff);
+
+    const mainRows = [
       ['БИН', z.bin],
       ['Наименование', insurerName],
       sg?.registrationDate ? ['Дата регистрации', sg.registrationDate] : null,
-      sg?.headFullname ? ['ФИО руководителя', sg.headFullname] : null,
-      ['КАТО', sg?.kato || '—'],
       ['Юридический адрес', sg?.legalAddress || App.binData.legalAddress || '(поиск...)'],
-    ].filter(Boolean);
-
-    // ========== СЕКЦИЯ 2: Деятельность ==========
-    const sec2 = [
-      ['Основной код ОКЭД', sg?.okedPrimaryCode || effOked || '—'],
-      ['Наименование вида экономической деятельности', effActivityName || '—'],
-    ];
-    if (sg?.okedSecondaryCodes && sg.okedSecondaryCodes.length) {
-      sec2.push(['Вторичный код ОКЭД', sg.okedSecondaryCodes.join(', ')]);
-    } else if (sg?.okedSecondaryCode) {
-      sec2.push(['Вторичный код ОКЭД', sg.okedSecondaryCode]);
-    }
-    sec2.push(['Активный ОКЭД для документов', effOked || '—']);
-    sec2.push(['Класс риска', effClass || '—']);
-    sec2.push(['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—']);
-
-    // ========== СЕКЦИЯ 3: Размер и собственность ==========
-    const sec3 = [];
-    if (sg?.krpWithBranchesCode) sec3.push(['Код КРП (с учётом филиалов)', sg.krpWithBranchesCode]);
-    if (sg?.krpWithBranchesName) sec3.push(['Наименование КРП', sg.krpWithBranchesName]);
-    if (sg?.krpWithoutBranchesCode) sec3.push(['Код КРП (без учёта филиалов)', sg.krpWithoutBranchesCode]);
-    if (sg?.krpWithoutBranchesName) sec3.push(['Наименование КРП', sg.krpWithoutBranchesName]);
-    if (sg?.kfsCode) sec3.push(['Код КФС', sg.kfsCode]);
-    if (sg?.kfsName) sec3.push(['Наименование КФС', sg.kfsName]);
-    if (sg?.sectorCode) sec3.push(['Код сектора экономики', sg.sectorCode]);
-    if (sg?.sectorName) sec3.push(['Наименование сектора экономики', sg.sectorName]);
-    sec3.push(['Гос. участие', App.binData.govParticipation || z.govParticipation || '(поиск...)']);
-
-    // Эффективные финансы с учётом overrides (аффилирован, young, НС).
-    const effFin = App._effectiveFinancials(z);
-
-    // ========== СЕКЦИЯ 4: Параметры договора ==========
-    const sec4 = [
+      ['Гос. участие', sgGov],
+      ['Класс риска', effClass || '—'],
+      ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
+      ['Страховая сумма', Utils.fmtMoney(effFin.insuranceSum)],
+      ['Работники', Utils.fmtInteger(z.workers)],
+      ['Страховая премия', Utils.fmtMoney(effFin.premiumBase)],
+      ['Премия с поправкой', premiumWithCoeffDisplay],
       ['Регион', z.region || '—'],
-      ['Дата заявки', z.docDate ? Utils.fmtDateShort(z.docDate) : '—'],
       ['Период страхования', (z.periodFrom && z.periodTo)
         ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}` : '—'],
-      ['Работники', Utils.fmtInteger(z.workers)],
-      ['Страховая сумма', Utils.fmtMoney(effFin.insuranceSum)],
-      ['Премия', Utils.fmtMoney(effFin.premiumBase)],
-      ['Премия с поправкой', Utils.fmtMoney(effFin.premiumWithCoeff)],
-      ['Порядок оплаты', z.paymentOrder],
-    ];
-    if (effFin.isAffiliated) {
-      sec4.push([
-        'ℹ Аффилированное лицо',
-        `пакет документов: СД (АР · Заключение · СЗ на Правление · СЗ на СД) независимо от страх. суммы`,
-      ]);
-    }
-    if (effFin.noDiscountReason === 'young_company') {
-      sec4.push(['⚠ Скидка не применяется', `компания младше 3 лет (возраст ≈ ${effFin.ageYears.toFixed(1)} г.)`]);
-    } else if (effFin.noDiscountReason === 'claims') {
-      sec4.push(['⚠ Скидка не применяется', 'были НС за последние 3 года']);
-    }
+      ['Порядок оплаты', z.paymentOrder || '—'],
+      ['Страховые случаи', nsDetails ? `${nsLine}. ${nsDetails}` : nsLine],
+    ].filter(Boolean);
+
+    // ========== ПОДРОБНОСТИ (скрыты по умолчанию) ==========
+    const detailRows = [];
+    if (sg?.headFullname) detailRows.push(['ФИО руководителя', sg.headFullname]);
+    if (sg?.kato) detailRows.push(['КАТО', sg.kato]);
+    if (sg?.krpWithBranchesCode) detailRows.push(['Код КРП (с учётом филиалов)', sg.krpWithBranchesCode]);
+    if (sg?.krpWithBranchesName) detailRows.push(['Наименование КРП (с учётом филиалов)', sg.krpWithBranchesName]);
+    if (sg?.krpWithoutBranchesCode) detailRows.push(['Код КРП (без учёта филиалов)', sg.krpWithoutBranchesCode]);
+    if (sg?.krpWithoutBranchesName) detailRows.push(['Наименование КРП (без учёта филиалов)', sg.krpWithoutBranchesName]);
+    if (sg?.kfsCode) detailRows.push(['Код КФС', sg.kfsCode]);
+    if (sg?.kfsName) detailRows.push(['Наименование КФС', sg.kfsName]);
+    if (sg?.sectorCode) detailRows.push(['Код сектора экономики', sg.sectorCode]);
+    if (sg?.sectorName) detailRows.push(['Наименование сектора экономики', sg.sectorName]);
+    detailRows.push(['Дата заявки', z.docDate ? Utils.fmtDateShort(z.docDate) : '—']);
 
     const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     const renderItems = (rows) => rows.map(([l, v]) => {
@@ -1144,17 +1163,22 @@ const App = {
       return `<div class="preview-item">
         <span class="pi-label">${l}:</span>
         <span class="pi-value">${display}</span>
-        ${copyBtn}
+        ${canCopy ? copyBtn : ''}
       </div>`;
     }).join('');
 
-    const renderSection = (title, rows) => `
-      <div class="preview-section">
-        <div class="preview-section-title">${title}</div>
-        ${renderItems(rows)}
-      </div>`;
+    // Бейджи affiliated / no-discount
+    const badges = [];
+    if (effFin.isAffiliated) {
+      badges.push(`<div class="pi-banner pi-banner--info">ℹ Аффилированное лицо — пакет документов СД (АР · Заключение · СЗ на Правление · СЗ на СД) независимо от страх. суммы</div>`);
+    }
+    if (effFin.noDiscountReason === 'young_company') {
+      badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: компания младше 3 лет (возраст ≈ ${effFin.ageYears.toFixed(1)} г.)</div>`);
+    } else if (effFin.noDiscountReason === 'claims') {
+      badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: были НС за последние 3 года</div>`);
+    }
 
-    // Статус-плашка stat.gov.kz (отдельно, если loading/error/not-found)
+    // Статус-плашка stat.gov.kz (loading/error/not-found)
     let sgStatus = '';
     if (App.statgov?.loading) {
       sgStatus = `<div class="preview-section"><div class="pi-loading">Поиск в реестре stat.gov.kz…</div></div>`;
@@ -1165,14 +1189,55 @@ const App = {
       sgStatus = `<div class="preview-section"><div class="pi-warn">БИН ${App.statgov.bin || ''} не найден в реестре stat.gov.kz.</div></div>`;
     }
 
+    // Состояние раскрытия для блока ОКЭДов и подробностей
+    const okedsOpen = localStorage.getItem('preview_okeds_open') !== '0';
+    const detailsOpen = localStorage.getItem('preview_details_open') === '1';
+
     grid.innerHTML =
-      renderSection('Страхователь', sec1) +
-      renderSection('Деятельность', sec2) +
-      renderSection('Размер и собственность', sec3) +
-      renderSection('Параметры договора', sec4) +
+      badges.join('') +
+      `<div class="preview-section">
+        <div class="preview-section-title">Основная информация</div>
+        ${renderItems(mainRows)}
+      </div>` +
+      `<div class="preview-section preview-collapsible ${okedsOpen ? 'is-open' : ''}" id="preview-okeds-section">
+        <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewOkeds()">
+          <span class="section-chevron">▸</span>
+          ОКЭДы и виды деятельности
+          <span class="pi-count">${companyOkeds.length || (effOked ? 1 : 0)}</span>
+        </div>
+        <div class="preview-collapsible-body">
+          ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
+        </div>
+      </div>` +
+      (detailRows.length ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
+        <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewDetails()">
+          <span class="section-chevron">▸</span>
+          Подробности (руководитель, КРП, КФС, КАТО, сектор, дата заявки)
+          <span class="pi-count">${detailRows.length}</span>
+        </div>
+        <div class="preview-collapsible-body">
+          ${renderItems(detailRows)}
+        </div>
+      </div>` : '') +
       sgStatus;
 
     panel.classList.add('visible');
+  },
+
+  togglePreviewOkeds() {
+    const el = document.getElementById('preview-okeds-section');
+    if (!el) return;
+    const open = !el.classList.contains('is-open');
+    el.classList.toggle('is-open', open);
+    localStorage.setItem('preview_okeds_open', open ? '1' : '0');
+  },
+
+  togglePreviewDetails() {
+    const el = document.getElementById('preview-details-section');
+    if (!el) return;
+    const open = !el.classList.contains('is-open');
+    el.classList.toggle('is-open', open);
+    localStorage.setItem('preview_details_open', open ? '1' : '0');
   },
 
   // Открывает выбранный AI-сервис с пред-заполненным промптом про компанию.
