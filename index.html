@@ -13,13 +13,15 @@
       <p>Standard Life — все данные обрабатываются локально</p>
     </header>
 
-    <!-- Reference files (uploaded once, cached) -->
-    <div class="section">
-      <div class="section-title">
+    <!-- Reference files (uploaded once, cached) — раскрывающийся раздел -->
+    <div class="section section-collapsible" id="refs-section">
+      <div class="section-title section-title--clickable" onclick="App.toggleRefsSection(event)">
+        <span class="section-chevron" id="refs-chevron">▸</span>
         Справочники
         <span class="badge" id="ref-badge">0/6 загружено</span>
-        <button class="btn-clear" onclick="App.clearCache()">Очистить кэш</button>
+        <button class="btn-clear" onclick="App.clearCache(); event.stopPropagation()">Очистить кэш</button>
       </div>
+      <div class="section-collapsible-body" id="refs-body">
       <div class="upload-grid">
         <div class="upload-zone" id="zone-popravka" onclick="this.querySelector('input').click()">
           <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('popravka', event)">❌</button>
@@ -63,6 +65,7 @@
           <div class="uz-status" id="status-affiliated">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('affiliated', this.files[0])">
         </div>
+      </div>
       </div>
     </div>
 

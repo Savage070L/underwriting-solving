@@ -736,6 +736,42 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   opacity: 0.8;
 }
 
+/* === Раскрывающийся раздел (Справочники) === */
+.section-title--clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: color .15s;
+}
+.section-title--clickable:hover { color: #4361ee; }
+.section-chevron {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: #98a2b3;
+  transition: transform .2s ease;
+  width: 14px;
+  text-align: center;
+}
+.section-collapsible.is-open .section-chevron {
+  transform: rotate(90deg);
+  color: #4361ee;
+}
+.section-collapsible-body {
+  display: none;
+  margin-top: 16px;
+}
+.section-collapsible.is-open .section-collapsible-body {
+  display: block;
+  animation: section-expand 0.25s ease;
+}
+@keyframes section-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Свёрнутый вид: section-title с уменьшенным margin */
+.section-collapsible:not(.is-open) .section-title {
+  margin-bottom: 0;
+}
+
 /* === Doc number — обособленный блок под verdict-card === */
 .doc-number-group {
   margin-top: 4px;

@@ -28,6 +28,37 @@ const App = {
     // кейса убедимся, что превью, кнопки и аналитика отражают актуальное
     // состояние (включая возможные изменения справочников между сессиями).
     App._refreshDerivedData();
+    // Состояние раскрытия раздела «Справочники» — восстановить из localStorage,
+    // либо умолчание: свёрнут если все 6/6 загружены, иначе раскрыт.
+    App._initRefsSection();
+  },
+
+  _initRefsSection() {
+    const section = document.getElementById('refs-section');
+    if (!section) return;
+    const saved = localStorage.getItem('refs_section_open');
+    let open;
+    if (saved === '1') open = true;
+    else if (saved === '0') open = false;
+    else {
+      // Умолчание: если все 6 справочников загружены — свёрнут (чтобы не мешал),
+      // иначе раскрыт (чтобы пользователь видел, что нужно загрузить).
+      const count = ['popravka','normativ','ku','calculator','classifier','affiliated']
+        .filter(k => !!App.refData[k]).length;
+      open = count < 6;
+    }
+    section.classList.toggle('is-open', open);
+  },
+
+  // Клик по заголовку «Справочники» — раскрыть/свернуть.
+  // event передаётся чтобы не сработал toggle при клике по дочерним кнопкам.
+  toggleRefsSection(event) {
+    if (event && event.target && event.target.closest('.btn-clear')) return;
+    const section = document.getElementById('refs-section');
+    if (!section) return;
+    const open = !section.classList.contains('is-open');
+    section.classList.toggle('is-open', open);
+    localStorage.setItem('refs_section_open', open ? '1' : '0');
   },
 
   // ===== VERDICT SELECTOR =====
