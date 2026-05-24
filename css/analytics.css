@@ -1,6 +1,402 @@
 /* ===== ANALYTICS DASHBOARD — premium edition ===== */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ==========================================================================
+   Entrance animations — fade-up with stagger
+   ========================================================================== */
+@keyframes anim-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes anim-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes anim-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes anim-slide-right {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes anim-bar-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@keyframes anim-donut-draw {
+  from { stroke-dashoffset: var(--circ, 360); }
+}
+@keyframes anim-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Hero — slides down/fades in */
+.hero { animation: anim-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.hero-verdict { animation: anim-scale-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both; }
+.hero-tag, .hero-side-block { animation: anim-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.hero-tag { animation-delay: 0.1s; }
+.hero-side-block:nth-of-type(1) { animation-delay: 0.05s; }
+.hero-side-block:nth-of-type(2) { animation-delay: 0.10s; }
+.hero-side-block:nth-of-type(3) { animation-delay: 0.15s; }
+
+/* Section headers — slide-in */
+.section-head { animation: anim-slide-right 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.1s; }
+
+/* KPI tiles — fade-up with stagger */
+.kpi { animation: anim-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.kpi-row > .kpi:nth-child(1) { animation-delay: 0.05s; }
+.kpi-row > .kpi:nth-child(2) { animation-delay: 0.10s; }
+.kpi-row > .kpi:nth-child(3) { animation-delay: 0.15s; }
+.kpi-row > .kpi:nth-child(4) { animation-delay: 0.20s; }
+.kpi-row > .kpi:nth-child(5) { animation-delay: 0.25s; }
+.kpi-row > .kpi:nth-child(6) { animation-delay: 0.30s; }
+
+/* Generic cards — fade-up */
+.card, .panel, .table-card, .insight-card {
+  animation: anim-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.15s;
+}
+
+/* Bars and progress — grow from left */
+.bar-fill, .progress-fill, .meter-fill {
+  transform-origin: left center;
+  animation: anim-bar-grow 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+
+/* List rows — staggered slide-in */
+.list-row, .table-row, tbody > tr {
+  animation: anim-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+tbody > tr:nth-child(1)  { animation-delay: 0.05s; }
+tbody > tr:nth-child(2)  { animation-delay: 0.08s; }
+tbody > tr:nth-child(3)  { animation-delay: 0.11s; }
+tbody > tr:nth-child(4)  { animation-delay: 0.14s; }
+tbody > tr:nth-child(5)  { animation-delay: 0.17s; }
+tbody > tr:nth-child(6)  { animation-delay: 0.20s; }
+tbody > tr:nth-child(7)  { animation-delay: 0.23s; }
+tbody > tr:nth-child(8)  { animation-delay: 0.26s; }
+tbody > tr:nth-child(9)  { animation-delay: 0.29s; }
+tbody > tr:nth-child(10) { animation-delay: 0.32s; }
+
+/* Hover micro-interactions */
+.kpi { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+
+.card, .panel, .insight-card { transition: transform 0.2s ease, box-shadow 0.25s ease; }
+.card:hover, .panel:hover, .insight-card:hover { box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); }
+
+/* Skeleton shimmer (для loading-состояний) */
+.skeleton {
+  background: linear-gradient(110deg, #ececec 8%, #f5f5f5 18%, #ececec 33%);
+  background-size: 200% 100%;
+  animation: anim-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* Reduce motion accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   PDF mode — плотная многоколоночная компоновка для html2pdf captures
+   Активируется добавлением body.is-pdf-mode (см. analytics.js #pdf=1)
+   ========================================================================== */
+body.is-pdf-mode {
+  background: #ffffff !important;
+  font-size: 12px;
+}
+body.is-pdf-mode * { animation: none !important; transition: none !important; }
+/* Nuke ALL gradients & patterns in PDF mode — html2canvas crashes on
+   repeating/conic/радиальных при 0-size элементах. Используем сплошные colors. */
+body.is-pdf-mode *,
+body.is-pdf-mode *::before,
+body.is-pdf-mode *::after {
+  background-image: none !important;
+}
+body.is-pdf-mode .bm-bar-fill { background-color: #6366f1 !important; }
+body.is-pdf-mode .bm-bar-fill--bench { background-color: #94a3b8 !important; }
+body.is-pdf-mode .progress-fill,
+body.is-pdf-mode .meter-fill,
+body.is-pdf-mode .bar-fill { background-color: #6366f1 !important; }
+body.is-pdf-mode .brand-mark,
+body.is-pdf-mode .score-num,
+body.is-pdf-mode .sh-num { background-color: #4338ca !important; color: #fff !important; }
+body.is-pdf-mode .card-icon { background-color: #e2e8f0 !important; }
+body.is-pdf-mode .info-icon { background-color: #e0e7ff !important; }
+body.is-pdf-mode .hero-tag--ok { background-color: #d1fae5 !important; color: #065f46 !important; }
+body.is-pdf-mode .hero-tag--warn { background-color: #fef3c7 !important; color: #92400e !important; }
+body.is-pdf-mode .hero-tag--bad { background-color: #fee2e2 !important; color: #991b1b !important; }
+body.is-pdf-mode .bc-bar { background-color: #6366f1 !important; }
+body.is-pdf-mode .dash {
+  max-width: 1200px !important;
+  margin: 0 auto !important;
+  padding: 12px 14px !important;
+}
+/* Cards — убрать большие margin/shadow, сделать плотнее */
+body.is-pdf-mode .card,
+body.is-pdf-mode .panel,
+body.is-pdf-mode .insight-card {
+  box-shadow: none !important;
+  border: 1px solid #e2e8f0 !important;
+  padding: 10px 12px !important;
+  margin-bottom: 10px !important;
+  border-radius: 8px !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+body.is-pdf-mode .card-head { padding: 0 0 6px !important; margin-bottom: 6px !important; }
+body.is-pdf-mode .card-head h2 { font-size: 13px !important; }
+body.is-pdf-mode .card-sub { font-size: 10px !important; color: #64748b !important; }
+body.is-pdf-mode .card-body { font-size: 11px !important; }
+
+/* Hero — компактнее */
+body.is-pdf-mode .hero { padding: 14px !important; margin-bottom: 12px !important; box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+body.is-pdf-mode .hero-main h1 { font-size: 22px !important; }
+body.is-pdf-mode .hero-meta { font-size: 11px !important; }
+body.is-pdf-mode .hero-grid { gap: 14px !important; }
+body.is-pdf-mode .hero-bg { display: none !important; }
+
+/* Section header — компактнее */
+body.is-pdf-mode .section-head { margin: 14px 0 8px !important; padding: 4px 0 !important; }
+body.is-pdf-mode .section-head h3 { font-size: 14px !important; }
+body.is-pdf-mode .section-head p { font-size: 10px !important; }
+
+/* KPI — 5-в-ряд для плотности */
+body.is-pdf-mode .kpi-row {
+  display: grid !important;
+  grid-template-columns: repeat(5, 1fr) !important;
+  gap: 8px !important;
+  margin-bottom: 10px !important;
+}
+body.is-pdf-mode .kpi {
+  padding: 8px 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+}
+body.is-pdf-mode .kpi-head { font-size: 9px !important; }
+body.is-pdf-mode .kpi-value { font-size: 18px !important; line-height: 1.1 !important; }
+body.is-pdf-mode .kpi-sub { font-size: 9px !important; margin-top: 2px !important; }
+
+/* Полный профиль — 2 колонки в группах + компактные ряды */
+body.is-pdf-mode .fp-grid { gap: 8px !important; }
+body.is-pdf-mode .fp-group { padding: 8px 10px !important; border-radius: 6px !important; }
+body.is-pdf-mode .fp-group-title { font-size: 10px !important; padding-bottom: 4px !important; margin-bottom: 6px !important; }
+body.is-pdf-mode .fp-row { font-size: 10.5px !important; gap: 6px !important; padding: 1px 0 !important; }
+body.is-pdf-mode .fp-okeds { margin-top: 10px !important; padding: 8px 10px !important; }
+body.is-pdf-mode .fp-oked-item { padding: 6px 8px !important; }
+
+/* Benchmark — плотнее */
+body.is-pdf-mode .bm-row { padding: 8px 10px !important; }
+body.is-pdf-mode .bm-bar-line { gap: 8px !important; }
+body.is-pdf-mode .bm-bar-track { height: 10px !important; }
+body.is-pdf-mode .bm-label { font-size: 11px !important; }
+body.is-pdf-mode .bm-bar-value { font-size: 10px !important; }
+
+/* Tables — плотный шрифт */
+body.is-pdf-mode .im-table { font-size: 10px !important; }
+body.is-pdf-mode .im-table th { padding: 5px 4px !important; font-size: 9px !important; }
+body.is-pdf-mode .im-table td { padding: 4px !important; }
+body.is-pdf-mode .im-cell-count { font-size: 11px !important; }
+body.is-pdf-mode .im-cell-sum { font-size: 8.5px !important; }
+
+/* Generic row-2 layouts — оставляем 2 колонки */
+body.is-pdf-mode .row-2 { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+body.is-pdf-mode .row-1 { gap: 8px !important; }
+
+/* Hide things not useful in PDF */
+body.is-pdf-mode .ai-fab,
+body.is-pdf-mode .ai-panel,
+body.is-pdf-mode .info-fab,
+body.is-pdf-mode .info-panel,
+body.is-pdf-mode .floating-toc,
+body.is-pdf-mode .back-link,
+body.is-pdf-mode .empty-cta,
+body.is-pdf-mode #ai-summary-card,
+body.is-pdf-mode .info-trigger,
+body.is-pdf-mode .ai-trigger,
+body.is-pdf-mode .icon-info { display: none !important; }
+
+/* Убрать ВСЕ gradient-патерны (html2canvas падает на repeating-linear-gradient
+   при width:0). Используем background-image: none + background-color. */
+body.is-pdf-mode .bm-bar-fill--bench {
+  background-image: none !important;
+  background-color: #94a3b8 !important;
+}
+body.is-pdf-mode .bm-bar-fill {
+  background-image: none !important;
+}
+body.is-pdf-mode .hero,
+body.is-pdf-mode .card-accent,
+body.is-pdf-mode .card-feature,
+body.is-pdf-mode .card-profile,
+body.is-pdf-mode .card-score {
+  background-image: none !important;
+  background-color: #ffffff !important;
+}
+/* Универсальный сейф: любое .bm-* / .progress-* / .meter-* с фоном — solid color */
+body.is-pdf-mode [class*="-fill"],
+body.is-pdf-mode [class*="bar-"],
+body.is-pdf-mode .donut-arc {
+  background-image: none !important;
+}
+/* Восстанавливаем сплошной фон для всех баров дашборда — после "background-image: none"
+   они становятся бесцветными прямоугольниками, и белый текст внутри (funnel-fill,
+   ladder-fill, decomp-seg) исчезает на белом фоне. */
+body.is-pdf-mode .hr-fill,
+body.is-pdf-mode .histo-row .hr-fill {
+  background-color: #6366f1 !important;
+}
+body.is-pdf-mode .pi-bar-fill {
+  background-color: #f59e0b !important;
+}
+body.is-pdf-mode .sc-fill--ok { background-color: #10b981 !important; }
+body.is-pdf-mode .sc-fill--mod { background-color: #f59e0b !important; }
+body.is-pdf-mode .sc-fill--bad { background-color: #ef4444 !important; }
+body.is-pdf-mode .funnel-fill--filed { background-color: #4f46e5 !important; }
+body.is-pdf-mode .funnel-fill--recog { background-color: #0284c7 !important; }
+body.is-pdf-mode .funnel-fill--paid { background-color: #059669 !important; }
+body.is-pdf-mode .funnel-fill--rejected { background-color: #dc2626 !important; }
+body.is-pdf-mode .funnel-fill--pending { background-color: #d97706 !important; }
+body.is-pdf-mode .poisson-bar-row .pb-fill { background-color: #7c3aed !important; }
+body.is-pdf-mode .decomp-seg--premium { background-color: #4f46e5 !important; }
+body.is-pdf-mode .decomp-seg--gap { background-color: #dc2626 !important; }
+body.is-pdf-mode .ladder-fill--pure { background-color: #0284c7 !important; }
+body.is-pdf-mode .ladder-fill--risk { background-color: #7c3aed !important; }
+body.is-pdf-mode .ladder-fill--office { background-color: #d97706 !important; }
+body.is-pdf-mode .ladder-fill--technical { background-color: #4f46e5 !important; }
+body.is-pdf-mode .ladder-fill--charged { background-color: #b91c1c !important; }
+body.is-pdf-mode .rr-fill { background-color: #6366f1 !important; }
+body.is-pdf-mode .vol-meter-fill { background-color: #f59e0b !important; }
+/* Убрать «before/after»-декорации hero, которые могут содержать сложные градиенты */
+body.is-pdf-mode .hero-inner::before,
+body.is-pdf-mode .hero-inner::after,
+body.is-pdf-mode .card-accent::before,
+body.is-pdf-mode .kpi::before { display: none !important; background: none !important; }
+/* Убедиться что все элементы имеют ненулевую ширину/высоту для html2canvas */
+body.is-pdf-mode .bm-bar-fill,
+body.is-pdf-mode .progress-fill,
+body.is-pdf-mode .meter-fill {
+  min-width: 1px !important;
+  transform: none !important; /* без scaleX(0) от анимации */
+}
+
+/* ==========================================================================
+   Print styles — для PDF-экспорта через window.print() (Save as PDF)
+   Цель: максимально плотная многоколоночная раскладка, чтобы каждая страница A4
+   использовалась полноценно, без больших пустот.
+   ========================================================================== */
+@page {
+  size: A4 portrait;
+  margin: 8mm 8mm 12mm 8mm;
+}
+@media print {
+  /* Сбросить анимации — могут оставить элементы в transform: scale(0) */
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* Скрыть всё интерактивное */
+  .ai-fab, .ai-panel, .info-fab, .info-panel, .floating-toc, .back-link,
+  .empty-cta, .empty-back, #ai-summary-card, #ai-summary, .ai-summary-actions,
+  .info-trigger, .ai-trigger, .icon-info { display: none !important; }
+  /* Body + цвета для печати */
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 9pt !important;
+    line-height: 1.35 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Container — на всю ширину */
+  .dash {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+  /* Все карточки — компактные, без теней, разрешаем разрезание (кроме мелких) */
+  .card, .panel, .insight-card {
+    box-shadow: none !important;
+    padding: 8px 10px !important;
+    margin-bottom: 6px !important;
+    border-radius: 6px !important;
+    border: 1px solid #e2e8f0 !important;
+    background: #ffffff !important;
+  }
+  .card-head { padding: 0 0 4px !important; margin-bottom: 4px !important; }
+  .card-head h2 { font-size: 11pt !important; }
+  .card-sub { font-size: 7.5pt !important; }
+  .card-body { font-size: 8.5pt !important; }
+  /* Hero — компактнее, в одну страницу */
+  .hero { margin: 0 0 6px !important; padding: 10px !important; border: 1px solid #e2e8f0 !important; background: #ffffff !important; }
+  .hero-bg { display: none !important; }
+  .hero-inner::before, .hero-inner::after, .card-accent::before, .kpi::before { display: none !important; }
+  .hero-main h1 { font-size: 16pt !important; }
+  .hero-meta { font-size: 8pt !important; }
+  /* Section headers */
+  .section-head { margin: 8px 0 4px !important; padding: 2px 0 !important; }
+  .section-head h3 { font-size: 11pt !important; }
+  .section-head p { font-size: 7.5pt !important; }
+  /* KPI — 5 в ряд, плотно */
+  .kpi-row {
+    display: grid !important;
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 4px !important;
+    margin-bottom: 6px !important;
+  }
+  .kpi {
+    padding: 6px 8px !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 6px !important;
+    background: #ffffff !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .kpi-head { font-size: 6.5pt !important; }
+  .kpi-value { font-size: 13pt !important; line-height: 1.1 !important; }
+  .kpi-sub { font-size: 6.5pt !important; }
+  /* Полный профиль — 2-колонки + плотные ряды */
+  .fp-grid { grid-template-columns: 1fr 1fr !important; gap: 4mm !important; }
+  .fp-group { padding: 6px 8px !important; border-radius: 5px !important; }
+  .fp-group-title { font-size: 7.5pt !important; padding-bottom: 3px !important; margin-bottom: 4px !important; }
+  .fp-row { font-size: 8pt !important; padding: 1px 0 !important; gap: 4px !important; }
+  .fp-okeds { margin-top: 6px !important; padding: 6px 8px !important; }
+  .fp-oked-item { padding: 4px 6px !important; }
+  /* Benchmark — компактнее */
+  .bm-row { padding: 6px 8px !important; page-break-inside: avoid; }
+  .bm-bar-track { height: 8px !important; }
+  .bm-label { font-size: 8.5pt !important; }
+  .bm-bar-value { font-size: 7.5pt !important; }
+  /* Таблицы */
+  .im-table, .table-card table { font-size: 7.5pt !important; }
+  .im-table th, .im-table td { padding: 3px 4px !important; }
+  .im-cell-count { font-size: 8.5pt !important; }
+  .im-cell-sum { font-size: 6.5pt !important; }
+  tr { page-break-inside: avoid; break-inside: avoid; }
+  /* row-2 layouts */
+  .row-2 { grid-template-columns: 1fr 1fr !important; gap: 5px !important; }
+  .row-1 > .card { page-break-inside: avoid; }
+  /* Forecast callouts */
+  .forecast-callout { padding: 6px 8px !important; font-size: 8.5pt !important; }
+  /* Pi-banners */
+  .pi-banner { padding: 6px 10px !important; font-size: 8.5pt !important; }
+}
+/* Body class .is-print-mode — применяется до window.print() */
+body.is-print-mode .ai-fab,
+body.is-print-mode .ai-panel,
+body.is-print-mode .info-fab,
+body.is-print-mode .floating-toc { display: none !important; }
+
 :root {
   --bg: #f7f8fb;
   --bg-2: #eef1f6;
@@ -385,6 +781,312 @@ body.is-inline .ai-fab { bottom: 20px; right: 20px; }
 .card-feature {
   background: linear-gradient(135deg, #fff 0%, #faf9ff 100%);
 }
+
+/* === Insurer × Year matrix table === */
+.im-wrap {
+  overflow-x: auto;
+  margin: -8px -8px 12px;
+  padding: 8px;
+}
+.im-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+.im-table th {
+  text-align: center;
+  padding: 10px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+}
+.im-table th.im-corner { text-align: left; padding-left: 12px; min-width: 220px; }
+.im-table th.im-total { background: #eef2ff; color: #4338ca; }
+.im-table td {
+  padding: 8px;
+  text-align: center;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.im-table td.im-name {
+  text-align: left;
+  padding-left: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.im-cell {
+  min-width: 80px;
+  transition: background 0.15s;
+}
+.im-cell:hover {
+  background: rgba(99, 102, 241, 0.15) !important;
+}
+.im-cell--empty {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+.im-cell--total {
+  background: #f5f3ff !important;
+  font-weight: 600;
+}
+.im-cell--grand {
+  background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%) !important;
+  color: #fff !important;
+}
+.im-cell--grand .im-cell-count, .im-cell--grand .im-cell-sum { color: #fff !important; }
+.im-cell-count {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+}
+.im-cell-sum {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.im-footer-row td {
+  border-top: 2px solid #cbd5e1;
+  border-bottom: none;
+}
+.im-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: #64748b;
+  padding: 8px 4px 0;
+}
+.im-legend-heat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.im-heat-low, .im-heat-high {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.im-heat-low { background: rgba(99, 102, 241, 0.10); }
+.im-heat-high { background: rgba(99, 102, 241, 0.55); }
+
+/* === Benchmark visualization (горизонтальные bar-чарты) === */
+.bm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.bm-row {
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.bm-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.bm-label {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+.bm-unit {
+  font-weight: 400;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+.bm-badge {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.bm-badge--ok { color: #047857; background: #d1fae5; border: 1px solid #a7f3d0; }
+.bm-badge--bad { color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; }
+.bm-bars { display: flex; flex-direction: column; gap: 6px; }
+.bm-bar-line {
+  display: grid;
+  grid-template-columns: 160px 1fr 110px;
+  align-items: center;
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .bm-bar-line { grid-template-columns: 1fr; gap: 4px; }
+  .bm-bar-line .bm-bar-value { text-align: left; }
+}
+.bm-bar-label {
+  font-size: 0.78rem;
+  color: #475569;
+  font-weight: 500;
+}
+.bm-bar-line--bench .bm-bar-label { color: #94a3b8; font-style: italic; }
+.bm-bar-track {
+  height: 14px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.bm-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bm-bar-fill--bench {
+  background: repeating-linear-gradient(
+    45deg,
+    #cbd5e1 0,
+    #cbd5e1 4px,
+    #94a3b8 4px,
+    #94a3b8 8px
+  );
+}
+.bm-bar-value {
+  font-size: 0.84rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+
+/* === Card-profile — «Полный профиль компании» === */
+.card-profile {
+  background: linear-gradient(135deg, #fff 0%, #f8fafc 100%);
+}
+.fp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .fp-grid { grid-template-columns: 1fr; }
+}
+.fp-group {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.fp-group-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.fp-group-rows { display: flex; flex-direction: column; gap: 8px; }
+.fp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.fp-label {
+  color: #64748b;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.fp-value {
+  color: #0f172a;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+.fp-okeds {
+  margin-top: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.fp-oked-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.fp-oked-item {
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border-left: 3px solid #cbd5e1;
+}
+.fp-oked-item--active {
+  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 100%);
+  border-left-color: #10b981;
+}
+.fp-oked-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.fp-oked-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+.fp-oked-kind {
+  font-size: 0.7rem;
+  color: #64748b;
+  background: #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.fp-oked-active {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  background: #10b981;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.fp-oked-class {
+  font-size: 0.74rem;
+  color: #1e40af;
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.fp-oked-name {
+  color: #1e293b;
+  font-weight: 500;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+.fp-oked-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #475569;
+}
+.fp-oked-rates strong { color: #0f172a; font-weight: 700; }
 
 .card-head {
   display: flex;
@@ -1339,12 +2041,24 @@ table.t tfoot td {
 }
 
 /* ===== PARETO ===== */
-.pareto-svg { display: block; width: 100%; height: 200px; }
-.pareto-bar { fill: url(#paretoBarGrad); opacity: 0.9; }
-.pareto-line { fill: none; stroke: var(--danger); stroke-width: 2.5; stroke-linejoin: round; }
+.pareto-svg {
+  display: block;
+  width: 100%;
+  /* height: auto — высота определяется viewBox + шириной, чтобы не сплющивать.
+     Ограничиваем max-height для очень широких экранов. */
+  height: auto;
+  max-height: 360px;
+}
+.pareto-bar { fill: url(#paretoBarGrad); opacity: 0.92; }
+.pareto-line { fill: none; stroke: var(--danger); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .pareto-marker { fill: var(--danger); stroke: #fff; stroke-width: 2; }
 .pareto-grid { stroke: var(--border-3); stroke-width: 1; stroke-dasharray: 2 4; }
-.pareto-axis { font-size: 10px; fill: var(--muted-2); font-weight: 600; }
+.pareto-axis { font-size: 11px; fill: var(--muted-2); font-weight: 600; }
+.pareto-axis-title { font-size: 10px; fill: var(--muted); font-weight: 600; }
+.pareto-value { font-size: 10.5px; fill: var(--danger); font-weight: 700; }
+/* В PDF-режиме html2canvas не рендерит SVG-градиенты по url() — заменяем
+   на solid color, чтобы бары не остались полностью прозрачными в экспорте. */
+body.is-pdf-mode .pareto-bar { fill: #6366f1 !important; }
 .pareto-note {
   margin-top: 12px;
   padding: 10px 14px;

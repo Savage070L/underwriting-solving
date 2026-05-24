@@ -23,6 +23,69 @@
     if (back) back.style.display = 'none';
   }
 
+  // Print mode — pages opened with #print=1 auto-trigger window.print()
+  // once content + animations have settled. Used by App.downloadAnalyticsPdf().
+  const isPrintMode = window.location.hash.includes('print=1');
+  if (isPrintMode) {
+    document.body.classList.add('is-print-mode');
+    document.documentElement.classList.add('is-print-mode');
+    const hideForPrint = ['.ai-fab', '.ai-panel', '.info-fab', '.info-panel',
+                          '.floating-toc', '.back-link'];
+    window.addEventListener('load', () => {
+      hideForPrint.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
+      });
+      // Wait for charts + animations to settle, then trigger print
+      setTimeout(() => {
+        window.print();
+        // Close window after print (optional — leaves it open if user cancels)
+        window.addEventListener('afterprint', () => setTimeout(() => window.close(), 200), { once: true });
+      }, 1800);
+    });
+  }
+
+  // Export-PDF mode — page is opened in a hidden iframe by
+  // App.downloadAnalyticsPdf() with #exportPdf=<filename>. We render the
+  // dashboard normally, then capture it with html2canvas and emit a real PDF
+  // via jsPDF. We reuse the existing `body.is-pdf-mode` styles from
+  // analytics.css (they kill animations, replace gradients with solid colors
+  // that html2canvas can render, and pin the dashboard width).
+  // Hash params (not query string) so that simple static servers like
+  // `npx http-server` — which 404 on URLs with a query — still serve the page.
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const exportPdfFileName = hashParams.get('exportPdf');
+  const isExportPdfMode = !!exportPdfFileName;
+  if (isExportPdfMode) {
+    document.body.classList.add('is-pdf-mode');
+    document.documentElement.classList.add('is-pdf-mode');
+    // Force a fixed desktop layout regardless of the iframe's actual width —
+    // otherwise we get the responsive narrow rendering and end up with a
+    // sliver of content on each A4 page.
+    const css = document.createElement('style');
+    css.textContent = `
+      html.is-pdf-mode, body.is-pdf-mode {
+        width: 1280px !important;
+        min-width: 1280px !important;
+        background: #ffffff !important;
+      }
+      body.is-pdf-mode .dash {
+        max-width: 1280px !important;
+        width: 1280px !important;
+        min-width: 1280px !important;
+        margin: 0 !important;
+        padding: 14px 18px !important;
+        background: #ffffff !important;
+      }
+      body.is-pdf-mode .hero { background: #f8fafc !important; }
+      body.is-pdf-mode .ai-fab,
+      body.is-pdf-mode .ai-panel,
+      body.is-pdf-mode .ai-overlay,
+      body.is-pdf-mode .floating-toc,
+      body.is-pdf-mode .back-link { display: none !important; }
+    `;
+    document.head.appendChild(css);
+  }
+
   const a = snap.analytics;
   const z = snap.zayavka || {};
   const NBSP = ' ';
@@ -232,6 +295,127 @@
         ${k.sub ? `<div class="kpi-sub">${k.sub}</div>` : ''}
       </div>
     `).join('');
+  })();
+
+  // ===== ПОЛНЫЙ ПРОФИЛЬ КОМПАНИИ — все данные в одном месте =====
+  // Что есть в snap: zayavka (z), statgov (sg), normativ, ku, popravka, activity, companyOkeds.
+  (function renderFullProfile() {
+    const body = document.getElementById('full-profile-body');
+    if (!body) return;
+    const sg = snap.statgov;
+    const okeds = snap.companyOkeds || [];
+    const norm = snap.normativ;
+    const ku = snap.ku;
+    const act = snap.activity;
+
+    // ── Группа 1: РЕЕСТРОВЫЕ ДАННЫЕ ──
+    const regRows = [];
+    regRows.push(['БИН', z.bin || '—']);
+    regRows.push(['Наименование', (typeof Utils !== 'undefined' && Utils.formatCompanyName)
+      ? Utils.formatCompanyName(z.insurerName || sg?.name || '—')
+      : (z.insurerName || sg?.name || '—')]);
+    if (sg?.registrationDate) regRows.push(['Дата регистрации', sg.registrationDate]);
+    if (z.companyAgeYears != null) regRows.push(['Возраст компании', z.companyAgeYears.toFixed(1) + ' лет']);
+    if (sg?.headFullname) regRows.push(['Руководитель', sg.headFullname]);
+    regRows.push(['Юридический адрес', z.legalAddress || sg?.legalAddress || '—']);
+    if (z.region) regRows.push(['Регион', z.region]);
+    if (sg?.kato) regRows.push(['КАТО', sg.kato]);
+    regRows.push(['Гос. участие', z.govParticipation || '—']);
+    if (z.isAffiliated) regRows.push(['Аффилированное лицо', z.affiliatedName || '✓ да']);
+
+    // ── Группа 2: КЛАССИФИКАЦИЯ ──
+    const clsRows = [];
+    if (sg?.krpWithBranchesCode) clsRows.push(['КРП (с филиалами)', `${sg.krpWithBranchesCode} — ${sg.krpWithBranchesName || ''}`]);
+    if (sg?.krpWithoutBranchesCode) clsRows.push(['КРП (без филиалов)', `${sg.krpWithoutBranchesCode} — ${sg.krpWithoutBranchesName || ''}`]);
+    if (sg?.kfsCode) clsRows.push(['КФС', `${sg.kfsCode} — ${sg.kfsName || ''}`]);
+    if (sg?.sectorCode) clsRows.push(['Сектор экономики', `${sg.sectorCode} — ${sg.sectorName || ''}`]);
+
+    // ── Группа 3: ПАРАМЕТРЫ ДОГОВОРА ──
+    const contractRows = [];
+    contractRows.push(['Численность застрахованных', `${fmtInt(z.workers)} чел.`]);
+    contractRows.push(['Страховая сумма', fmtMoneyShort(z.insuranceSum)]);
+    contractRows.push(['Класс риска', z.riskClass || '—']);
+    contractRows.push(['Страховой тариф', z.tariff != null ? fmtPct(z.tariff * 100, 2) : '—']);
+    contractRows.push(['Страховая премия', fmtMoneyShort(z.premiumBase)]);
+    if (z.premiumWithCoeff != null && z.premiumWithCoeff !== z.premiumBase && z.coeffDown > 0) {
+      contractRows.push(['Премия с поправкой', fmtMoneyShort(z.premiumWithCoeff)]);
+    }
+    if (z.coeff != null && z.coeff !== 1) contractRows.push(['Поправочный коэффициент', z.coeff.toFixed(2)]);
+    if (z.coeffDown != null && z.coeffDown > 0) contractRows.push(['Понижающий коэффициент', fmtPct(z.coeffDown * 100, 1)]);
+    if (z.noDiscountReason === 'young_company') contractRows.push(['Скидка не применяется', 'компания младше 3 лет']);
+    else if (z.noDiscountReason === 'claims') contractRows.push(['Скидка не применяется', 'были НС за 3 года']);
+    contractRows.push(['Период страхования', z.periodFrom && z.periodTo
+      ? `${fmtDate(z.periodFrom)} — ${fmtDate(z.periodTo)}` : '—']);
+    contractRows.push(['Порядок оплаты', z.paymentOrder || '—']);
+    if (z.docDate) contractRows.push(['Дата заявки', fmtDate(z.docDate)]);
+    // Средняя ЗП и ФОТ (manual mode)
+    if (z.avgSalary) contractRows.push(['Средняя зарплата', fmtMoneyShort(z.avgSalary) + '/мес']);
+    if (z.fot) contractRows.push(['ФОТ годовой', fmtMoneyShort(z.fot)]);
+
+    // ── Группа 4: ПОРТФЕЛЬНЫЕ И ОТРАСЛЕВЫЕ ПОКАЗАТЕЛИ ──
+    const portfolioRows = [];
+    if (norm) {
+      portfolioRows.push(['Активы Компании (на дату)', fmtMoneyShort(norm.fullAssetsTenge)]);
+      const ratio = norm.fullAssetsTenge > 0 ? (z.insuranceSum / norm.fullAssetsTenge * 100) : 0;
+      portfolioRows.push(['Доля страх. суммы от активов', fmtPct(ratio, 2)]);
+      portfolioRows.push(['Доля ОСРНС в портфеле', fmtPct(norm.portfolioShare * 100, 2)]);
+    }
+    if (ku) {
+      portfolioRows.push(['Портфельный КУ (с РЗНУ)', fmtPct(ku.lossRatioWith, 2)]);
+      portfolioRows.push(['Портфельный КУ (без РЗНУ)', fmtPct(ku.lossRatioWithout, 2)]);
+    }
+    if (act && (act.deathRate > 0 || act.injuryRate > 0)) {
+      portfolioRows.push(['Отраслевая частота смертей (на 1000)', fmtRate(act.deathRate)]);
+      portfolioRows.push(['Отраслевая частота травм (на 1000)', fmtRate(act.injuryRate)]);
+    }
+
+    // ── Группа 5: ОКЭДы ──
+    const fmtRateOk = (v) => v != null ? Number(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',') : '—';
+    const okedHtml = okeds.length
+      ? `<div class="fp-oked-list">` + okeds.map(o => `
+          <div class="fp-oked-item ${o.code === z.oked ? 'fp-oked-item--active' : ''}">
+            <div class="fp-oked-head">
+              <span class="fp-oked-code">${o.code}</span>
+              <span class="fp-oked-kind">${o.kind === 'primary' ? 'основной' : 'вторичный'}</span>
+              ${o.code === z.oked ? '<span class="fp-oked-active">активный</span>' : ''}
+              ${o.riskClass != null ? `<span class="fp-oked-class">класс ${o.riskClass}</span>` : ''}
+            </div>
+            <div class="fp-oked-name">${o.name || '<em class="muted">нет в классификаторе</em>'}</div>
+            ${(o.deathRate != null || o.injuryRate != null || o.tariff != null) ? `
+              <div class="fp-oked-rates">
+                ${o.tariff != null ? `<span>Тариф: <strong>${(o.tariff * 100).toFixed(2).replace('.', ',')}%</strong></span>` : ''}
+                ${o.deathRate != null ? `<span>Смерть /1000: <strong>${fmtRateOk(o.deathRate)}</strong></span>` : ''}
+                ${o.injuryRate != null ? `<span>Травма /1000: <strong>${fmtRateOk(o.injuryRate)}</strong></span>` : ''}
+              </div>
+            ` : ''}
+          </div>
+        `).join('') + `</div>`
+      : '<div class="muted">— нет данных по ОКЭДам</div>';
+
+    // Рендер: 4 группы данных в grid + ОКЭДы внизу
+    const renderGroup = (title, rows) => rows.length ? `
+      <div class="fp-group">
+        <div class="fp-group-title">${title}</div>
+        <div class="fp-group-rows">
+          ${rows.map(([l, v]) => `
+            <div class="fp-row">
+              <span class="fp-label">${l}</span>
+              <span class="fp-value">${v}</span>
+            </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    body.innerHTML =
+      `<div class="fp-grid">
+        ${renderGroup('Реестровые данные', regRows)}
+        ${renderGroup('Параметры договора', contractRows)}
+        ${renderGroup('Классификация', clsRows)}
+        ${renderGroup('Портфель и отрасль', portfolioRows)}
+      </div>
+      <div class="fp-okeds">
+        <div class="fp-group-title">ОКЭДы и виды деятельности</div>
+        ${okedHtml}
+      </div>`;
   })();
 
   // ===== RISK SCORE (composite 0-100) =====
@@ -561,6 +745,208 @@
         <span>Больше · max ${maxVal}/мес</span>
       </div>`;
     document.getElementById('heatmap-body').innerHTML = html;
+  })();
+
+  // ===== INSURER × YEAR MATRIX (табличная аналитика) =====
+  (function renderInsurerMatrix() {
+    const card = document.getElementById('card-insurer-matrix');
+    if (!card) return;
+    const insurerByYear = a.insurerByYear || [];
+    const byInsurer = a.byInsurer || [];
+    const byYear = a.byYear || [];
+    if (insurerByYear.length === 0 || byInsurer.length === 0) {
+      card.style.display = 'none';
+      return;
+    }
+    // Build cell lookup: company → year → {count, sum}
+    const lookup = {};
+    insurerByYear.forEach(b => {
+      if (!lookup[b.company]) lookup[b.company] = {};
+      lookup[b.company][b.year] = { count: b.count, sum: b.sum };
+    });
+    // Sort years ascending, insurers by total cases descending
+    const years = Array.from(new Set(insurerByYear.map(b => b.year))).sort((a, b) => a - b);
+    const insurers = byInsurer.map(b => b.name);
+
+    // Find max for heat coloring (intensity by share of count)
+    let maxCount = 0;
+    insurerByYear.forEach(b => { if (b.count > maxCount) maxCount = b.count; });
+
+    // Year totals (from byYear)
+    const yearTotals = {};
+    byYear.forEach(y => { yearTotals[y.year] = { count: y.cases, sum: y.sum }; });
+
+    // Grand total
+    const grandCount = byInsurer.reduce((s, b) => s + b.count, 0);
+    const grandSum = byInsurer.reduce((s, b) => s + b.sum, 0);
+
+    const heatColor = (val) => {
+      if (!val || maxCount === 0) return '';
+      const intensity = val / maxCount;
+      const alpha = 0.08 + intensity * 0.45;
+      return `background: rgba(99, 102, 241, ${alpha.toFixed(2)});`;
+    };
+
+    const header = `<tr>
+      <th class="im-corner">Страховщик</th>
+      ${years.map(y => `<th class="im-year">${y}</th>`).join('')}
+      <th class="im-total">Всего за 3 года</th>
+    </tr>`;
+    const rows = insurers.map(ins => {
+      const totalCount = byInsurer.find(b => b.name === ins)?.count || 0;
+      const totalSum = byInsurer.find(b => b.name === ins)?.sum || 0;
+      return `<tr>
+        <td class="im-name" title="${ins}">${ins}</td>
+        ${years.map(y => {
+          const cell = lookup[ins]?.[y];
+          if (!cell) return `<td class="im-cell im-cell--empty">—</td>`;
+          return `<td class="im-cell" style="${heatColor(cell.count)}">
+            <div class="im-cell-count">${cell.count}</div>
+            <div class="im-cell-sum">${fmtMoneyShort(cell.sum)}</div>
+          </td>`;
+        }).join('')}
+        <td class="im-cell im-cell--total">
+          <div class="im-cell-count">${totalCount}</div>
+          <div class="im-cell-sum">${fmtMoneyShort(totalSum)}</div>
+        </td>
+      </tr>`;
+    }).join('');
+    const footer = `<tr class="im-footer-row">
+      <td class="im-name"><strong>Итого</strong></td>
+      ${years.map(y => {
+        const t = yearTotals[y];
+        if (!t) return `<td class="im-cell im-cell--total">—</td>`;
+        return `<td class="im-cell im-cell--total">
+          <div class="im-cell-count">${t.count}</div>
+          <div class="im-cell-sum">${fmtMoneyShort(t.sum)}</div>
+        </td>`;
+      }).join('')}
+      <td class="im-cell im-cell--grand">
+        <div class="im-cell-count">${grandCount}</div>
+        <div class="im-cell-sum">${fmtMoneyShort(grandSum)}</div>
+      </td>
+    </tr>`;
+    document.getElementById('insurer-matrix-body').innerHTML = `
+      <div class="im-wrap">
+        <table class="im-table">
+          <thead>${header}</thead>
+          <tbody>${rows}${footer}</tbody>
+        </table>
+      </div>
+      <div class="im-legend">
+        <span>В ячейках: верхнее число — кол-во НС, нижнее — сумма выплат.</span>
+        <span class="im-legend-heat">Цвет: <span class="im-heat-low"></span> мало → <span class="im-heat-high"></span> много</span>
+      </div>`;
+  })();
+
+  // ===== BENCHMARK — company vs industry vs portfolio =====
+  // Визуальное сравнение 4 ключевых индикаторов риска на горизонтальных bar-чартах.
+  (function renderBenchmark() {
+    const card = document.getElementById('card-benchmark');
+    if (!card) return;
+    const act = snap.activity;
+    const ku = snap.ku;
+    const workers = z.workers || 0;
+    const recogYear = workers > 0 ? a.avgFreq : 0; // НС в год
+    const deathYear = workers > 0 ? (a.deathCases?.count || 0) / 3 : 0;
+    const factDeath = workers > 0 ? deathYear / workers * 1000 : 0;
+    const factInjury = workers > 0 ? (recogYear - deathYear) / workers * 1000 : 0;
+    const premium = z.premiumWithCoeff || z.premiumBase || 0;
+    const factLR = premium > 0 && a.avgSumPerYear ? 100 * a.avgSumPerYear / premium : null;
+
+    // Если совсем нет данных — скрыть
+    const hasData = workers > 0 && (recogYear > 0 || factLR != null);
+    if (!hasData) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const normDeath = act?.deathRate || 0;
+    const normInjury = act?.injuryRate || 0;
+    const portfolioLR = ku?.lossRatioWith || 0;
+
+    // 4 индикатора. Каждый: lab, factValue, benchmarkValue, benchmarkLabel, units, formatter
+    const indicators = [
+      {
+        label: 'Частота смертельных НС',
+        unit: '/ 1000 чел.',
+        fact: factDeath,
+        bench: normDeath,
+        benchLabel: 'отраслевая норма',
+        fmt: (v) => v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ','),
+      },
+      {
+        label: 'Частота травматических НС',
+        unit: '/ 1000 чел.',
+        fact: factInjury,
+        bench: normInjury,
+        benchLabel: 'отраслевая норма',
+        fmt: (v) => v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ','),
+      },
+      {
+        label: 'Прогнозный КУ',
+        unit: '%',
+        fact: factLR || 0,
+        bench: portfolioLR,
+        benchLabel: 'портфельный КУ',
+        fmt: (v) => v.toFixed(1).replace('.', ',') + '%',
+      },
+      {
+        label: 'Среднее НС в год',
+        unit: 'случаев',
+        fact: recogYear,
+        bench: act && (act.deathRate + act.injuryRate) > 0
+          ? (act.deathRate + act.injuryRate) * workers / 1000
+          : 0,
+        benchLabel: 'ожидаемое по отрасли',
+        fmt: (v) => Math.round(v).toString(),
+      },
+    ];
+
+    // Drop indicators where both fact and bench are 0
+    const valid = indicators.filter(ind => ind.fact > 0 || ind.bench > 0);
+    if (valid.length === 0) { card.style.display = 'none'; return; }
+
+    const rows = valid.map(ind => {
+      const max = Math.max(ind.fact, ind.bench) * 1.1;
+      const factPct = max > 0 ? Math.min((ind.fact / max) * 100, 100) : 0;
+      const benchPct = max > 0 ? Math.min((ind.bench / max) * 100, 100) : 0;
+      const ratio = ind.bench > 0 ? ind.fact / ind.bench : null;
+      // Цвет: <=1.0 — зелёный, 1-3 — оранжевый, >3 — красный
+      const factColor = ratio == null ? '#6366f1'
+        : ratio <= 1 ? '#10b981'
+        : ratio <= 3 ? '#f59e0b'
+        : '#ef4444';
+      const diffBadge = ratio == null ? '' :
+        ratio > 1 ? `<span class="bm-badge bm-badge--bad">×${ratio.toFixed(1).replace('.', ',')} выше нормы</span>` :
+        ratio < 0.8 ? `<span class="bm-badge bm-badge--ok">×${(1/ratio).toFixed(1).replace('.', ',')} ниже нормы</span>` :
+        `<span class="bm-badge bm-badge--ok">в пределах нормы</span>`;
+      return `
+        <div class="bm-row">
+          <div class="bm-row-head">
+            <span class="bm-label">${ind.label} <span class="bm-unit">${ind.unit}</span></span>
+            ${diffBadge}
+          </div>
+          <div class="bm-bars">
+            <div class="bm-bar-line">
+              <span class="bm-bar-label">Факт по компании</span>
+              <div class="bm-bar-track">
+                <div class="bm-bar-fill" style="width: ${factPct}%; background: ${factColor};"></div>
+              </div>
+              <span class="bm-bar-value" style="color: ${factColor}; font-weight: 700">${ind.fmt(ind.fact)}</span>
+            </div>
+            ${ind.bench > 0 ? `
+            <div class="bm-bar-line bm-bar-line--bench">
+              <span class="bm-bar-label">${ind.benchLabel}</span>
+              <div class="bm-bar-track">
+                <div class="bm-bar-fill bm-bar-fill--bench" style="width: ${benchPct}%;"></div>
+              </div>
+              <span class="bm-bar-value">${ind.fmt(ind.bench)}</span>
+            </div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    document.getElementById('benchmark-body').innerHTML = `<div class="bm-grid">${rows}</div>`;
   })();
 
   // ===== MONTHLY LINE CHART =====
@@ -1670,40 +2056,69 @@
       }
       buckets.push({ decile: i, cumLossPct: cum, decilePct });
     }
-    const W = 600, H = 200, padL = 40, padR = 16, padT = 16, padB = 30;
+    // Просторный viewBox с фиксированным aspect ratio — SVG масштабируется
+    // пропорционально (без `preserveAspectRatio="none"`, который рушил шрифты
+    // и заставлял подписи осей наезжать друг на друга).
+    const W = 900, H = 300;
+    const padL = 56;   // место для подписей оси Y (0%–100%) + вертикальной подписи «% выплат»
+    const padR = 24;
+    const padT = 24;
+    const padB = 52;   // место для тиков X + подписи «дециль дел»
     const innerW = W - padL - padR;
     const innerH = H - padT - padB;
-    const barWidth = innerW / buckets.length - 4;
+    const gap = 6;
+    const barWidth = (innerW - gap * (buckets.length - 1)) / buckets.length;
+    const colX = (i) => padL + i * (barWidth + gap);
+    const colCx = (i) => colX(i) + barWidth / 2;
+
     const barsHtml = buckets.map((b, i) => {
       const sliceLoss = i === 0 ? b.cumLossPct : b.cumLossPct - buckets[i - 1].cumLossPct;
-      const x = padL + i * (barWidth + 4);
       const h = (sliceLoss / 100) * innerH;
       const y = padT + innerH - h;
-      return `<rect class="pareto-bar" x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="3"/>`;
+      return `<rect class="pareto-bar" x="${colX(i).toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${h.toFixed(1)}" rx="4"/>`;
     }).join('');
-    const linePoints = buckets.map((b, i) => {
-      const x = padL + i * (barWidth + 4) + barWidth / 2;
+
+    const linePts = buckets.map((b, i) => {
+      const x = colCx(i);
       const y = padT + innerH - (b.cumLossPct / 100) * innerH;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' L ');
+    });
+    const linePath = `M ${linePts.join(' L ')}`;
+
     const markers = buckets.map((b, i) => {
-      const x = padL + i * (barWidth + 4) + barWidth / 2;
+      const x = colCx(i);
       const y = padT + innerH - (b.cumLossPct / 100) * innerH;
-      return `<circle class="pareto-marker" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"/>`;
+      return `<circle class="pareto-marker" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4"/>`;
     }).join('');
+
+    // Подписи кумулятивных %: показываем только на каждой 2-й точке, чтобы не было каши.
+    const valueLabels = buckets.map((b, i) => {
+      if (i % 2 !== 0 && i !== buckets.length - 1) return '';
+      const x = colCx(i);
+      const y = padT + innerH - (b.cumLossPct / 100) * innerH - 10;
+      return `<text class="pareto-value" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle">${Math.round(b.cumLossPct)}%</text>`;
+    }).join('');
+
     const xLabels = buckets.map((b, i) => {
-      const x = padL + i * (barWidth + 4) + barWidth / 2;
-      return `<text class="pareto-axis" x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle">${b.decilePct}%</text>`;
+      const x = colCx(i);
+      return `<text class="pareto-axis" x="${x.toFixed(1)}" y="${padT + innerH + 18}" text-anchor="middle">${b.decilePct}%</text>`;
     }).join('');
+
     let yTicks = '';
     for (let i = 0; i <= 4; i++) {
       const v = 100 * (1 - i / 4);
       const y = padT + innerH * (i / 4);
-      yTicks += `<line class="pareto-grid" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"/>
-                 <text class="pareto-axis" x="${padL - 6}" y="${y + 3}" text-anchor="end">${Math.round(v)}%</text>`;
+      yTicks += `<line class="pareto-grid" x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}"/>
+                 <text class="pareto-axis" x="${padL - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${Math.round(v)}%</text>`;
     }
+
+    // Подписи осей: «% выплат» вертикально слева, «дециль дел» горизонтально снизу.
+    // Никаких наложений с тиками — текст отделен от шкалы по отдельной координате.
+    const yAxisTitle = `<text class="pareto-axis-title" transform="translate(14 ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">кум. % выплат</text>`;
+    const xAxisTitle = `<text class="pareto-axis-title" x="${(padL + innerW / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">дециль дел (% наименее крупных в начале → крупнейших в конце)</text>`;
+
     document.getElementById('pareto-body').innerHTML = `
-      <svg class="pareto-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <svg class="pareto-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Парето-распределение выплат">
         <defs>
           <linearGradient id="paretoBarGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#6366f1"/>
@@ -1712,11 +2127,12 @@
         </defs>
         ${yTicks}
         ${barsHtml}
-        <path class="pareto-line" d="M ${linePoints}"/>
+        <path class="pareto-line" d="${linePath}"/>
         ${markers}
+        ${valueLabels}
         ${xLabels}
-        <text class="pareto-axis" x="${padL - 6}" y="${padT - 4}" text-anchor="end" font-size="9">% выплат</text>
-        <text class="pareto-axis" x="${W - padR}" y="${H - 2}" text-anchor="end" font-size="9">% дел</text>
+        ${yAxisTitle}
+        ${xAxisTitle}
       </svg>
       <div class="pareto-note">
         <strong>10 % самых крупных дел дают ${fmtPct(top10pct, 1)} всех выплат.</strong>
@@ -1935,8 +2351,22 @@
     const card = document.getElementById('card-forecast');
     const premium = z.premiumWithCoeff || z.premiumBase || 0;
     const sumInsured = z.insuranceSum || 0;
-    if (a.recognition.recognized === 0 || premium === 0) {
-      card.style.display = 'none';
+    // Раньше блок прятался при отсутствии данных — теперь показываем placeholder
+    // с объяснением, чтобы пользователь видел причину и понимал что доделать.
+    if (a.recognition.recognized === 0) {
+      document.getElementById('forecast-sub').textContent = '';
+      document.getElementById('forecast-body').innerHTML = `
+        <div class="forecast-callout forecast-callout--ok">
+          <span>✓ Страховых случаев за анализируемый период не зафиксировано — прогноз убыточности по новому договору не требуется. Стандартное принятие риска возможно.</span>
+        </div>`;
+      return;
+    }
+    if (premium === 0) {
+      document.getElementById('forecast-sub').textContent = '';
+      document.getElementById('forecast-body').innerHTML = `
+        <div class="forecast-callout forecast-callout--warn">
+          <span>⚠ Прогноз КУ не построен: страховая премия не определена. Заполните ФОТ/среднюю ЗП и убедитесь, что справочники «Поправочные коэффициенты» и «Классификатор ОКЭД» загружены — премия рассчитается автоматически из тарифа.</span>
+        </div>`;
       return;
     }
     const expectedLoss = a.avgSumPerYear;
@@ -3229,5 +3659,167 @@
 
     return { toggle, open, close, copy, sendTo };
   })();
+
+  // ===== EXPORT TO PDF =====
+  // Active when the page is opened with ?exportPdf=<filename> by
+  // App.downloadAnalyticsPdf() in a hidden iframe. After every renderer above
+  // has populated the DOM, we group dash.children into "chunks" (one row /
+  // section-head) and snapshot each chunk separately with html2canvas. Each
+  // chunk image is placed on the current A4 page; if it doesn't fit, we
+  // start a new page; if the chunk itself is taller than one page (rare —
+  // huge tables), it's sliced vertically. Chunked instead of one giant
+  // capture so we don't OOM on dashboards with 40+ cards.
+  if (isExportPdfMode) {
+    const post = (data, transfer) => {
+      try { window.parent.postMessage(data, '*', transfer); } catch (_) {}
+    };
+    const loadScript = (src) => new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = resolve;
+      s.onerror = () => reject(new Error('Не удалось загрузить ' + src));
+      document.head.appendChild(s);
+    });
+    const waitFonts = () => (document.fonts && document.fonts.ready)
+      ? document.fonts.ready : Promise.resolve();
+
+    window.addEventListener('load', async () => {
+      try {
+        // 1. Wait for layout + staggered fade-ins to settle.
+        await waitFonts();
+        await new Promise(r => setTimeout(r, 1500));
+
+        post({ type: 'pdf-progress', text: 'Загружаем библиотеки…' });
+        if (typeof window.html2canvas === 'undefined') {
+          await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+        }
+        if (typeof window.jspdf === 'undefined') {
+          await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js');
+        }
+
+        const dash = document.getElementById('dash');
+        if (!dash) throw new Error('Дашборд не найден');
+
+        // 2. Collect renderable top-level blocks. Each block is one logical
+        // unit (hero, kpi row, row-1 with 1 card, row-2 with 2 cards,
+        // section-head divider). We skip the AI FAB / panel / overlay
+        // (floating chrome) and any block that ended up hidden because there
+        // was no data to render.
+        const skipClasses = ['ai-fab', 'ai-panel', 'ai-overlay'];
+        const blocks = Array.from(dash.children).filter(el => {
+          const tag = el.tagName.toLowerCase();
+          if (tag === 'button' || tag === 'aside') return false;
+          const cls = String(el.className || '');
+          if (skipClasses.some(c => cls.includes(c))) return false;
+          const cs = window.getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+          // Block has no visible height — skip.
+          if (el.offsetHeight === 0) return false;
+          return true;
+        });
+        if (!blocks.length) throw new Error('Нет содержимого для экспорта');
+
+        // 3. PDF setup. A4 portrait, small uniform margins.
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+        const pageW = 210;
+        const pageH = 297;
+        const margin = 8;
+        const usableW = pageW - margin * 2;   // 194 mm
+        const usableH = pageH - margin * 2;   // 281 mm
+
+        // 4. Capture options. We pin windowWidth to the dashboard's actual
+        // width so html2canvas doesn't simulate a narrow viewport. We also
+        // pass `width`/`height` explicitly so html2canvas captures the full
+        // element bounds even if its offsetParent is offscreen.
+        const dashWidth = Math.max(dash.scrollWidth, dash.clientWidth, 1200);
+
+        // Track current page state. pdf starts on page 1 and is empty.
+        let yPosMm = margin;
+        let firstDrawDone = false;
+
+        // Helper: append `dataUrl` (a chunk image with px dimensions
+        // `pxW × pxH`) to the PDF, starting a new page when needed.
+        const drawChunk = (dataUrl, pxW, pxH) => {
+          const mmH = pxH * usableW / pxW;
+          // If the chunk doesn't fit in the remaining space on the current
+          // page, start a new page (unless we haven't drawn anything yet).
+          if (firstDrawDone && yPosMm + mmH > pageH - margin + 0.5) {
+            pdf.addPage();
+            yPosMm = margin;
+          }
+          pdf.addImage(dataUrl, 'JPEG', margin, yPosMm, usableW, mmH);
+          yPosMm += mmH + 2;
+          firstDrawDone = true;
+        };
+
+        // 5. Capture each block. If a block is taller than one A4 page,
+        // slice the captured canvas into page-height chunks before adding.
+        for (let i = 0; i < blocks.length; i++) {
+          post({ type: 'pdf-progress', text: `Секция ${i + 1} из ${blocks.length}…` });
+          const el = blocks[i];
+
+          let canvas;
+          try {
+            canvas = await window.html2canvas(el, {
+              scale: 1.5,
+              useCORS: true,
+              logging: false,
+              backgroundColor: '#ffffff',
+              allowTaint: false,
+              windowWidth: dashWidth,
+              width: el.scrollWidth || dashWidth,
+              height: el.scrollHeight || el.offsetHeight,
+              scrollX: 0,
+              scrollY: 0,
+            });
+          } catch (capErr) {
+            console.warn('html2canvas failed on block, skipping:', el, capErr);
+            continue;
+          }
+          if (!canvas || !canvas.width || !canvas.height) continue;
+
+          // Total height of this block when scaled to fit usableW.
+          const mmH = canvas.height * usableW / canvas.width;
+
+          if (mmH <= usableH) {
+            // Fits on a single page — encode the whole canvas as one chunk.
+            drawChunk(canvas.toDataURL('image/jpeg', 0.92), canvas.width, canvas.height);
+          } else {
+            // Taller than a page. Slice the canvas in vertical strips,
+            // each ≤ usableH (in mm) tall. Force a fresh page so each
+            // slice starts at the top of its page (otherwise residual
+            // yPos from the previous block creates an odd-sized first
+            // strip).
+            if (firstDrawDone) { pdf.addPage(); yPosMm = margin; firstDrawDone = false; }
+            const stripPx = Math.floor(canvas.width * usableH / usableW);
+            for (let srcY = 0; srcY < canvas.height; srcY += stripPx) {
+              const sliceH = Math.min(stripPx, canvas.height - srcY);
+              const c2 = document.createElement('canvas');
+              c2.width = canvas.width;
+              c2.height = sliceH;
+              const ctx = c2.getContext('2d');
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, canvas.width, sliceH);
+              ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+              drawChunk(c2.toDataURL('image/jpeg', 0.9), canvas.width, sliceH);
+            }
+          }
+        }
+
+        if (!firstDrawDone) throw new Error('Не удалось снять ни одной секции');
+
+        post({ type: 'pdf-progress', text: 'Сохраняем файл…' });
+        // Send the PDF bytes back to the parent — the parent will trigger
+        // the download. Doing the save() here (inside an offscreen iframe)
+        // gets blocked by Chrome's "downloads from invisible frames" rule
+        // even on same-origin: jsPDF reports success but no file appears.
+        const buffer = pdf.output('arraybuffer');
+        post({ type: 'pdf-done', buffer, filename: exportPdfFileName }, [buffer]);
+      } catch (e) {
+        console.error('PDF export error:', e);
+        post({ type: 'pdf-error', message: e.message || 'Ошибка экспорта' });
+      }
+    });
+  }
 
 })();

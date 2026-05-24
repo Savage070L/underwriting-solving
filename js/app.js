@@ -16,6 +16,7 @@ const App = {
     calculator: null, // array of activity objects
     classifier: null, // ОКЭД → класс риска + название деятельности
     affiliated: null, // [{ id: '12-digit', name }, ...]
+    limits: {},       // ручные правки регламентных лимитов (см. LIMITS_DEFAULTS)
   },
   _rawNormativBuffer: null, // keep raw buffer for date-dependent lookup
 
@@ -214,7 +215,7 @@ const App = {
     const regDateRaw = sg?.registrationDate || null;
     const refDate = z.periodFrom || z.docDate || new Date();
     const ageYears = Utils.companyAgeYears(regDateRaw, refDate);
-    const isYoung = ageYears != null && ageYears < 3;
+    const isYoung = ageYears != null && ageYears < App._getLimit('minCompanyAgeYears');
     const noDiscountReason = (claimsCount > 0)
       ? 'claims'
       : (isYoung ? 'young_company' : null);
@@ -237,9 +238,30 @@ const App = {
     return null;
   },
 
-  // Обновляет alert «средняя зарплата ниже 85 000 ₸» (для андеррайтера).
+  // Дефолтные значения «лимитов процедуры». Пользователь может перебить любой
+  // из них через справочник «Лимиты процедуры» (App.refData.limits.<key>);
+  // тогда _getLimit(name) вернёт override, иначе — этот дефолт. После загрузки
+  // overrides из localStorage значения мутируются в App.AVG_SALARY_THRESHOLD и
+  // Utils.LIMIT_* (для обратной совместимости с уже написанным кодом).
+  LIMITS_DEFAULTS: {
+    minCompanyAgeYears: 3,           // < 3 лет → скидка не применяется
+    minAvgSalary: 85000,             // порог alert «низкая ЗП»
+    limitAsLowCls1_15: 2000000000,   // АС: нижний порог, классы 1–15
+    limitAsLowCls16_22: 1500000000,  // АС: нижний порог, классы 16–22
+    limitAsHigh: 10000000000,        // АС: верхний порог
+    limitSdAssetsRatio: 0.25,        // СД: доля от активов (0..1)
+  },
+
+  // Эффективное значение лимита: override > default.
+  _getLimit(name) {
+    const ovr = App.refData.limits && App.refData.limits[name];
+    if (ovr != null && Number.isFinite(ovr)) return ovr;
+    return App.LIMITS_DEFAULTS[name];
+  },
+
+  // Обновляет alert «средняя зарплата ниже X ₸» (для андеррайтера).
   // Порог пока информационный — без эффекта на расчёты.
-  AVG_SALARY_THRESHOLD: 85000,
+  AVG_SALARY_THRESHOLD: 85000, // переопределяется при загрузке overrides
   _updateAvgSalaryAlert() {
     const el = document.getElementById('avg-salary-alert');
     if (!el) return;
@@ -322,17 +344,36 @@ const App = {
           const base64 = App._arrayBufferToBase64(buf);
           localStorage.setItem('ref_normativ_raw', base64);
           App._rawNormativBuffer = buf;
-          // Если заявка уже загружена — читаем с учётом её даты.
-          // Иначе берём самую последнюю строку файла.
-          const effDate = App.zayavka
-            ? (App.zayavka.periodFrom || App.zayavka.docDate) : null;
+          // Дата для выборки строки норматива (приоритет):
+          //   1. Дата заявки (periodFrom / docDate)
+          //   2. Дата, извлечённая из названия файла ("Норматив 01.05.2026.xlsx")
+          //   3. null → парсер возьмёт последнюю строку файла
+          const filenameDate = App._extractDateFromFilename(file.name);
+          const effDate = (App.zayavka && (App.zayavka.periodFrom || App.zayavka.docDate))
+            || (filenameDate ? new Date(filenameDate) : null);
           App.refData.normativ = ExcelReader.readNormativ(buf, effDate);
+          // Если в самом файле даты нет (или парсер её не нашёл), а имя
+          // содержит её — берём из имени.
+          if (App.refData.normativ && !App.refData.normativ.date && filenameDate) {
+            App.refData.normativ.date = new Date(filenameDate);
+          }
+          // Поверх Excel — ручные правки (приоритет всегда у override).
+          App._applyRefOverrides('normativ');
+          // Заполняем инпуты ручного ввода данными из Excel — только пустые
+          // (где у пользователя ещё нет override), чтобы он мог их подправить.
+          App._prefillRefInputsFromExcel('normativ');
           break;
         }
         case 'ku': {
           const result = ExcelReader.readKuPoKlassam(buf);
+          // КУ-файл не содержит даты внутри — берём её из названия
+          // («КУ по классам на 01.05.2026.xlsx» → 2026-05-01).
+          const filenameDate = App._extractDateFromFilename(file.name);
+          if (filenameDate) result.date = new Date(filenameDate);
           App.refData.ku = result;
           localStorage.setItem('ref_ku', JSON.stringify(result));
+          App._applyRefOverrides('ku');
+          App._prefillRefInputsFromExcel('ku');
           break;
         }
         case 'calculator': {
@@ -382,6 +423,20 @@ const App = {
     if (!keys[type]) return;
     localStorage.removeItem(keys[type]);
     localStorage.removeItem(`ref_${type}_name`);
+    // Снимаем и ручные override для норматива/КУ — иначе после очистки файла
+    // данные «остаются» в виде смерженных override-значений.
+    if (type === 'normativ' || type === 'ku') {
+      App.refOverride[type] = {};
+      localStorage.removeItem(`ref_${type}_override`);
+      // Очистить инпуты ручного ввода
+      App.fillRefOverrideInputs(type);
+      // И сбросить их placeholder'ы (от Excel-prefill)
+      ['date', type === 'normativ' ? 'assets' : 'with', type === 'normativ' ? 'portfolio' : 'without']
+        .forEach(suffix => {
+          const inp = document.getElementById(`ovr-${type}-${suffix}`);
+          if (inp) inp.placeholder = '';
+        });
+    }
     App.refData[type] = null;
     if (type === 'normativ') App._rawNormativBuffer = null;
     if (type === 'calculator') {
@@ -392,6 +447,426 @@ const App = {
     App.updateRefBadge();
     App._refreshDerivedData();
     App.showMsg(`Справочник «${type}» очищен.`, 'success');
+  },
+
+  // Извлекает дату из имени файла справочника. Поддерживает форматы:
+  //   "Норматив 01.05.2026.xlsx", "КУ по классам на 01.05.2026.xlsx"
+  //   "ku_2026-05.xlsx", "normativ_april.xlsx", "ку май 2026.xlsx"
+  // Возвращает ISO-строку "YYYY-MM-DD" или null.
+  // Используется в loadRef для нормативa и КУ — даёт fallback-дату, когда
+  // в самом файле даты нет или заявка ещё не загружена.
+  _extractDateFromFilename(name) {
+    if (!name) return null;
+    const s = String(name);
+    // 1. DD.MM.YYYY / DD-MM-YYYY / DD/MM/YYYY (полная дата)
+    let m = s.match(/(\d{1,2})[.\-_/](\d{1,2})[.\-_/](\d{4})/);
+    if (m) {
+      return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    }
+    // 2. YYYY-MM-DD ISO
+    m = s.match(/(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})/);
+    if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+    // 3. YYYY-MM (только год + месяц) — берём 1-е число
+    m = s.match(/(20\d{2})[-_.](\d{1,2})\b/);
+    if (m) return `${m[1]}-${m[2].padStart(2,'0')}-01`;
+    // 4. DD.MM.YY → 20YY
+    m = s.match(/\b(\d{1,2})[.\-_/](\d{1,2})[.\-_/](\d{2})\b/);
+    if (m) return `20${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    // 5. Названия месяцев на русском + год: «на май 2026», «апрель 26»
+    const months = {
+      'январ': '01', 'феврал': '02', 'март':  '03', 'апрел': '04',
+      'мая':   '05', 'май':    '05', 'июн':   '06', 'июл':   '07',
+      'август':'08', 'сентябр':'09', 'октябр':'10', 'ноябр': '11', 'декабр':'12',
+    };
+    const lower = s.toLowerCase();
+    for (const [stem, mm] of Object.entries(months)) {
+      if (!lower.includes(stem)) continue;
+      const yM = lower.match(/\b(20\d{2})\b/) || lower.match(/\b(\d{2})\b(?!\d)/);
+      const yyyy = yM ? (yM[1].length === 4 ? yM[1] : ('20' + yM[1])) : null;
+      if (yyyy) return `${yyyy}-${mm}-01`;
+    }
+    // 6. Названия месяцев на английском (для test-data: normativ_april.xlsx)
+    const monthsEn = {
+      january: '01', february: '02', march: '03', april: '04',
+      may: '05', june: '06', july: '07', august: '08',
+      september: '09', october: '10', november: '11', december: '12',
+    };
+    for (const [name, mm] of Object.entries(monthsEn)) {
+      if (!lower.includes(name)) continue;
+      const yM = lower.match(/\b(20\d{2})\b/);
+      // Если год не указан — используем текущий год.
+      const yyyy = yM ? yM[1] : String(new Date().getFullYear());
+      return `${yyyy}-${mm}-01`;
+    }
+    return null;
+  },
+
+  // ===== MANUAL OVERRIDE FOR NORMATIV / KU =====
+  // Хранилище: App.refOverride[type] = { date?, fullAssetsTenge?, portfolioShare?,
+  // lossRatioWith?, lossRatioWithout? }. Ключи, которых нет в объекте, считаются
+  // «не переопределёнными» — берём значение из Excel. Объект также сохраняется
+  // в localStorage под ключом `ref_${type}_override`.
+  //
+  // _applyRefOverrides() склеивает Excel-данные с ручными правками: поверх
+  // App.refData[type] (содержит данные из файла) накладывает все ключи из
+  // App.refOverride[type]. Если файл не загружен — создаёт объект с нуля.
+  refOverride: { normativ: {}, ku: {} },
+
+  // Парсинг ввода. Дата возвращается строкой YYYY-MM-DD (как в input type=date),
+  // числа — float (с поддержкой запятой как десятичного разделителя).
+  // portfolioShare — пользователь вводит проценты (91,4), хранится дробь (0,914),
+  // т.к. analytics/snapshot ожидают именно дробь и умножают на 100 при выводе.
+  _parseOverrideValue(field, raw) {
+    if (raw == null || String(raw).trim() === '') return null;
+    if (field === 'date') {
+      // Браузерный input[type=date] уже возвращает ISO; на всякий случай
+      // принимаем DD.MM.YYYY.
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+      if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+      return null;
+    }
+    const n = Number(String(raw).replace(',', '.').replace(/\s/g, ''));
+    if (!Number.isFinite(n)) return null;
+    if (field === 'portfolioShare') return n / 100; // % → доля
+    return n;
+  },
+
+  // Применяет ручные правки (refOverride[type]) поверх данных из файла
+  // (которые ExcelReader уже положил в refData[type]).
+  //
+  // Сохраняет «чистые» Excel-значения в target._excel перед наложением, чтобы
+  // placeholder инпутов ручного ввода мог показывать «Excel: <значение>» даже
+  // когда верхний уровень уже переопределён.
+  _applyRefOverrides(type) {
+    if (!App.refData[type]) {
+      // Если файла не было, но есть override — создаём пустой объект.
+      if (Object.keys(App.refOverride[type] || {}).length === 0) return;
+      App.refData[type] = {};
+    }
+    const target = App.refData[type];
+    // Снимок «как из файла»: один раз при первом вызове после загрузки/restore.
+    if (!target._excel) {
+      const excel = {};
+      for (const k of Object.keys(target)) {
+        if (k.startsWith('_')) continue;
+        excel[k] = target[k];
+      }
+      target._excel = excel;
+    }
+    const ovr = App.refOverride[type] || {};
+    for (const [k, v] of Object.entries(ovr)) {
+      if (v == null) continue;
+      target[k] = v;
+      // Производные поля для норматива: при ручном fullAssetsTenge пересчитываем
+      // fullAssets (в тыс. тенге) и assets25pct (для совместимости со старым кодом).
+      if (type === 'normativ' && k === 'fullAssetsTenge') {
+        target.fullAssets = v / 1000;
+        target.assets25pct = (v / 1000) * 0.25;
+      }
+    }
+    // Помечаем, какие ключи переопределены — может пригодиться UI/snapshot.
+    target._manualKeys = Object.keys(ovr).filter(k => ovr[k] != null);
+  },
+
+  // Обработчик oninput на полях ручного ввода. Записывает значение в
+  // refOverride[type], применяет переопределения к refData, обновляет UI/превью.
+  onRefOverride(type, field, rawValue) {
+    if (!App.refOverride[type]) App.refOverride[type] = {};
+    const parsed = App._parseOverrideValue(field, rawValue);
+    if (parsed == null) {
+      delete App.refOverride[type][field];
+      // Возвращаем значение из Excel (если файл был загружен) или null.
+      App._reloadRefFromExcel(type);
+    } else {
+      App.refOverride[type][field] = parsed;
+      App._reloadRefFromExcel(type);
+    }
+    // Подсветка поля: если ввод задан — оранжевая рамка.
+    const inp = document.getElementById(`ovr-${type}-${App._ovrInputSuffix(field)}`);
+    if (inp) inp.classList.toggle('ovr-active', parsed != null);
+    // Обновляем ОСТАЛЬНЫЕ инпуты этого блока из свежеперечитанных данных
+    // (важно для normativ: смена override-date перечитывает строку файла за
+    // другой месяц, и assets/portfolio тоже меняются). Инпут, который сейчас
+    // редактируется, _prefillRefInputsFromExcel не трогает (проверка activeElement).
+    App._prefillRefInputsFromExcel(type);
+    // Сохраняем в localStorage.
+    localStorage.setItem(`ref_${type}_override`, JSON.stringify(App.refOverride[type]));
+    // Прогон зависимостей — превью, аналитика, бейджи.
+    App._refreshDerivedData();
+  },
+
+  // Перечитывает Excel-данные (если есть raw-буфер для norm) и поверх кладёт
+  // ручные правки. Вызывается после каждого изменения override.
+  _reloadRefFromExcel(type) {
+    if (type === 'normativ') {
+      if (App._rawNormativBuffer) {
+        // Дата для вырезки строки: ручная dateOverride > docDate заявки.
+        const ovrDate = App.refOverride.normativ?.date;
+        const effDate = ovrDate ? new Date(ovrDate)
+          : (App.zayavka?.periodFrom || App.zayavka?.docDate || null);
+        App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effDate);
+      } else if (App.refData.normativ && !App.refData.normativ._manualKeys) {
+        App.refData.normativ = null;
+      }
+    } else if (type === 'ku') {
+      // КУ хранится как готовый JSON — перечитываем из ref_ku.
+      try {
+        const raw = localStorage.getItem('ref_ku');
+        if (raw) App.refData.ku = JSON.parse(raw);
+        else App.refData.ku = null;
+      } catch (_) { App.refData.ku = null; }
+    }
+    App._applyRefOverrides(type);
+  },
+
+  // Маппинг field → суффикс id поля ввода (id: ovr-{type}-{suffix}).
+  _ovrInputSuffix(field) {
+    return ({
+      date: 'date',
+      fullAssetsTenge: 'assets',
+      portfolioShare: 'portfolio',
+      lossRatioWith: 'with',
+      lossRatioWithout: 'without',
+    })[field] || field;
+  },
+
+  // Заполняет инпуты ручного ввода значениями из refOverride (для restore).
+  fillRefOverrideInputs(type) {
+    const ovr = App.refOverride[type] || {};
+    const fields = type === 'normativ'
+      ? ['date', 'fullAssetsTenge', 'portfolioShare']
+      : ['date', 'lossRatioWith', 'lossRatioWithout'];
+    for (const f of fields) {
+      const inp = document.getElementById(`ovr-${type}-${App._ovrInputSuffix(f)}`);
+      if (!inp) continue;
+      const v = ovr[f];
+      if (v == null) {
+        inp.value = '';
+        inp.classList.remove('ovr-active');
+      } else if (f === 'date') {
+        inp.value = String(v);
+        inp.classList.add('ovr-active');
+      } else if (f === 'portfolioShare') {
+        // Хранится как дробь — в инпуте показываем процент.
+        inp.value = App._fmtNumWithSpaces(Number((v * 100).toFixed(2)));
+        inp.classList.add('ovr-active');
+      } else {
+        // Большие числа (активы, КУ) — с пробелами в разрядах.
+        inp.value = App._fmtNumWithSpaces(v);
+        inp.classList.add('ovr-active');
+      }
+    }
+  },
+
+  // На blur пустого инпута — возвращаем значение из Excel (если файл загружен).
+  // Так у пользователя в любой момент в инпуте видно эффективное значение.
+  _refillIfEmpty(type) {
+    App._prefillRefInputsFromExcel(type);
+  },
+
+  // ===== ЛИМИТЫ ПРОЦЕДУРЫ (manual override of regulatory thresholds) =====
+  // Маппинг: limit key → id инпута + конвертер вход/выход (если значение
+  // в инпуте отличается от хранимого: % → доля, и наоборот).
+  _LIMIT_INPUTS: {
+    minCompanyAgeYears: { id: 'lim-minAge',     toStored: v => v,        toDisplay: v => v },
+    minAvgSalary:       { id: 'lim-minSalary',  toStored: v => v,        toDisplay: v => v },
+    limitAsLowCls1_15:  { id: 'lim-asLow1_15',  toStored: v => v,        toDisplay: v => v },
+    limitAsLowCls16_22: { id: 'lim-asLow16_22', toStored: v => v,        toDisplay: v => v },
+    limitAsHigh:        { id: 'lim-asHigh',     toStored: v => v,        toDisplay: v => v },
+    limitSdAssetsRatio: { id: 'lim-sdRatio',    toStored: v => v / 100,  toDisplay: v => v * 100 },
+  },
+
+  // Обработчик oninput. Записывает значение в App.refData.limits,
+  // мутирует Utils.LIMIT_* и App.AVG_SALARY_THRESHOLD для обратной
+  // совместимости, сохраняет в localStorage, перепроверяет зависимости.
+  onLimitOverride(name, rawValue) {
+    if (!App.refData.limits) App.refData.limits = {};
+    const map = App._LIMIT_INPUTS[name];
+    if (!map) return;
+    const raw = String(rawValue || '').trim();
+    if (!raw) {
+      delete App.refData.limits[name];
+    } else {
+      const n = Number(raw.replace(',', '.').replace(/\s/g, ''));
+      if (!Number.isFinite(n)) return;
+      App.refData.limits[name] = map.toStored(n);
+    }
+    App._syncLimitsToGlobals();
+    App._persistLimits();
+    // Подсветка поля
+    const inp = document.getElementById(map.id);
+    if (inp) inp.classList.toggle('ovr-active', App.refData.limits[name] != null);
+    App._updateLimitsStatus();
+    App._refreshDerivedData();
+  },
+
+  // Мутирует Utils.LIMIT_* и App.AVG_SALARY_THRESHOLD в соответствии с
+  // эффективными лимитами. Так весь старый код, который читает эти
+  // константы напрямую, начинает использовать пользовательские overrides.
+  _syncLimitsToGlobals() {
+    if (typeof Utils !== 'undefined') {
+      Utils.LIMIT_AS_LOW_CLS_1_15 = App._getLimit('limitAsLowCls1_15');
+      Utils.LIMIT_AS_LOW_CLS_16_22 = App._getLimit('limitAsLowCls16_22');
+      Utils.LIMIT_AS_HIGH = App._getLimit('limitAsHigh');
+      Utils.LIMIT_SD_ASSETS_RATIO = App._getLimit('limitSdAssetsRatio');
+    }
+    App.AVG_SALARY_THRESHOLD = App._getLimit('minAvgSalary');
+  },
+
+  _persistLimits() {
+    const lim = App.refData.limits || {};
+    if (Object.keys(lim).length === 0) {
+      localStorage.removeItem('ref_limits');
+    } else {
+      localStorage.setItem('ref_limits', JSON.stringify(lim));
+    }
+  },
+
+  _updateLimitsStatus() {
+    const el = document.getElementById('status-limits');
+    if (!el) return;
+    const count = Object.keys(App.refData.limits || {}).length;
+    el.textContent = count === 0 ? 'По умолчанию' : `Изменено: ${count} из 6`;
+  },
+
+  // Форматирование числа с пробелами в качестве разделителей разрядов.
+  // 10000000000 → "10 000 000 000", 1500.5 → "1 500,5".
+  // Парсер игнорирует пробелы (см. _parseOverrideValue), так что введённое
+  // «1 000 000» корректно превратится в 1000000.
+  _fmtNumWithSpaces(n) {
+    if (n == null || !Number.isFinite(n)) return '';
+    const [intPart, fracPart] = String(n).split('.');
+    const intFmt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return fracPart ? `${intFmt},${fracPart}` : intFmt;
+  },
+
+  // Заполняет все 6 инпутов: либо override-значением, либо дефолтом.
+  _fillLimitsInputs() {
+    for (const [name, map] of Object.entries(App._LIMIT_INPUTS)) {
+      const inp = document.getElementById(map.id);
+      if (!inp) continue;
+      if (document.activeElement === inp) continue;
+      const ovr = App.refData.limits && App.refData.limits[name];
+      const eff = (ovr != null) ? ovr : App.LIMITS_DEFAULTS[name];
+      inp.value = App._fmtNumWithSpaces(map.toDisplay(eff));
+      inp.classList.toggle('ovr-active', ovr != null);
+      // Placeholder показывает дефолт.
+      const def = map.toDisplay(App.LIMITS_DEFAULTS[name]);
+      inp.placeholder = `По умолч.: ${App._fmtNumWithSpaces(def)}`;
+    }
+    App._updateLimitsStatus();
+  },
+
+  // Сброс всех лимитов к значениям по умолчанию.
+  resetLimitsToDefaults(ev) {
+    if (ev) ev.stopPropagation();
+    App.refData.limits = {};
+    App._syncLimitsToGlobals();
+    App._persistLimits();
+    App._fillLimitsInputs();
+    App._refreshDerivedData();
+    App.showMsg('Лимиты процедуры сброшены к значениям по умолчанию.', 'success');
+  },
+
+  // Восстановление при загрузке страницы.
+  _restoreLimits() {
+    try {
+      const raw = localStorage.getItem('ref_limits');
+      App.refData.limits = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (_) {
+      App.refData.limits = {};
+    }
+    App._syncLimitsToGlobals();
+    App._fillLimitsInputs();
+  },
+
+  // Восстановление overrides из localStorage. Вызывается из restoreCache.
+  _restoreRefOverrides() {
+    for (const t of ['normativ', 'ku']) {
+      try {
+        const raw = localStorage.getItem(`ref_${t}_override`);
+        if (raw) {
+          App.refOverride[t] = JSON.parse(raw) || {};
+          App._applyRefOverrides(t);
+          App.fillRefOverrideInputs(t);
+        }
+      } catch (_) { App.refOverride[t] = {}; }
+    }
+  },
+
+  // После загрузки Excel — заполняем пустые инпуты ручного ввода значениями
+  // из файла (только те поля, которые пользователь ещё НЕ переопределил).
+  // Это позволяет пользователю увидеть автозаполненные значения и при
+  // необходимости тут же их поправить.
+  _prefillRefInputsFromExcel(type) {
+    const data = App.refData[type];
+    if (!data) return;
+    // Используем «чистый» Excel-снимок (без overrides), чтобы placeholder и
+    // автозаполнение показывали реальные значения из файла, а не уже
+    // переопределённые.
+    const excel = data._excel || data;
+    const ovr = App.refOverride[type] || {};
+    const fmtNum = (v, decimals = 2) => {
+      if (v == null || !Number.isFinite(v)) return '';
+      // Округляем для удобства, но без лишних нулей.
+      return Number(v.toFixed(decimals)).toString().replace('.', ',');
+    };
+    const fmtDate = (v) => {
+      if (!v) return '';
+      const d = v instanceof Date ? v : new Date(v);
+      if (isNaN(d)) return '';
+      const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
+    // Когда у поля НЕТ ручного override — значение в инпуте принадлежит
+    // предыдущему Excel-файлу (или пусто). При загрузке нового файла такое
+    // значение надо ЗАМЕНИТЬ свежим, иначе пользователь увидит устаревшие
+    // данные пока не перезагрузит страницу.
+    const setFromExcel = (id, val) => {
+      const inp = document.getElementById(id);
+      if (!inp) return;
+      // Если пользователь сейчас редактирует — не перетираем.
+      if (document.activeElement === inp) return;
+      inp.value = val || '';
+      inp.placeholder = val ? `Excel: ${val}` : '';
+    };
+    // Поле переопределено вручную — оставляем значение, только обновляем
+    // placeholder, чтобы видеть, что лежит «в новом файле».
+    const setPlaceholder = (id, val) => {
+      const inp = document.getElementById(id);
+      if (!inp || !val) return;
+      inp.placeholder = `Excel: ${val}`;
+    };
+    if (type === 'normativ') {
+      const dateStr = fmtDate(excel.date);
+      // Активы — большое число, разделители разрядов пробелами.
+      const assetsStr = excel.fullAssetsTenge != null
+        ? App._fmtNumWithSpaces(Math.round(excel.fullAssetsTenge)) : '';
+      // portfolioShare хранится как дробь (0.914); в инпуте показываем процент (91,40).
+      const portfolioStr = excel.portfolioShare != null
+        ? fmtNum(excel.portfolioShare * 100, 2) : '';
+      // Если поля переопределены — оставляем как есть; иначе подставляем из Excel.
+      if (ovr.date == null) setFromExcel('ovr-normativ-date', dateStr);
+      else setPlaceholder('ovr-normativ-date', dateStr);
+      if (ovr.fullAssetsTenge == null) setFromExcel('ovr-normativ-assets', assetsStr);
+      else setPlaceholder('ovr-normativ-assets', assetsStr);
+      if (ovr.portfolioShare == null) setFromExcel('ovr-normativ-portfolio', portfolioStr);
+      else setPlaceholder('ovr-normativ-portfolio', portfolioStr);
+    } else if (type === 'ku') {
+      // КУ-файл сам по себе даты не содержит, но App.refData.ku.date
+      // populated из имени файла при загрузке («КУ по классам на 01.05.2026.xlsx»).
+      const dateStr = fmtDate(excel.date);
+      const withStr = fmtNum(excel.lossRatioWith);
+      const withoutStr = fmtNum(excel.lossRatioWithout);
+      if (ovr.date == null) setFromExcel('ovr-ku-date', dateStr);
+      else setPlaceholder('ovr-ku-date', dateStr);
+      if (ovr.lossRatioWith == null) setFromExcel('ovr-ku-with', withStr);
+      else setPlaceholder('ovr-ku-with', withStr);
+      if (ovr.lossRatioWithout == null) setFromExcel('ovr-ku-without', withoutStr);
+      else setPlaceholder('ovr-ku-without', withoutStr);
+    }
   },
 
   // Сброс только «Вид деятельности»: снимает выбор из dropdown, удаляет ручную
@@ -460,6 +935,7 @@ const App = {
       : null;
     if (App._rawNormativBuffer) {
       App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
+      App._applyRefOverrides('normativ');
     }
     // Сброс формы (вердикт, описание, доп. поля) — пользователь явно жмёт «обновить»
     App._resetFormState();
@@ -631,6 +1107,7 @@ const App = {
       const effectiveDate = App.zayavka.periodFrom || App.zayavka.docDate;
       if (App._rawNormativBuffer && effectiveDate) {
         App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, effectiveDate);
+        App._applyRefOverrides('normativ');
       }
 
       // Auto-lookup BIN for address and gov participation
@@ -934,6 +1411,7 @@ const App = {
     App.zayavka = {
       _manual: true,
       _manualPrimary: primary, // запомнить, чтобы корректно восстановить на reload
+      // Имя подтянется из statgov (autoLookupStatGov ниже). До этого момента — пусто.
       insurerName: '',
       bin,
       region: '',
@@ -961,6 +1439,7 @@ const App = {
     // Пересчитать норматив на дату договора (если справочник загружен)
     if (App._rawNormativBuffer) {
       App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, from);
+      App._applyRefOverrides('normativ');
     }
 
     // Подставить даты в инпуты периода страхования
@@ -1522,6 +2001,15 @@ const App = {
     } catch (e) {
       App.statgov = { error: e.message, loading: false };
     }
+    // statgov.name подставляем только в внутренние данные (App.zayavka.insurerName),
+    // чтобы оно отразилось в preview / analytics / документах. Input-поле
+    // manualName НЕ трогаем — оно остаётся для случая, когда пользователь хочет
+    // ввести имя вручную (например, если расширение не установлено).
+    if (App.statgov?.name && !App.statgov.error
+        && App.zayavka && App.zayavka._manual && !App.zayavka.insurerName) {
+      App.zayavka.insurerName = App.statgov.name;
+      App._persistCase();
+    }
     App.showPreview();
     App.renderCompanyOkeds();
     // После того как statgov загружен, _resolveOked() начнёт возвращать max-class ОКЭД —
@@ -1611,8 +2099,6 @@ const App = {
     const resolved = App._resolveOked();
     const effOked = resolved.oked || z.oked || '';
     const effRC = resolved.riskClass || z.riskClass;
-    // Активный тариф с учётом ручных корректировок
-    const effTariff = App._resolveTariff ? App._resolveTariff(effRC) : null;
     // Деятельность: для primary statgov — точное название из реестра
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
@@ -1625,9 +2111,18 @@ const App = {
     const periodToInput = document.getElementById('periodTo')?.value;
     const periodFrom = periodFromInput ? new Date(periodFromInput) : z.periodFrom;
     const periodTo = periodToInput ? new Date(periodToInput) : z.periodTo;
-    // Имя и адрес — ТОЛЬКО из statgov (без fallback на pk.uchet.kz)
+    // Имя — ТОЛЬКО из statgov (с fallback на ручной ввод insurerName)
     const insurerName = (sg && sg.name) || z.insurerName || '';
     const legalAddress = (sg && sg.legalAddress) || '';
+    // Эффективные финансы — учитывают affiliated override / overrides из manual режима
+    // (insuranceSum / premiumBase / premiumWithCoeff / tariff / organ).
+    // Это ключ к корректным данным аналитики в manual-режиме.
+    const effFin = App._effectiveFinancials ? App._effectiveFinancials({ ...z, periodFrom, periodTo }) : null;
+    const effTariff = effFin?.tariff ?? (App._resolveTariff ? App._resolveTariff(effRC) : null);
+    const effInsuranceSum = effFin?.insuranceSum ?? z.insuranceSum ?? 0;
+    const effPremiumBase = effFin?.premiumBase ?? z.premiumBase ?? 0;
+    const effPremiumWithCoeff = effFin?.premiumWithCoeff ?? z.premiumWithCoeff ?? 0;
+    const effCoeffDown = effFin?.coeffDown ?? z.coeffDown ?? 0;
 
     return {
       generatedAt: new Date().toISOString(),
@@ -1639,20 +2134,28 @@ const App = {
         oked: effOked,
         activity: effActivity || '',
         region: z.region || '',
-        insuranceSum: z.insuranceSum || 0,
-        premiumBase: z.premiumBase || 0,
-        premiumWithCoeff: z.premiumWithCoeff || 0,
+        insuranceSum: effInsuranceSum,
+        premiumBase: effPremiumBase,
+        premiumWithCoeff: effPremiumWithCoeff,
         periodFrom: periodFrom ? new Date(periodFrom).toISOString() : null,
         periodTo: periodTo ? new Date(periodTo).toISOString() : null,
-        tariff: effTariff,                 // ← пересчитанный тариф, не сырой z.tariff
+        tariff: effTariff,
         coeff: z.coeff || null,
-        coeffDown: z.coeffDown || 0,
+        coeffDown: effCoeffDown,
         paymentOrder: z.paymentOrder || '',
         docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
         govParticipation: App.binData.govParticipation || z.govParticipation || '',
         legalAddress,
         // Источники активного ОКЭДа (manual / statgov-max-class / zayavka)
         okedSource: resolved.source || 'unknown',
+        // Доп. поля для manual-режима, чтобы аналитика могла отметить особенности
+        isManual: !!z._manual,
+        isAffiliated: !!effFin?.isAffiliated,
+        affiliatedName: effFin?.affiliatedEntry?.name || null,
+        noDiscountReason: effFin?.noDiscountReason || null,
+        companyAgeYears: effFin?.ageYears || null,
+        avgSalary: z.avgSalary || null,
+        fot: z.fot || null,
       },
       verdict: document.getElementById('verdict')?.value || 'auto',
       popravka: App.refData.popravka ? {
@@ -1693,7 +2196,30 @@ const App = {
         sectorCode: sg.sectorCode,
         sectorName: sg.sectorName,
       } : null,
-      companyOkeds: App._collectCompanyOkeds ? App._collectCompanyOkeds() : [],
+      companyOkeds: (() => {
+        let okeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+        // Если statgov не загружен но ОКЭД известен (manual-ввод) — синтезируем
+        // single-entry для аналитики из classifier+popravka+calculator.
+        if (okeds.length === 0 && effOked) {
+          const classifier = App.refData.classifier || [];
+          const found = Utils.lookupOked ? Utils.lookupOked(effOked, classifier) : null;
+          const calcMap = App._calcOkedMap ? App._calcOkedMap() : {};
+          const calc = calcMap[effOked];
+          const calcActivity = (calc && typeof calc === 'object') ? calc : null;
+          const popTariff = (effRC && App.refData.popravka?.riskRates)
+            ? App.refData.popravka.riskRates.get(effRC) : null;
+          okeds = [{
+            code: effOked,
+            kind: 'primary',
+            name: found?.name || calcActivity?.activityName || calcActivity?.okedName || null,
+            riskClass: effRC || calcActivity?.riskClass || null,
+            tariff: popTariff || calcActivity?.tariff || null,
+            deathRate: calcActivity?.deathRate ?? null,
+            injuryRate: calcActivity?.injuryRate ?? null,
+          }];
+        }
+        return okeds;
+      })(),
     };
   },
 
@@ -1718,13 +2244,41 @@ const App = {
     const iframe = document.getElementById('analytics-iframe');
     if (container.classList.contains('is-open')) {
       container.classList.remove('is-open');
-      hint.textContent = '↓ развернуть';
+      hint.textContent = '↓ показать';
       return;
     }
     localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
     iframe.src = 'analytics.html#inline=1&t=' + Date.now(); // force reload via hash
     container.classList.add('is-open');
     hint.textContent = '↑ свернуть';
+    // Auto-resize iframe to its content's height so внутренний скроллбар не появляется.
+    // Same-origin iframe — можно читать contentDocument напрямую.
+    const resizeIframe = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const h = Math.max(
+          doc.body?.scrollHeight || 0,
+          doc.documentElement?.scrollHeight || 0
+        );
+        if (h > 0) iframe.style.height = (h + 16) + 'px';
+      } catch (e) { /* same-origin should always work */ }
+    };
+    // На load и далее периодически (контент может асинхронно добавляться:
+    // charts, lazy sections). ResizeObserver если доступен — наблюдаем за body.
+    iframe.addEventListener('load', () => {
+      resizeIframe();
+      try {
+        const body = iframe.contentDocument?.body;
+        if (body && window.ResizeObserver) {
+          if (App._inlineResizeObserver) App._inlineResizeObserver.disconnect();
+          App._inlineResizeObserver = new ResizeObserver(() => resizeIframe());
+          App._inlineResizeObserver.observe(body);
+        }
+        // На всякий случай — несколько отложенных пересчётов (для шрифтов/картинок)
+        [150, 400, 800, 1500].forEach(t => setTimeout(resizeIframe, t));
+      } catch (e) { /* ignore */ }
+    }, { once: true });
     setTimeout(() => container.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   },
 
@@ -1803,6 +2357,107 @@ const App = {
     } catch (e) {
       console.error('СЗ на СД generation error:', e);
       App.showMsg(`Ошибка генерации СЗ на СД: ${e.message}`, 'error');
+    }
+  },
+
+  // ===== СКАЧАТЬ АНАЛИТИКУ В PDF =====
+  // Раньше тут была попытка вручную собрать PDF через pdfMake (9 секций) —
+  // дашборд содержит ~40 карточек, поэтому документ выходил наполовину
+  // пустой. Текущая реализация открывает analytics.html в скрытом iframe
+  // с параметром ?exportPdf=<имя>; страница рендерит весь дашборд, ловит
+  // его html2canvas-ом и собирает реальный PDF через jsPDF. Так в файл
+  // попадают ВСЕ секции аналитики ровно в том виде, в котором они на экране.
+  async downloadAnalyticsPdf(btn) {
+    if (!App.claims || !App.claims.analytics) {
+      App.showMsg('Сначала загрузите историю убытков.', 'error');
+      return;
+    }
+    const origText = btn?.innerHTML;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="dla-spinner"></span> Готовим PDF…';
+    }
+    const setBtnText = (t) => {
+      if (btn) btn.innerHTML = `<span class="dla-spinner"></span> ${t}`;
+    };
+
+    // Сохраняем snapshot — iframe прочитает его из localStorage и отрендерит дашборд.
+    localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
+
+    const z = App.zayavka || {};
+    const companyName = Utils.formatCompanyName((App.statgov?.name) || z.insurerName || z.bin || 'компания');
+    const dateStr = new Date().toLocaleDateString('ru-RU').replace(/\//g, '-');
+    const fileName = `Аналитика ${companyName} от ${dateStr}.pdf`;
+
+    let iframe = null;
+    let onMsg = null;
+    try {
+      iframe = document.createElement('iframe');
+      // Фиксированная десктопная ширина 1280px — внутри iframe мы навешиваем
+      // body.is-pdf-mode с `width: 1280px !important` на .dash, чтобы row-2
+      // раскладка с двумя колонками точно отрендерилась, а не мобильным
+      // стеком. Высоту делаем большой, чтобы дашборд уложился без скролла —
+      // иначе offsetHeight некоторых секций может оказаться 0.
+      iframe.setAttribute('width', '1280');
+      iframe.setAttribute('height', '3000');
+      iframe.style.cssText = 'position:fixed;left:-99999px;top:0;width:1280px;height:3000px;border:0;opacity:0;pointer-events:none;';
+      // Hash, not query-string — npx http-server returns 404 on URLs with `?`.
+      iframe.src = `analytics.html#exportPdf=${encodeURIComponent(fileName)}&inline=1`;
+
+      await new Promise((resolve, reject) => {
+        // На реальной машине пакет из ~42 секций снимается за 15–25 сек,
+        // но под Chrome DevTools / CDP-отладчиком html2canvas замедляется
+        // в десятки раз — даём щедрый запас.
+        const TIMEOUT_MS = 5 * 60 * 1000;
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Таймаут генерации PDF (>5 минут)'));
+        }, TIMEOUT_MS);
+        onMsg = (e) => {
+          if (!iframe || e.source !== iframe.contentWindow) return;
+          const data = e.data || {};
+          if (data.type === 'pdf-progress' && data.text) {
+            setBtnText(data.text);
+          } else if (data.type === 'pdf-done') {
+            clearTimeout(timeoutId);
+            // Браузеры (Chrome в т.ч.) блокируют <a download> клик из
+            // offscreen-iframe — поэтому фактическое сохранение делает
+            // родительский window, у которого ещё жив user gesture.
+            try {
+              if (data.buffer) {
+                const blob = new Blob([data.buffer], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = data.filename || fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }
+              resolve();
+            } catch (saveErr) {
+              reject(saveErr);
+            }
+          } else if (data.type === 'pdf-error') {
+            clearTimeout(timeoutId);
+            reject(new Error(data.message || 'Ошибка экспорта'));
+          }
+        };
+        window.addEventListener('message', onMsg);
+        document.body.appendChild(iframe);
+      });
+
+      App.showMsg(`${fileName} скачан.`, 'success');
+    } catch (e) {
+      console.error('PDF generation error:', e);
+      App.showMsg(`Ошибка генерации PDF: ${e.message}`, 'error');
+    } finally {
+      if (onMsg) window.removeEventListener('message', onMsg);
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
     }
   },
 
@@ -2513,6 +3168,19 @@ const App = {
         App.updateRefStatus('ku', true, nameOf('ku'));
       }
 
+      // Manual overrides (normativ + ku) — поверх Excel-данных. Должно идти
+      // после восстановления normativ/ku, иначе _applyRefOverrides не найдёт
+      // куда писать. fillRefOverrideInputs работает с DOM, в этой точке
+      // index.html уже отрисован (restoreCache вызывается из init).
+      App._restoreRefOverrides();
+      // Также показываем в инпутах автозаполненные значения из Excel
+      // (для тех полей, что не переопределены вручную).
+      App._prefillRefInputsFromExcel('normativ');
+      App._prefillRefInputsFromExcel('ku');
+
+      // Лимиты процедуры — overrides → Utils/App + заполнение инпутов.
+      App._restoreLimits();
+
       // Calculator
       const calcStr = localStorage.getItem('ref_calculator');
       if (calcStr) {
@@ -2548,16 +3216,25 @@ const App = {
     localStorage.removeItem('ref_calculator');
     localStorage.removeItem('ref_classifier');
     localStorage.removeItem('ref_affiliated');
+    localStorage.removeItem('ref_normativ_override');
+    localStorage.removeItem('ref_ku_override');
+    localStorage.removeItem('ref_limits');
     localStorage.removeItem('manual_verdict');
     localStorage.removeItem('selected_activity_idx');
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated']
       .forEach(t => localStorage.removeItem(`ref_${t}_name`));
     localStorage.removeItem('manual_activity_for_oked');
-    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null };
+    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null, limits: {} };
+    App.refOverride = { normativ: {}, ku: {} };
     App._rawNormativBuffer = null;
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated'].forEach(t => App.updateRefStatus(t, false));
     App.updateRefBadge();
     App.populateActivityDropdown();
+    // Сбросить override-инпуты + лимиты
+    App.fillRefOverrideInputs('normativ');
+    App.fillRefOverrideInputs('ku');
+    App._syncLimitsToGlobals();
+    App._fillLimitsInputs();
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
     App.updateVerdictHint();

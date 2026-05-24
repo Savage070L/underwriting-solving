@@ -4,13 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Андеррайтинговое решение по ОСРНС</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <a class="app-brand" href="/" aria-label="Standard Life — главная">
+        <img class="sl-logo" src="assets/standard-life-logo.png" alt="Standard Life" />
+        <span class="app-brand-divider" aria-hidden="true"></span>
+        <div class="app-brand-text">
+          <div class="app-name">Андеррайтинговое решение</div>
+          <div class="app-subtitle">по ОСРНС</div>
+        </div>
+      </a>
+      <div class="app-meta">
+        <span class="app-status-pill"><span class="app-status-dot"></span> Локальная обработка</span>
+      </div>
+    </div>
+  </header>
   <div class="container">
-    <header>
-      <h1>Андеррайтинговое решение по ОСРНС</h1>
-    </header>
 
     <!-- Reference files (uploaded once, cached) — раскрывающийся раздел -->
     <div class="section section-collapsible" id="refs-section">
@@ -23,46 +38,84 @@
       <div class="section-collapsible-body" id="refs-body">
       <div class="upload-grid">
         <div class="upload-zone" id="zone-popravka" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('popravka', event)">❌</button>
-          <div class="uz-icon">📊</div>
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('popravka', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="13" width="3" height="5"/><rect x="12" y="9" width="3" height="9"/><rect x="17" y="6" width="3" height="12"/></svg></span>
           <div class="uz-label">Поправочные коэффициенты</div>
           <div class="uz-status" id="status-popravka">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('popravka', this.files[0])">
         </div>
-        <div class="upload-zone" id="zone-normativ" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('normativ', event)">❌</button>
-          <div class="uz-icon">📈</div>
-          <div class="uz-label">Норматив</div>
-          <div class="uz-status" id="status-normativ">Не загружен</div>
-          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('normativ', this.files[0])">
-        </div>
-        <div class="upload-zone" id="zone-ku" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('ku', event)">❌</button>
-          <div class="uz-icon">📉</div>
-          <div class="uz-label">КУ по классам</div>
-          <div class="uz-status" id="status-ku">Не загружен</div>
-          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('ku', this.files[0])">
-        </div>
-        <div class="upload-zone" id="zone-calculator" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('calculator', event)">❌</button>
-          <div class="uz-icon">🔢</div>
-          <div class="uz-label">Калькулятор рентабельности</div>
-          <div class="uz-status" id="status-calculator">Не загружен</div>
-          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('calculator', this.files[0])">
-        </div>
         <div class="upload-zone" id="zone-classifier" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('classifier', event)">❌</button>
-          <div class="uz-icon">🗂️</div>
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('classifier', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="7" y1="13" x2="17" y2="13"/></svg></span>
           <div class="uz-label">Классификатор ОКЭД</div>
           <div class="uz-status" id="status-classifier">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('classifier', this.files[0])">
         </div>
         <div class="upload-zone" id="zone-affiliated" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('affiliated', event)">❌</button>
-          <div class="uz-icon">👥</div>
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('affiliated', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <div class="uz-label">Аффилированные лица</div>
           <div class="uz-status" id="status-affiliated">Не загружен</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('affiliated', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-calculator" onclick="this.querySelector('input').click()">
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('calculator', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="9" y2="11"/><line x1="12" y1="11" x2="13" y2="11"/><line x1="16" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="9" y2="15"/><line x1="12" y1="15" x2="13" y2="15"/><line x1="16" y1="15" x2="16" y2="15"/><line x1="8" y1="19" x2="9" y2="19"/><line x1="12" y1="19" x2="13" y2="19"/><line x1="16" y1="19" x2="16" y2="19"/></svg></span>
+          <div class="uz-label">Калькулятор рентабельности</div>
+          <div class="uz-status" id="status-calculator">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('calculator', this.files[0])">
+        </div>
+        <div class="upload-zone" id="zone-normativ" onclick="if(event.target.closest('.ref-override')) return; this.querySelector('input[type=file]').click()">
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('normativ', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></span>
+          <div class="uz-label">Норматив</div>
+          <div class="uz-status" id="status-normativ">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('normativ', this.files[0])">
+          <!-- Ручной ввод: имеет приоритет над Excel. Если поле пустое — берётся значение из файла. -->
+          <div class="ref-override" onclick="event.stopPropagation()">
+            <div class="ref-override-title">Ручной ввод</div>
+            <div class="ref-override-grid">
+              <label>На дату<input type="date" id="ovr-normativ-date" oninput="App.onRefOverride('normativ','date',this.value)" onblur="App._refillIfEmpty('normativ')"></label>
+              <label>Активы Компании<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="ovr-normativ-assets" placeholder="напр. 89320000000" oninput="App.onRefOverride('normativ','fullAssetsTenge',this.value)" onblur="App._refillIfEmpty('normativ')"></span></label>
+              <label>Доля ОСРНС в портфеле<span class="input-with-unit" data-unit="%"><input type="text" inputmode="decimal" id="ovr-normativ-portfolio" placeholder="напр. 91,4" oninput="App.onRefOverride('normativ','portfolioShare',this.value)" onblur="App._refillIfEmpty('normativ')"></span></label>
+            </div>
+          </div>
+        </div>
+        <div class="upload-zone" id="zone-ku" onclick="if(event.target.closest('.ref-override')) return; this.querySelector('input[type=file]').click()">
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearOneRef('ku', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M14 17h7v-7"/></svg></span>
+          <div class="uz-label">КУ по классам</div>
+          <div class="uz-status" id="status-ku">Не загружен</div>
+          <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadRef('ku', this.files[0])">
+          <div class="ref-override" onclick="event.stopPropagation()">
+            <div class="ref-override-title">Ручной ввод</div>
+            <div class="ref-override-grid">
+              <label title="Только для отображения в карточке. В документах КУ выводится с датой Норматива (единый период расчёта).">На дату<input type="date" id="ovr-ku-date" oninput="App.onRefOverride('ku','date',this.value)" onblur="App._refillIfEmpty('ku')"></label>
+              <label>КУ с РЗНУ<span class="input-with-unit" data-unit="%"><input type="text" inputmode="decimal" id="ovr-ku-with" placeholder="напр. 20,65" oninput="App.onRefOverride('ku','lossRatioWith',this.value)" onblur="App._refillIfEmpty('ku')"></span></label>
+              <label>КУ без РЗНУ<span class="input-with-unit" data-unit="%"><input type="text" inputmode="decimal" id="ovr-ku-without" placeholder="напр. 21,05" oninput="App.onRefOverride('ku','lossRatioWithout',this.value)" onblur="App._refillIfEmpty('ku')"></span></label>
+            </div>
+          </div>
+        </div>
+        <!-- Лимиты процедуры — параметры внутренних правил андеррайтинга
+             (пороги АС/Правления/СД, мин. возраст компании, мин. ср. ЗП).
+             Файла нет: только ручной ввод. По умолчанию подставляются текущие
+             регламентные значения. -->
+        <div class="upload-zone upload-zone--no-file loaded" id="zone-limits">
+          <button class="uz-delete" title="Сбросить все лимиты к значениям по умолчанию" onclick="App.resetLimitsToDefaults(event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+          <div class="uz-label">Лимиты процедуры</div>
+          <div class="uz-status" id="status-limits">По умолчанию</div>
+          <div class="ref-override ref-override--limits" onclick="event.stopPropagation()">
+            <div class="ref-override-title">Параметры регламента</div>
+            <div class="ref-override-grid ref-override-grid--2col">
+              <label title="Если возраст компании < этого значения — скидка не применяется">Возраст компании &lt; ___ лет → без скидки<span class="input-with-unit" data-unit="лет"><input type="text" inputmode="decimal" id="lim-minAge" placeholder="напр. 3" oninput="App.onLimitOverride('minCompanyAgeYears',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="Если средняя ЗП < этого значения — показывается alert андеррайтеру">Ср. ЗП &lt; ___ ₸/мес → alert<span class="input-with-unit" data-unit="₸/мес"><input type="text" inputmode="decimal" id="lim-minSalary" placeholder="напр. 85000" oninput="App.onLimitOverride('minAvgSalary',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="Класс риска 1–15: страх.сумма ≥ этого → АС; меньше — стандартное принятие">АС, кл. 1–15: сумма ≥ ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asLow1_15" placeholder="напр. 2000000000" oninput="App.onLimitOverride('limitAsLowCls1_15',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="Класс риска 16–22: страх.сумма ≥ этого → АС; меньше — стандартное принятие">АС, кл. 16–22: сумма ≥ ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asLow16_22" placeholder="напр. 1500000000" oninput="App.onLimitOverride('limitAsLowCls16_22',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="Если страх.сумма > этого значения — кейс уходит в Правление">Правление: сумма &gt; ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asHigh" placeholder="напр. 10000000000" oninput="App.onLimitOverride('limitAsHigh',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="СД: если страх.сумма / активы компании > этого значения — Совет директоров">СД: сумма / активы &gt; ___ (%)<span class="input-with-unit" data-unit="%"><input type="text" inputmode="decimal" id="lim-sdRatio" placeholder="напр. 25" oninput="App.onLimitOverride('limitSdAssetsRatio',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+            </div>
+          </div>
         </div>
       </div>
       </div>
@@ -76,15 +129,15 @@
       </div>
       <div class="upload-grid-main">
         <div class="upload-zone-main" id="zone-zayavka" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('zayavka', event)">❌</button>
-          <div class="uz-icon">📋</div>
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('zayavka', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6a2 2 0 0 1 2 2v2h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2V4a2 2 0 0 1 2-2z"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg></span>
           <div class="uz-label">Заявка на андеррайтинг</div>
           <div class="uz-status" id="status-zayavka">Загрузите .xlsm файл</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadZayavka(this.files[0])">
         </div>
         <div class="upload-zone-main" id="zone-claims" onclick="this.querySelector('input').click()">
-          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('claims', event)">❌</button>
-          <div class="uz-icon">📑</div>
+          <button class="uz-delete" title="Удалить файл" onclick="App.clearCaseFile('claims', event)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></span>
           <div class="uz-label">История убытков</div>
           <div class="uz-status" id="status-claims">Загрузите .xls файл</div>
           <input type="file" accept=".xlsx,.xls,.xlsm" onchange="App.loadClaims(this.files[0])">
@@ -109,39 +162,41 @@
             <input type="date" id="manualDocDate" oninput="App.onManualInput('date')">
           </div>
           <div class="form-group">
-            <label for="manualWorkers">Количество работников</label>
+            <label for="manualWorkers">Кол-во работников</label>
             <input type="number" id="manualWorkers" min="1" step="1" placeholder="например: 25" oninput="App.onManualInput('workers')">
           </div>
           <div class="form-group">
-            <label for="manualFot">
-              ФОТ годовой, ₸
+            <label for="manualFot" class="manual-label-inline">
+              <span>ФОТ годовой, ₸</span>
               <span class="manual-field-tag" id="tag-fot" style="display:none">посчитано</span>
             </label>
             <input type="text" id="manualFot" inputmode="decimal" placeholder="например: 36 000 000,00"
                    oninput="App.onManualInput('fot')" onblur="App.onManualMoneyBlur('fot')">
           </div>
           <div class="form-group">
-            <label for="manualAvgSalary">
-              Средняя зарплата, ₸/мес
+            <label for="manualAvgSalary" class="manual-label-inline">
+              <span>Ср. зп, ₸/мес</span>
               <span class="manual-field-tag" id="tag-avg" style="display:none">посчитано</span>
             </label>
             <input type="text" id="manualAvgSalary" inputmode="decimal" placeholder="ИЛИ заполните вместо ФОТ"
                    oninput="App.onManualInput('avg')" onblur="App.onManualMoneyBlur('avg')">
           </div>
         </div>
-        <div class="manual-input-hint" id="manual-hint">Заполните БИН, количество работников и хотя бы одно из: ФОТ или среднюю ЗП.</div>
+        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.</div>
         <div class="manual-input-actions">
           <button class="btn-manual-apply" id="btn-manual-apply" onclick="App.applyManualZayavka()">Применить</button>
         </div>
       </div>
 
+      <!-- Alert: средняя ЗП < 85 000 ₸ (информационный для андеррайтера).
+           Размещаем ДО превью основной информации — этот алерт должен бросаться
+           в глаза первым, прежде чем пользователь начнёт изучать профиль. -->
+      <div class="avg-salary-alert" id="avg-salary-alert"></div>
+
       <!-- Preview panel -->
       <div class="preview-panel" id="preview-panel">
         <div class="preview-grid" id="preview-grid"></div>
       </div>
-
-      <!-- Alert: средняя ЗП < 85 000 ₸ (информационный для андеррайтера) -->
-      <div class="avg-salary-alert" id="avg-salary-alert"></div>
 
       <!-- Принудительное обновление данных: re-fetch statgov + БИН + пересборка -->
       <button class="btn-refresh-wide" onclick="App.refreshAll()" title="Перечитать stat.gov.kz, БИН-лукап и пересобрать данные">
@@ -154,10 +209,6 @@
     <div class="section">
       <div class="section-title">1. Параметры страхования</div>
       <div class="form-grid">
-        <div class="checkbox-group form-group">
-          <input type="checkbox" id="nonResident">
-          <label for="nonResident">Нерезидент</label>
-        </div>
         <div class="form-group full-width" id="company-okeds-section" style="display:none">
           <label>
             ОКЭДы компании
@@ -187,6 +238,10 @@
           <input type="text" id="okedInput" placeholder="например: 07101" oninput="App.onOkedChange()">
           <div class="oked-lookup-result" id="oked-result"></div>
         </div>
+        <div class="checkbox-group form-group">
+          <input type="checkbox" id="nonResident">
+          <label for="nonResident">Нерезидент</label>
+        </div>
         <div class="form-group full-width">
           <label for="activitySelect" class="activity-label-row">
             <span>Вид деятельности (для оценки рисков смерти/травмы)
@@ -205,6 +260,10 @@
           <div class="oked-lookup-result" id="activity-result"></div>
           <div class="activity-diagnostics" id="activity-diagnostics"></div>
         </div>
+      </div>
+
+      <!-- Один компактный ряд: порядок оплаты + (опционально) периодичность + период с / по -->
+      <div class="form-row-tight">
         <div class="form-group">
           <label for="paymentOrder">Порядок уплаты страховой премии</label>
           <select id="paymentOrder" onchange="App.onPaymentChange()">
@@ -222,41 +281,35 @@
             <option value="week">Раз в неделю</option>
             <option value="day">Раз в день</option>
           </select>
-          <div class="payment-preview" id="payment-preview"></div>
         </div>
-      </div>
-
-      <!-- Период страхования: по умолчанию F3 + 1 день → +1 год. Ручной ввод имеет приоритет. -->
-      <div class="dates-row visible" id="dates-row">
         <div class="form-group">
-          <label for="periodFrom">
-            Период страхования с
-          </label>
+          <label for="periodFrom">Период страхования с</label>
           <input type="date" id="periodFrom">
         </div>
         <div class="form-group">
-          <label for="periodTo">
-            Период страхования по
-          </label>
+          <label for="periodTo">Период страхования по</label>
           <input type="date" id="periodTo">
         </div>
       </div>
+
+      <!-- Preview траншей рассрочки (показывается только когда порядок = «В рассрочку») -->
+      <div class="payment-preview" id="payment-preview"></div>
     </div>
 
     <!-- ============ Шаг 2: Аналитика — пересчёт на основе введённых параметров ============ -->
     <div class="section">
-      <div class="section-title">2. Аналитика убытков и риска</div>
+      <div class="section-title">2. Аналитика страховых случаев</div>
       <div class="analytics-cta" id="analytics-cta">
         <div class="analytics-cta-row">
           <button class="btn-analytics btn-analytics--inline" onclick="App.toggleInlineAnalytics()">
             <span class="ba-icon">📊</span>
-            <span class="ba-label">Аналитика прямо здесь</span>
-            <span class="ba-hint" id="inline-hint">↓ развернуть</span>
+            <span class="ba-label">Развернуть аналитику ниже</span>
+            <span class="ba-hint" id="inline-hint">↓ показать</span>
           </button>
           <button class="btn-analytics" onclick="App.openAnalytics()">
             <span class="ba-icon">↗</span>
-            <span class="ba-label">Открыть на отдельной странице</span>
-            <span class="ba-hint">в новой вкладке</span>
+            <span class="ba-label">Открыть в новой вкладке</span>
+            <span class="ba-hint">отдельной страницей</span>
           </button>
         </div>
       </div>
@@ -337,6 +390,11 @@
           СЗ на СД
         </button>
       </div>
+      <!-- Скачать аналитику в PDF — доступна всегда, независимо от пакета документов -->
+      <button class="btn-download-analytics" id="btnDownloadAnalytics" onclick="App.downloadAnalyticsPdf(this)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Скачать аналитику (PDF)</span>
+      </button>
       <div class="msg" id="msg"></div>
     </div>
   </div>
@@ -344,6 +402,9 @@
   <script src="js/lib/xlsx.full.min.js"></script>
   <script src="js/lib/docx.min.js"></script>
   <script src="js/lib/FileSaver.min.js"></script>
+  <!-- PDF-экспорт аналитики делается через скрытый iframe с analytics.html?exportPdf=<имя>.
+       html2canvas + jsPDF подгружаются по требованию изнутри analytics.js — здесь
+       ничего загружать не надо. -->
   <script src="js/utils.js"></script>
   <script src="js/excel-reader.js"></script>
   <script src="js/ar-generator.js"></script>

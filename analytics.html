@@ -53,6 +53,17 @@
     <!-- KPI strip -->
     <section class="kpi-row" id="kpi-row"></section>
 
+    <!-- Полные данные о компании — всё, что известно по БИНу + договору -->
+    <section class="row-1">
+      <div class="card card-profile" id="card-full-profile">
+        <div class="card-head">
+          <h2><span class="card-icon">🏢</span> Полный профиль компании</h2>
+          <div class="card-sub">Реестровые данные, ОКЭДы, параметры договора и финансовые показатели в одном месте</div>
+        </div>
+        <div class="card-body" id="full-profile-body"></div>
+      </div>
+    </section>
+
     <!-- Risk Score banner -->
     <section class="row-1">
       <div class="card card-score" id="card-score">
@@ -97,6 +108,28 @@
           <div class="card-sub">Интенсивность страховых случаев по месяцам — чем темнее, тем больше НС</div>
         </div>
         <div class="card-body" id="heatmap-body"></div>
+      </div>
+    </section>
+
+    <!-- Матрица: годы × страховщики (табличная аналитика) -->
+    <section class="row-1">
+      <div class="card" id="card-insurer-matrix">
+        <div class="card-head">
+          <h2><span class="card-icon">📋</span> Кейсы по годам и страховщикам</h2>
+          <div class="card-sub">Распределение НС и выплат по комбинациям «страховщик × год»</div>
+        </div>
+        <div class="card-body" id="insurer-matrix-body"></div>
+      </div>
+    </section>
+
+    <!-- Сравнительная панель: компания vs отрасль vs портфель -->
+    <section class="row-1">
+      <div class="card" id="card-benchmark">
+        <div class="card-head">
+          <h2><span class="card-icon">📊</span> Бенчмарк: компания vs отрасль vs портфель</h2>
+          <div class="card-sub">Сравнение ключевых индикаторов риска с эталонными показателями</div>
+        </div>
+        <div class="card-body" id="benchmark-body"></div>
       </div>
     </section>
 
@@ -289,12 +322,12 @@
       </div>
     </section>
 
-    <!-- Профиль из реестра stat.gov.kz (если данные есть) -->
+    <!-- Профиль организации и ОКЭДы (statgov реестр или ручной ввод) -->
     <section class="row-1" id="card-statgov-profile-section" style="display:none">
       <div class="card" id="card-statgov-profile">
         <div class="card-head">
-          <h2><span class="card-icon">📋</span> Профиль из реестра stat.gov.kz</h2>
-          <div class="card-sub">Реестровые данные о страхователе, ОКЭДах и структуре собственности</div>
+          <h2><span class="card-icon">📋</span> ОКЭДы и профиль организации</h2>
+          <div class="card-sub">Виды деятельности, классы риска и структура собственности</div>
         </div>
         <div class="card-body" id="statgov-profile-body"></div>
       </div>
