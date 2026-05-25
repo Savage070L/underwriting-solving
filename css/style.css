@@ -240,21 +240,54 @@ header.app-header {
    ========================================================================== */
 .upload-grid {
   display: grid;
-  /* 8 справочников укладываются в 2 строки по 4 — естественно через
-     4-колоночную сетку без явного позиционирования. */
-  grid-template-columns: repeat(4, 1fr);
+  /* 12-колоночная сетка (НОК для 4 и 3). Распределение:
+        Row 1: 4 карточки × 3 кол. = 12 (file-only refs)
+        Row 2: 3 карточки × 4 кол. = 12 (Норматив, КУ, Лимиты)
+        Row 3: Подписанты × 12 кол. = full-width
+     Так обе короткие строки заполняют контейнер без пустот по бокам. */
+  grid-template-columns: repeat(12, 1fr);
   gap: var(--sp-3);
 }
+.upload-grid > :nth-child(-n+4) { grid-column: span 3; }
+.upload-grid > :nth-child(n+5)  { grid-column: span 4; }
+/* Подписанты — 3-я строка, full-width. order:99 ставит её ПОСЛЕ всех остальных
+   карточек независимо от позиции в HTML, grid-column: 1/-1 растягивает на
+   все 12 колонок. */
+.upload-grid #zone-signers {
+  grid-column: 1 / -1 !important;
+  order: 99;
+}
 @media (max-width: 1100px) {
-  .upload-grid { grid-template-columns: repeat(3, 1fr); }
+  .upload-grid { grid-template-columns: repeat(6, 1fr); }
+  .upload-grid > :nth-child(-n+4),
+  .upload-grid > :nth-child(n+5) { grid-column: span 2; }
 }
 @media (max-width: 800px) {
   .upload-grid { grid-template-columns: 1fr 1fr; }
+  .upload-grid > :nth-child(-n+4),
+  .upload-grid > :nth-child(n+5) { grid-column: auto; }
 }
 
-/* Карточка «Подписанты»: группы ФИО, каждая группа со своим заголовком. */
+/* Карточка «Подписанты»: 4 группы в горизонтальном grid, заполняют всю
+   ширину карточки. На узких экранах перестраиваются в меньшее число
+   колонок. */
+.ref-override--signers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.ref-override--signers > .ref-override-title {
+  grid-column: 1 / -1;
+}
+@media (max-width: 1100px) {
+  .ref-override--signers { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .ref-override--signers { grid-template-columns: 1fr; }
+}
 .ref-override--signers .signers-group {
-  margin-bottom: 12px;
+  margin-bottom: 0; /* теперь это колонка grid, не stack */
 }
 .ref-override--signers .signers-group:last-child { margin-bottom: 0; }
 .ref-override--signers .signers-group-title {
@@ -298,11 +331,18 @@ header.app-header {
   font-weight: 600;
 }
 
-/* Редактируемый ряд: 3-колонный grid (чекбокс, должность, ФИО). */
+/* Редактируемый ряд: чекбокс + должность сверху, ФИО снизу.
+   Двухстрочная раскладка экономит горизонтальное пространство в узких
+   4-колоночных группах. */
 .ref-override--signers .signer-row--editable {
-  grid-template-columns: 18px 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: 18px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  row-gap: 2px;
   align-items: center;
+  padding: 6px 8px;
+  background: rgba(99, 102, 241, 0.04);
+  border-radius: 5px;
 }
 .ref-override--signers .signer-row--editable input[type="checkbox"] {
   width: 16px;
@@ -310,10 +350,20 @@ header.app-header {
   cursor: pointer;
   accent-color: #6366f1;
   margin: 0;
+  grid-row: 1;
+  grid-column: 1;
 }
 .ref-override--signers .signer-role-input {
   font-size: 0.7rem !important;
   color: var(--c-text-secondary);
+  grid-row: 1;
+  grid-column: 2;
+}
+/* ФИО на второй строке, со сдвигом под чекбокс */
+.ref-override--signers .signer-row--editable > input[type="text"]:not(.signer-role-input) {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  margin-left: 22px; /* visual indent под role-input */
 }
 
 /* Затемнение ряда «в отпуске» — пользователь видит, что строка не пойдёт в документ. */
