@@ -865,12 +865,19 @@ const App = {
   // не появится (loop по AS_MEMBERS/PRAVLENIE_MEMBERS итерирует только активных).
   _syncSignersToUtils() {
     if (typeof Utils === 'undefined') return;
+    // ФИО solo-подписантов и секретарей
     Utils.SD_CHAIR_NAME        = App._getSigner('sdChair');
     Utils.PRAVLENIE_CHAIR_NAME = App._getSigner('pravlenieChair');
     Utils.DAIP_DIRECTOR_NAME   = App._getSigner('daipDirector');
     Utils.UPRAV_DIR_NAME       = App._getSigner('upravDir');
     Utils.AS_SECRETARY         = App._getSigner('asSecretary');
     Utils.PRAVLENIE_SECRETARY  = App._getSigner('pravlenieSecretary');
+    // Должности solo-подписантов (могут поменяться при перестановках —
+    // например, «Управляющий директор» → «Заместитель председателя Правления»).
+    Utils.SD_CHAIR_ROLE        = App._getSignerRole('sdChair');
+    Utils.PRAVLENIE_CHAIR_ROLE = App._getSignerRole('pravlenieChair');
+    Utils.DAIP_DIRECTOR_ROLE   = App._getSignerRole('daipDirector');
+    Utils.UPRAV_DIR_ROLE       = App._getSignerRole('upravDir');
 
     const buildMembers = (keys) => keys
       .filter(k => !App._isSignerSkipped(k))
