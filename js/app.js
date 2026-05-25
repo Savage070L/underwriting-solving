@@ -17,6 +17,7 @@ const App = {
     classifier: null, // ОКЭД → класс риска + название деятельности
     affiliated: null, // [{ id: '12-digit', name }, ...]
     limits: {},       // ручные правки регламентных лимитов (см. LIMITS_DEFAULTS)
+    signers: {},      // ручные правки ФИО подписантов (см. SIGNERS_DEFAULTS)
   },
   _rawNormativBuffer: null, // keep raw buffer for date-dependent lookup
 
@@ -780,6 +781,153 @@ const App = {
     }
     App._syncLimitsToGlobals();
     App._fillLimitsInputs();
+  },
+
+  // ===== ПОДПИСАНТЫ (signatories) =====
+  // Дефолтные ФИО всех подписантов и адресатов документов. Когда кто-то уходит
+  // в отпуск / на больничный / увольняется — пользователь правит ФИО в карточке
+  // «Подписанты», override сохраняется в localStorage и переписывается в
+  // Utils.* при загрузке, чтобы все генераторы документов (АР, Заключение,
+  // Протокол, СЗ) автоматически использовали новые значения.
+  //
+  // Роли остаются hardcoded — они меняются редко, а ФИО гораздо чаще.
+  SIGNERS_DEFAULTS: {
+    // Solo positions
+    sdChair:          'М.К. Альжанов',     // Председатель Совета директоров (адресат СЗ на СД)
+    pravlenieChair:   'Г. Амерходжаев',    // Председатель Правления (адресат СЗ на Правление)
+    daipDirector:     'Джелкобаев Т.К.',   // Директор ДАиП (подписант СЗ)
+    upravDir:         'Аринов Д.С.',       // Управляющий директор
+    // АС (Андеррайтинговый Совет) — 6 членов + секретарь
+    asMember0:        'Амерходжаев Г.Т.',  // Председатель Правления
+    asMember1:        'Кныкова А.У.',      // Заместитель председателя Правления, член Правления
+    asMember2:        'Уткин А.С.',        // Управляющий директор
+    asMember3:        'Осинцев Р.С.',      // Руководитель Службы управления рисками
+    asMember4:        'Аринов Д.С.',       // Управляющий директор
+    asMember5:        'Джелкобаев Т.К.',   // Директор ДАиП
+    asSecretary:      'Клейнбок О.И.',     // Секретарь АС
+    // Правление (для протокола Правления и СД) — 3 члена + секретарь
+    pravlenieMember0: 'Амерходжаев Г.Т.',  // Председатель Правления
+    pravlenieMember1: 'Кныкова А.У.',      // Заместитель председателя Правления, член Правления
+    pravlenieMember2: 'Керн Ю.П.',         // Главный бухгалтер, член Правления
+    pravlenieSecretary: 'Боева И.В.',      // Секретарь Правления
+  },
+
+  // Роли — для отображения в UI и заполнения структур Utils.AS_MEMBERS / PRAVLENIE_MEMBERS.
+  SIGNERS_ROLES: {
+    sdChair:          'Председатель Совета директоров',
+    pravlenieChair:   'Председатель Правления',
+    daipDirector:     'Директор ДАиП',
+    upravDir:         'Управляющий директор',
+    asMember0:        'Председатель Правления',
+    asMember1:        'Заместитель председателя Правления, член Правления',
+    asMember2:        'Управляющий директор',
+    asMember3:        'Руководитель Службы управления рисками',
+    asMember4:        'Управляющий директор',
+    asMember5:        'Директор ДАиП',
+    asSecretary:      'Секретарь Андеррайтингового Совета',
+    pravlenieMember0: 'Председатель Правления',
+    pravlenieMember1: 'Заместитель председателя Правления, член Правления',
+    pravlenieMember2: 'Главный бухгалтер, член Правления',
+    pravlenieSecretary: 'Секретарь Правления',
+  },
+
+  _getSigner(key) {
+    const ovr = App.refData.signers && App.refData.signers[key];
+    if (ovr != null && String(ovr).trim()) return String(ovr).trim();
+    return App.SIGNERS_DEFAULTS[key];
+  },
+
+  // Переписывает Utils.* константы из эффективных подписантов (override > default).
+  // Вызывается после загрузки overrides и после каждого изменения.
+  _syncSignersToUtils() {
+    if (typeof Utils === 'undefined') return;
+    Utils.SD_CHAIR_NAME      = App._getSigner('sdChair');
+    Utils.PRAVLENIE_CHAIR_NAME = App._getSigner('pravlenieChair');
+    Utils.DAIP_DIRECTOR_NAME = App._getSigner('daipDirector');
+    Utils.UPRAV_DIR_NAME     = App._getSigner('upravDir');
+    Utils.AS_MEMBERS = [
+      [App.SIGNERS_ROLES.asMember0, App._getSigner('asMember0')],
+      [App.SIGNERS_ROLES.asMember1, App._getSigner('asMember1')],
+      [App.SIGNERS_ROLES.asMember2, App._getSigner('asMember2')],
+      [App.SIGNERS_ROLES.asMember3, App._getSigner('asMember3')],
+      [App.SIGNERS_ROLES.asMember4, App._getSigner('asMember4')],
+      [App.SIGNERS_ROLES.asMember5, App._getSigner('asMember5')],
+    ];
+    Utils.PRAVLENIE_MEMBERS = [
+      [App.SIGNERS_ROLES.pravlenieMember0, App._getSigner('pravlenieMember0')],
+      [App.SIGNERS_ROLES.pravlenieMember1, App._getSigner('pravlenieMember1')],
+      [App.SIGNERS_ROLES.pravlenieMember2, App._getSigner('pravlenieMember2')],
+    ];
+    Utils.AS_SECRETARY        = App._getSigner('asSecretary');
+    Utils.PRAVLENIE_SECRETARY = App._getSigner('pravlenieSecretary');
+  },
+
+  // Обработчик oninput на инпуте подписанта.
+  onSignerOverride(key, rawValue) {
+    if (!App.refData.signers) App.refData.signers = {};
+    const v = String(rawValue || '').trim();
+    if (!v || v === App.SIGNERS_DEFAULTS[key]) {
+      delete App.refData.signers[key];
+    } else {
+      App.refData.signers[key] = v;
+    }
+    App._syncSignersToUtils();
+    App._persistSigners();
+    // Подсветка изменённого поля
+    const inp = document.getElementById(`sgn-${key}`);
+    if (inp) inp.classList.toggle('ovr-active', App.refData.signers[key] != null);
+    App._updateSignersStatus();
+  },
+
+  _persistSigners() {
+    const s = App.refData.signers || {};
+    if (Object.keys(s).length === 0) {
+      localStorage.removeItem('ref_signers');
+    } else {
+      localStorage.setItem('ref_signers', JSON.stringify(s));
+    }
+  },
+
+  _updateSignersStatus() {
+    const el = document.getElementById('status-signers');
+    if (!el) return;
+    const total = Object.keys(App.SIGNERS_DEFAULTS).length;
+    const count = Object.keys(App.refData.signers || {}).length;
+    el.textContent = count === 0 ? 'По умолчанию' : `Изменено: ${count} из ${total}`;
+  },
+
+  // Заполнить все инпуты подписантов текущими эффективными значениями.
+  _fillSignersInputs() {
+    for (const key of Object.keys(App.SIGNERS_DEFAULTS)) {
+      const inp = document.getElementById(`sgn-${key}`);
+      if (!inp) continue;
+      if (document.activeElement === inp) continue;
+      const ovr = App.refData.signers && App.refData.signers[key];
+      inp.value = ovr || App.SIGNERS_DEFAULTS[key];
+      inp.classList.toggle('ovr-active', ovr != null);
+      inp.placeholder = `По умолч.: ${App.SIGNERS_DEFAULTS[key]}`;
+    }
+    App._updateSignersStatus();
+  },
+
+  resetSignersToDefaults(ev) {
+    if (ev) ev.stopPropagation();
+    App.refData.signers = {};
+    App._syncSignersToUtils();
+    App._persistSigners();
+    App._fillSignersInputs();
+    App.showMsg('Подписанты сброшены к значениям по умолчанию.', 'success');
+  },
+
+  _restoreSigners() {
+    try {
+      const raw = localStorage.getItem('ref_signers');
+      App.refData.signers = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (_) {
+      App.refData.signers = {};
+    }
+    App._syncSignersToUtils();
+    App._fillSignersInputs();
   },
 
   // Восстановление overrides из localStorage. Вызывается из restoreCache.
@@ -3181,6 +3329,9 @@ const App = {
       // Лимиты процедуры — overrides → Utils/App + заполнение инпутов.
       App._restoreLimits();
 
+      // Подписанты — overrides → Utils.* (имена в АР, СЗ, Протоколе, Заключении).
+      App._restoreSigners();
+
       // Calculator
       const calcStr = localStorage.getItem('ref_calculator');
       if (calcStr) {
@@ -3219,22 +3370,25 @@ const App = {
     localStorage.removeItem('ref_normativ_override');
     localStorage.removeItem('ref_ku_override');
     localStorage.removeItem('ref_limits');
+    localStorage.removeItem('ref_signers');
     localStorage.removeItem('manual_verdict');
     localStorage.removeItem('selected_activity_idx');
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated']
       .forEach(t => localStorage.removeItem(`ref_${t}_name`));
     localStorage.removeItem('manual_activity_for_oked');
-    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null, limits: {} };
+    App.refData = { popravka: null, normativ: null, ku: null, calculator: null, classifier: null, affiliated: null, limits: {}, signers: {} };
     App.refOverride = { normativ: {}, ku: {} };
     App._rawNormativBuffer = null;
     ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated'].forEach(t => App.updateRefStatus(t, false));
     App.updateRefBadge();
     App.populateActivityDropdown();
-    // Сбросить override-инпуты + лимиты
+    // Сбросить override-инпуты + лимиты + подписанты
     App.fillRefOverrideInputs('normativ');
     App.fillRefOverrideInputs('ku');
     App._syncLimitsToGlobals();
     App._fillLimitsInputs();
+    App._syncSignersToUtils();
+    App._fillSignersInputs();
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
     App.updateVerdictHint();

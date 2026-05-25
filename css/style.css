@@ -240,25 +240,44 @@ header.app-header {
    ========================================================================== */
 .upload-grid {
   display: grid;
-  /* 12-колоночная сетка (НОК для 4 и 3). Верхняя строка: 4 карточки × 3 кол.
-     = 12. Нижняя строка: 3 карточки × 4 кол. = 12. Так обе строки полностью
-     заполняют ширину контейнера, без пустых мест по бокам. */
-  grid-template-columns: repeat(12, 1fr);
+  /* 8 справочников укладываются в 2 строки по 4 — естественно через
+     4-колоночную сетку без явного позиционирования. */
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-3);
 }
-.upload-grid > :nth-child(-n+4) { grid-column: span 3; }
-.upload-grid > :nth-child(n+5)  { grid-column: span 4; }
-
 @media (max-width: 1100px) {
-  /* На средних экранах: 3 ряда — 3+3+1, по 2 колонки на карточку (6 колонок). */
-  .upload-grid { grid-template-columns: repeat(6, 1fr); }
-  .upload-grid > :nth-child(-n+4),
-  .upload-grid > :nth-child(n+5) { grid-column: span 2; }
+  .upload-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 800px) {
   .upload-grid { grid-template-columns: 1fr 1fr; }
-  .upload-grid > :nth-child(-n+4),
-  .upload-grid > :nth-child(n+5) { grid-column: auto; }
+}
+
+/* Карточка «Подписанты»: группы ФИО, каждая группа со своим заголовком.
+   Лейблы внутри override-grid не нуждаются в специальном grid — стек по
+   умолчанию. */
+.ref-override--signers .signers-group {
+  margin-bottom: 12px;
+}
+.ref-override--signers .signers-group:last-child { margin-bottom: 0; }
+.ref-override--signers .signers-group-title {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6366f1;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px dotted #c7d2fe;
+}
+.ref-override--signers label {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  margin-bottom: 5px;
+}
+.ref-override--signers label:last-child { margin-bottom: 0; }
+.ref-override--signers input {
+  font-variant-numeric: normal !important;
 }
 
 /* Карточка лимитов процедуры — без файлового инпута, всегда «в активе»,
