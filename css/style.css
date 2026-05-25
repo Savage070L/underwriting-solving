@@ -252,14 +252,16 @@ header.app-header {
   .upload-grid { grid-template-columns: 1fr 1fr; }
 }
 
-/* Карточка «Подписанты»: группы ФИО, каждая группа со своим заголовком.
-   Лейблы внутри override-grid не нуждаются в специальном grid — стек по
-   умолчанию. */
+/* Карточка «Подписанты»: группы ФИО, каждая группа со своим заголовком. */
 .ref-override--signers .signers-group {
   margin-bottom: 12px;
 }
 .ref-override--signers .signers-group:last-child { margin-bottom: 0; }
 .ref-override--signers .signers-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 0.66rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -269,14 +271,63 @@ header.app-header {
   padding-bottom: 4px;
   border-bottom: 1px dotted #c7d2fe;
 }
-.ref-override--signers label {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 2px !important;
-  margin-bottom: 5px;
+.ref-override--signers .signers-hint {
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
+  font-style: italic;
 }
-.ref-override--signers label:last-child { margin-bottom: 0; }
-.ref-override--signers input {
+
+/* Ряд одного подписанта. 2 варианта:
+   1) Простой (solo, секретари): [роль-лейбл] + [ФИО input]
+   2) Редактируемый (члены АС/Правления): [☑] + [роль input] + [ФИО input] */
+.ref-override--signers .signer-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+  margin-bottom: 6px;
+  padding: 4px 0;
+}
+.ref-override--signers .signer-row:last-child { margin-bottom: 0; }
+
+.ref-override--signers .signer-role {
+  font-size: 0.68rem;
+  color: var(--c-text-secondary);
+  font-weight: 600;
+}
+
+/* Редактируемый ряд: 3-колонный grid (чекбокс, должность, ФИО). */
+.ref-override--signers .signer-row--editable {
+  grid-template-columns: 18px 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.ref-override--signers .signer-row--editable input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #6366f1;
+  margin: 0;
+}
+.ref-override--signers .signer-role-input {
+  font-size: 0.7rem !important;
+  color: var(--c-text-secondary);
+}
+
+/* Затемнение ряда «в отпуске» — пользователь видит, что строка не пойдёт в документ. */
+.ref-override--signers .signer-row--skipped input[type="text"] {
+  opacity: 0.4;
+  text-decoration: line-through;
+  background: #f1f5f9;
+}
+.ref-override--signers .signer-row--skipped .signer-role {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.ref-override--signers input[type="text"] {
   font-variant-numeric: normal !important;
 }
 

@@ -831,52 +831,108 @@ const App = {
     pravlenieSecretary: 'Секретарь Правления',
   },
 
+  // Возвращает ЭФФЕКТИВНОЕ ФИО подписанта.
+  // Override может быть строкой (старый формат) или объектом {name, role, skip}.
   _getSigner(key) {
     const ovr = App.refData.signers && App.refData.signers[key];
-    if (ovr != null && String(ovr).trim()) return String(ovr).trim();
-    return App.SIGNERS_DEFAULTS[key];
+    if (ovr == null) return App.SIGNERS_DEFAULTS[key];
+    if (typeof ovr === 'string') return ovr.trim() || App.SIGNERS_DEFAULTS[key];
+    // object form
+    return (ovr.name && String(ovr.name).trim()) || App.SIGNERS_DEFAULTS[key];
+  },
+
+  // ЭФФЕКТИВНАЯ должность (роль) — для членов АС и Правления её можно
+  // переопределить, у solo-подписантов всегда из SIGNERS_ROLES.
+  _getSignerRole(key) {
+    const ovr = App.refData.signers && App.refData.signers[key];
+    if (ovr && typeof ovr === 'object' && ovr.role && String(ovr.role).trim()) {
+      return String(ovr.role).trim();
+    }
+    return App.SIGNERS_ROLES[key];
+  },
+
+  // «Пропустить» подписанта (применимо для членов АС/Правления — если кто-то
+  // в отпуске или на больничном, его строка не попадёт в документ).
+  _isSignerSkipped(key) {
+    const ovr = App.refData.signers && App.refData.signers[key];
+    return !!(ovr && typeof ovr === 'object' && ovr.skip === true);
   },
 
   // Переписывает Utils.* константы из эффективных подписантов (override > default).
   // Вызывается после загрузки overrides и после каждого изменения.
+  // Для членов АС/Правления применяются 3 типа override: имя, должность, skip.
+  // Skip-члены полностью исключаются из массива → в документе их строка
+  // не появится (loop по AS_MEMBERS/PRAVLENIE_MEMBERS итерирует только активных).
   _syncSignersToUtils() {
     if (typeof Utils === 'undefined') return;
-    Utils.SD_CHAIR_NAME      = App._getSigner('sdChair');
+    Utils.SD_CHAIR_NAME        = App._getSigner('sdChair');
     Utils.PRAVLENIE_CHAIR_NAME = App._getSigner('pravlenieChair');
-    Utils.DAIP_DIRECTOR_NAME = App._getSigner('daipDirector');
-    Utils.UPRAV_DIR_NAME     = App._getSigner('upravDir');
-    Utils.AS_MEMBERS = [
-      [App.SIGNERS_ROLES.asMember0, App._getSigner('asMember0')],
-      [App.SIGNERS_ROLES.asMember1, App._getSigner('asMember1')],
-      [App.SIGNERS_ROLES.asMember2, App._getSigner('asMember2')],
-      [App.SIGNERS_ROLES.asMember3, App._getSigner('asMember3')],
-      [App.SIGNERS_ROLES.asMember4, App._getSigner('asMember4')],
-      [App.SIGNERS_ROLES.asMember5, App._getSigner('asMember5')],
-    ];
-    Utils.PRAVLENIE_MEMBERS = [
-      [App.SIGNERS_ROLES.pravlenieMember0, App._getSigner('pravlenieMember0')],
-      [App.SIGNERS_ROLES.pravlenieMember1, App._getSigner('pravlenieMember1')],
-      [App.SIGNERS_ROLES.pravlenieMember2, App._getSigner('pravlenieMember2')],
-    ];
-    Utils.AS_SECRETARY        = App._getSigner('asSecretary');
-    Utils.PRAVLENIE_SECRETARY = App._getSigner('pravlenieSecretary');
+    Utils.DAIP_DIRECTOR_NAME   = App._getSigner('daipDirector');
+    Utils.UPRAV_DIR_NAME       = App._getSigner('upravDir');
+    Utils.AS_SECRETARY         = App._getSigner('asSecretary');
+    Utils.PRAVLENIE_SECRETARY  = App._getSigner('pravlenieSecretary');
+
+    const buildMembers = (keys) => keys
+      .filter(k => !App._isSignerSkipped(k))
+      .map(k => [App._getSignerRole(k), App._getSigner(k)]);
+
+    Utils.AS_MEMBERS = buildMembers(['asMember0','asMember1','asMember2','asMember3','asMember4','asMember5']);
+    Utils.PRAVLENIE_MEMBERS = buildMembers(['pravlenieMember0','pravlenieMember1','pravlenieMember2']);
   },
 
-  // Обработчик oninput на инпуте подписанта.
-  onSignerOverride(key, rawValue) {
+  // Обработчик изменений на инпутах подписанта.
+  // field: 'name' | 'role' | 'skip'
+  onSignerOverride(key, field, rawValue) {
     if (!App.refData.signers) App.refData.signers = {};
-    const v = String(rawValue || '').trim();
-    if (!v || v === App.SIGNERS_DEFAULTS[key]) {
+    // Нормализуем существующую запись: если хранится как строка (старый формат),
+    // конвертируем в объект {name}.
+    let entry = App.refData.signers[key];
+    if (typeof entry === 'string') entry = { name: entry };
+    if (!entry) entry = {};
+
+    if (field === 'skip') {
+      if (rawValue) entry.skip = true;
+      else delete entry.skip;
+    } else {
+      // name или role: пустая строка / равенство дефолту = снять override
+      const v = String(rawValue || '').trim();
+      const defVal = field === 'role'
+        ? App.SIGNERS_ROLES[key]
+        : App.SIGNERS_DEFAULTS[key];
+      if (!v || v === defVal) {
+        delete entry[field];
+      } else {
+        entry[field] = v;
+      }
+    }
+
+    // Если объект пустой — снимаем весь override.
+    if (Object.keys(entry).length === 0) {
       delete App.refData.signers[key];
     } else {
-      App.refData.signers[key] = v;
+      App.refData.signers[key] = entry;
     }
+
     App._syncSignersToUtils();
     App._persistSigners();
-    // Подсветка изменённого поля
-    const inp = document.getElementById(`sgn-${key}`);
-    if (inp) inp.classList.toggle('ovr-active', App.refData.signers[key] != null);
+    App._updateSignerRowState(key);
     App._updateSignersStatus();
+  },
+
+  // Подсветка одного «ряда» подписанта: оранжевая рамка на изменённых
+  // полях + затемнение всего ряда если skip=true.
+  _updateSignerRowState(key) {
+    const row = document.getElementById(`sgn-row-${key}`);
+    if (!row) return;
+    const isSkipped = App._isSignerSkipped(key);
+    row.classList.toggle('signer-row--skipped', isSkipped);
+
+    const ovr = App.refData.signers && App.refData.signers[key];
+    const ovrObj = (typeof ovr === 'string') ? { name: ovr } : (ovr || {});
+    const nameInp = document.getElementById(`sgn-${key}`);
+    const roleInp = document.getElementById(`sgn-role-${key}`);
+    if (nameInp) nameInp.classList.toggle('ovr-active', !!ovrObj.name);
+    if (roleInp) roleInp.classList.toggle('ovr-active', !!ovrObj.role);
   },
 
   _persistSigners() {
@@ -891,21 +947,45 @@ const App = {
   _updateSignersStatus() {
     const el = document.getElementById('status-signers');
     if (!el) return;
+    const signers = App.refData.signers || {};
     const total = Object.keys(App.SIGNERS_DEFAULTS).length;
-    const count = Object.keys(App.refData.signers || {}).length;
-    el.textContent = count === 0 ? 'По умолчанию' : `Изменено: ${count} из ${total}`;
+    const overridden = Object.keys(signers).length;
+    const skippedCount = Object.keys(signers).filter(k => App._isSignerSkipped(k)).length;
+    if (overridden === 0) {
+      el.textContent = 'По умолчанию';
+    } else if (skippedCount > 0) {
+      el.textContent = `Изменено: ${overridden} из ${total} · в отпуске: ${skippedCount}`;
+    } else {
+      el.textContent = `Изменено: ${overridden} из ${total}`;
+    }
   },
 
-  // Заполнить все инпуты подписантов текущими эффективными значениями.
+  // Заполнить все инпуты подписантов: name, role (для членов АС/Правл.),
+  // skip-чекбокс. Если поле в данный момент в фокусе у пользователя, не
+  // переписываем — иначе курсор «прыгает».
   _fillSignersInputs() {
     for (const key of Object.keys(App.SIGNERS_DEFAULTS)) {
-      const inp = document.getElementById(`sgn-${key}`);
-      if (!inp) continue;
-      if (document.activeElement === inp) continue;
+      const nameInp = document.getElementById(`sgn-${key}`);
+      const roleInp = document.getElementById(`sgn-role-${key}`);
+      const skipChk = document.getElementById(`sgn-skip-${key}`);
+      if (!nameInp && !roleInp && !skipChk) continue;
       const ovr = App.refData.signers && App.refData.signers[key];
-      inp.value = ovr || App.SIGNERS_DEFAULTS[key];
-      inp.classList.toggle('ovr-active', ovr != null);
-      inp.placeholder = `По умолч.: ${App.SIGNERS_DEFAULTS[key]}`;
+      const ovrObj = (typeof ovr === 'string') ? { name: ovr } : (ovr || {});
+
+      if (nameInp && document.activeElement !== nameInp) {
+        nameInp.value = App._getSigner(key);
+        nameInp.classList.toggle('ovr-active', !!ovrObj.name);
+        nameInp.placeholder = `По умолч.: ${App.SIGNERS_DEFAULTS[key]}`;
+      }
+      if (roleInp && document.activeElement !== roleInp) {
+        roleInp.value = App._getSignerRole(key);
+        roleInp.classList.toggle('ovr-active', !!ovrObj.role);
+        roleInp.placeholder = `По умолч.: ${App.SIGNERS_ROLES[key]}`;
+      }
+      if (skipChk) {
+        skipChk.checked = !App._isSignerSkipped(key);
+      }
+      App._updateSignerRowState(key);
     }
     App._updateSignersStatus();
   },

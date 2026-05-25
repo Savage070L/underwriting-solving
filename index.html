@@ -107,37 +107,95 @@
           <div class="uz-label">Подписанты</div>
           <div class="uz-status" id="status-signers">По умолчанию</div>
           <div class="ref-override ref-override--signers" onclick="event.stopPropagation()">
-            <div class="ref-override-title">ФИО (роли фиксированы регламентом)</div>
+            <div class="ref-override-title">ФИО и должности подписантов</div>
 
+            <!-- Solo подписанты (1 человек на роль) — только ФИО, без skip и без редактирования роли. -->
             <div class="signers-group">
-              <div class="signers-group-title">Адресаты</div>
-              <label>Председатель Совета директоров<input type="text" id="sgn-sdChair" oninput="App.onSignerOverride('sdChair',this.value)"></label>
-              <label>Председатель Правления<input type="text" id="sgn-pravlenieChair" oninput="App.onSignerOverride('pravlenieChair',this.value)"></label>
+              <div class="signers-group-title">Адресаты СЗ</div>
+              <div class="signer-row" id="sgn-row-sdChair">
+                <div class="signer-role">Председатель Совета директоров</div>
+                <input type="text" id="sgn-sdChair" placeholder="ФИО" oninput="App.onSignerOverride('sdChair','name',this.value)">
+              </div>
+              <div class="signer-row" id="sgn-row-pravlenieChair">
+                <div class="signer-role">Председатель Правления</div>
+                <input type="text" id="sgn-pravlenieChair" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieChair','name',this.value)">
+              </div>
             </div>
 
             <div class="signers-group">
               <div class="signers-group-title">Подписанты СЗ</div>
-              <label>Директор ДАиП<input type="text" id="sgn-daipDirector" oninput="App.onSignerOverride('daipDirector',this.value)"></label>
-              <label>Управляющий директор<input type="text" id="sgn-upravDir" oninput="App.onSignerOverride('upravDir',this.value)"></label>
+              <div class="signer-row" id="sgn-row-daipDirector">
+                <div class="signer-role">Директор ДАиП</div>
+                <input type="text" id="sgn-daipDirector" placeholder="ФИО" oninput="App.onSignerOverride('daipDirector','name',this.value)">
+              </div>
+              <div class="signer-row" id="sgn-row-upravDir">
+                <div class="signer-role">Управляющий директор</div>
+                <input type="text" id="sgn-upravDir" placeholder="ФИО" oninput="App.onSignerOverride('upravDir','name',this.value)">
+              </div>
             </div>
 
+            <!-- Члены АС: 6 человек, у каждого можно править должность и снять
+                 галочку «участвует» (например, в отпуске → строка не попадёт в АР/Протокол). -->
             <div class="signers-group">
-              <div class="signers-group-title">Андеррайтинговый Совет (АР, Протокол АС)</div>
-              <label>Председатель Правления<input type="text" id="sgn-asMember0" oninput="App.onSignerOverride('asMember0',this.value)"></label>
-              <label>Зам. пред. Правления, член Правления<input type="text" id="sgn-asMember1" oninput="App.onSignerOverride('asMember1',this.value)"></label>
-              <label>Управляющий директор<input type="text" id="sgn-asMember2" oninput="App.onSignerOverride('asMember2',this.value)"></label>
-              <label>Руководитель Службы упр. рисками<input type="text" id="sgn-asMember3" oninput="App.onSignerOverride('asMember3',this.value)"></label>
-              <label>Управляющий директор<input type="text" id="sgn-asMember4" oninput="App.onSignerOverride('asMember4',this.value)"></label>
-              <label>Директор ДАиП<input type="text" id="sgn-asMember5" oninput="App.onSignerOverride('asMember5',this.value)"></label>
-              <label>Секретарь АС<input type="text" id="sgn-asSecretary" oninput="App.onSignerOverride('asSecretary',this.value)"></label>
+              <div class="signers-group-title">Андеррайтинговый Совет — АР и Протокол АС <span class="signers-hint">(снимите галочку, если в отпуске)</span></div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember0">
+                <input type="checkbox" id="sgn-skip-asMember0" checked title="Включить в документ" onchange="App.onSignerOverride('asMember0','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember0" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember0','role',this.value)">
+                <input type="text" id="sgn-asMember0" placeholder="ФИО" oninput="App.onSignerOverride('asMember0','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember1">
+                <input type="checkbox" id="sgn-skip-asMember1" checked onchange="App.onSignerOverride('asMember1','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember1" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember1','role',this.value)">
+                <input type="text" id="sgn-asMember1" placeholder="ФИО" oninput="App.onSignerOverride('asMember1','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember2">
+                <input type="checkbox" id="sgn-skip-asMember2" checked onchange="App.onSignerOverride('asMember2','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember2" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember2','role',this.value)">
+                <input type="text" id="sgn-asMember2" placeholder="ФИО" oninput="App.onSignerOverride('asMember2','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember3">
+                <input type="checkbox" id="sgn-skip-asMember3" checked onchange="App.onSignerOverride('asMember3','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember3" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember3','role',this.value)">
+                <input type="text" id="sgn-asMember3" placeholder="ФИО" oninput="App.onSignerOverride('asMember3','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember4">
+                <input type="checkbox" id="sgn-skip-asMember4" checked onchange="App.onSignerOverride('asMember4','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember4" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember4','role',this.value)">
+                <input type="text" id="sgn-asMember4" placeholder="ФИО" oninput="App.onSignerOverride('asMember4','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-asMember5">
+                <input type="checkbox" id="sgn-skip-asMember5" checked onchange="App.onSignerOverride('asMember5','skip',!this.checked)">
+                <input type="text" id="sgn-role-asMember5" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('asMember5','role',this.value)">
+                <input type="text" id="sgn-asMember5" placeholder="ФИО" oninput="App.onSignerOverride('asMember5','name',this.value)">
+              </div>
+              <div class="signer-row" id="sgn-row-asSecretary">
+                <div class="signer-role">Секретарь АС</div>
+                <input type="text" id="sgn-asSecretary" placeholder="ФИО" oninput="App.onSignerOverride('asSecretary','name',this.value)">
+              </div>
             </div>
 
+            <!-- Члены Правления — 3 человека, аналогично. -->
             <div class="signers-group">
-              <div class="signers-group-title">Правление / СД (Протокол Правления, СД)</div>
-              <label>Председатель Правления<input type="text" id="sgn-pravlenieMember0" oninput="App.onSignerOverride('pravlenieMember0',this.value)"></label>
-              <label>Зам. пред. Правления, член Правления<input type="text" id="sgn-pravlenieMember1" oninput="App.onSignerOverride('pravlenieMember1',this.value)"></label>
-              <label>Главный бухгалтер, член Правления<input type="text" id="sgn-pravlenieMember2" oninput="App.onSignerOverride('pravlenieMember2',this.value)"></label>
-              <label>Секретарь Правления<input type="text" id="sgn-pravlenieSecretary" oninput="App.onSignerOverride('pravlenieSecretary',this.value)"></label>
+              <div class="signers-group-title">Правление / СД — Протокол Правления / СД <span class="signers-hint">(снимите галочку, если в отпуске)</span></div>
+              <div class="signer-row signer-row--editable" id="sgn-row-pravlenieMember0">
+                <input type="checkbox" id="sgn-skip-pravlenieMember0" checked onchange="App.onSignerOverride('pravlenieMember0','skip',!this.checked)">
+                <input type="text" id="sgn-role-pravlenieMember0" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieMember0','role',this.value)">
+                <input type="text" id="sgn-pravlenieMember0" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieMember0','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-pravlenieMember1">
+                <input type="checkbox" id="sgn-skip-pravlenieMember1" checked onchange="App.onSignerOverride('pravlenieMember1','skip',!this.checked)">
+                <input type="text" id="sgn-role-pravlenieMember1" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieMember1','role',this.value)">
+                <input type="text" id="sgn-pravlenieMember1" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieMember1','name',this.value)">
+              </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-pravlenieMember2">
+                <input type="checkbox" id="sgn-skip-pravlenieMember2" checked onchange="App.onSignerOverride('pravlenieMember2','skip',!this.checked)">
+                <input type="text" id="sgn-role-pravlenieMember2" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieMember2','role',this.value)">
+                <input type="text" id="sgn-pravlenieMember2" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieMember2','name',this.value)">
+              </div>
+              <div class="signer-row" id="sgn-row-pravlenieSecretary">
+                <div class="signer-role">Секретарь Правления</div>
+                <input type="text" id="sgn-pravlenieSecretary" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieSecretary','name',this.value)">
+              </div>
             </div>
           </div>
         </div>
