@@ -360,14 +360,24 @@ const App = {
     App._refreshInlineAnalytics();
   },
 
-  // Принудительно перезагружает iframe inline-аналитики (если открыт).
+  // Перезагружает iframe inline-аналитики. Если контейнер открыт —
+  // делаем это сразу (видимое обновление). Если закрыт — всё равно
+  // помечаем src устаревшим (`_pendingReload`), чтобы при следующем
+  // открытии toggleInlineAnalytics() подгрузил свежие данные.
   _refreshInlineAnalytics() {
-    const container = document.getElementById('analytics-inline');
-    if (!container || !container.classList.contains('is-open')) return;
     if (!App.claims || !App.claims.analytics) return;
     const iframe = document.getElementById('analytics-iframe');
     if (!iframe) return;
-    iframe.src = 'analytics.html#inline=1&t=' + Date.now();
+    const container = document.getElementById('analytics-inline');
+    const isOpen = container && container.classList.contains('is-open');
+    if (isOpen) {
+      iframe.src = 'analytics.html#inline=1&t=' + Date.now();
+    } else {
+      // Помечаем, чтобы toggleInlineAnalytics при следующем раскрытии знал,
+      // что src нужно перевыставить (он и так это делает, но флаг помогает
+      // отслеживать состояние при отладке).
+      iframe.dataset.pendingReload = '1';
+    }
   },
 
   // ===== REFERENCE FILE LOADING =====
@@ -1256,7 +1266,10 @@ const App = {
       document.getElementById('analytics-inline')?.classList.remove('is-open');
     }
     App._persistCase();
-    App.updateButtons();
+    // При удалении файла кейса (заявка/история) тоже надо прокатить
+    // полную цепочку — иначе превью и аналитика остаются с данными
+    // от ушедшего файла.
+    App._refreshDerivedData();
     App.showMsg('Файл удалён.', 'success');
   },
 
@@ -1359,7 +1372,7 @@ const App = {
     document.getElementById('analytics-cta')?.classList.remove('visible');
     document.getElementById('analytics-inline')?.classList.remove('is-open');
     document.getElementById('preview-panel')?.classList.remove('visible');
-    App.updateButtons();
+    App._refreshDerivedData();
     App.showMsg('Файлы кейса очищены.', 'success');
   },
 
@@ -1747,13 +1760,11 @@ const App = {
     App.autoLookupStatGov(bin);
     App.autoLookupStatsnet(bin);
 
-    // Первый показ превью (statgov ещё loading)
-    App.showPreview();
-    App.onOkedChange(); // запустит _recalcManualPremium
-    App._updateAvgSalaryAlert();
     App._persistCase();
-    App.updateButtons();
-    App.updateVerdictHint();
+    // Единая точка обновления UI/превью/аналитики/snapshot — иначе при
+    // ручном вводе данные у inline-iframe и снапшота остаются от предыдущего
+    // кейса.
+    App._refreshDerivedData();
     App.showMsg('Данные приняты. Идёт поиск по реестрам — премия пересчитается автоматически.', 'success');
   },
 
@@ -1779,9 +1790,11 @@ const App = {
       if (z.premiumWithCoeff !== withCoeff) { z.premiumWithCoeff = withCoeff; changed = true; }
     }
     if (changed) {
-      App.showPreview();
-      App.updateButtons();
       App._persistCase();
+      // Пересчитанная премия = меняется LR-warning в verdict-hint, обновляется
+      // snapshot аналитики, перезагружается inline-iframe — нужно весь цепочку
+      // прокатить, а не только showPreview/updateButtons.
+      App._refreshDerivedData();
     }
   },
 

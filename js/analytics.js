@@ -7,6 +7,23 @@
   const dashEl = document.getElementById('dash');
   const emptyEl = document.getElementById('dash-empty');
 
+  // Cross-tab синхронизация: когда index.html обновляет snapshot после
+  // загрузки нового файла, открытое в ДРУГОЙ вкладке окно дашборда не
+  // имеет иного способа узнать об изменении. Браузер шлёт «storage»
+  // event во всех вкладках того же origin кроме той, что вызвала запись —
+  // этим и пользуемся. Inline-iframe пропускаем (родитель сам ставит
+  // iframe.src=...&t=..., двойная перезагрузка не нужна).
+  const _inlineUrlCheck = window.location.hash.includes('inline=1')
+                       || new URLSearchParams(window.location.search).get('inline') === '1';
+  if (!_inlineUrlCheck) {
+    window.addEventListener('storage', (e) => {
+      if (e.key !== 'analytics_snapshot' || !e.newValue) return;
+      if (window.__analyticsReloading) return;
+      window.__analyticsReloading = true;
+      setTimeout(() => window.location.reload(), 50);
+    });
+  }
+
   if (!raw) { emptyEl.style.display = 'flex'; return; }
   let snap;
   try { snap = JSON.parse(raw); } catch (e) { emptyEl.style.display = 'flex'; return; }
