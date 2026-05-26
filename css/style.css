@@ -287,10 +287,12 @@ header.app-header {
 }
 .ref-override--signers .signers-group:last-child { margin-bottom: 0; }
 .ref-override--signers .signers-group-title {
+  /* Заголовок группы + хинт. Разрешаем wrap чтобы длинные хинты типа
+     "(снимите галочку, если в отпуске)" не выходили за пределы колонки. */
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 4px 8px;
   font-size: 0.66rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -307,6 +309,8 @@ header.app-header {
   letter-spacing: 0;
   color: #94a3b8;
   font-style: italic;
+  /* Хинт может стать новой строкой если не помещается. */
+  flex-basis: 100%;
 }
 
 /* Ряд одного подписанта. 2 варианта:
@@ -322,11 +326,23 @@ header.app-header {
 }
 .ref-override--signers .signer-row:last-child { margin-bottom: 0; }
 
-/* Solo: 2 строки (роль сверху, ФИО снизу). */
+/* Solo: 2 строки — роль сверху, ФИО снизу. Принудительно укладываем
+   обе input-строки вертикально через flex-колонку (некоторые глобальные
+   правила для `input` в .upload-zone могут возвращать display: inline,
+   из-за чего без явного flex-direction они визуально становятся
+   рядом). */
 .ref-override--signers .signer-row--solo {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px;
   padding: 6px 8px;
   background: rgba(99, 102, 241, 0.04);
   border-radius: 5px;
+}
+.ref-override--signers .signer-row--solo > input { width: 100%; }
+.ref-override--signers .signer-row--solo .signer-role-input {
+  font-size: 0.7rem !important;
+  color: var(--c-text-secondary);
 }
 
 .ref-override--signers .signer-role {
