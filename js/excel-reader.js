@@ -320,21 +320,22 @@ const ExcelReader = {
     // которые искажают картину в начале и конце года (53 НС в начале 2026 vs
     // полный 2025 — некорректное сравнение).
     const periodBounds = [];
+    const fmtDmY = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
     for (let i = 0; i < 3; i++) {
       const endY = now.getFullYear() - i;
       const startY = now.getFullYear() - i - 1;
       const periodEnd = new Date(endY, now.getMonth(), now.getDate());
       const periodStart = new Date(startY, now.getMonth(), now.getDate());
-      const dd = String(periodEnd.getDate()).padStart(2, '0');
-      const mm = String(periodEnd.getMonth() + 1).padStart(2, '0');
       periodBounds.push({
         index: i,                    // 0 = newest, 2 = oldest
         periodStart,
         periodEnd,
-        // label: дата КОНЦА периода — "26.05.2026", "26.05.2025", "26.05.2024".
-        label: `${dd}.${mm}.${endY}`,
-        // year-alias: год конца периода, для обратной совместимости с
-        // существующими консьюмерами (графики, документы).
+        // label: дата КОНЦА периода — компактно для подписей графиков.
+        label: fmtDmY(periodEnd),
+        // labelRange: «01.06.2023 — 26.05.2024» — для превью/документов, где
+        // нужно сразу видеть от какой до какой даты считали.
+        labelRange: `${fmtDmY(periodStart)} — ${fmtDmY(periodEnd)}`,
+        // year-alias: год конца периода, для обратной совместимости.
         year: endY,
       });
     }
@@ -382,8 +383,9 @@ const ExcelReader = {
       periodIndex: p.index,
       periodStart: p.periodStart,
       periodEnd: p.periodEnd,
-      label: p.label,
-      year: p.year,            // для обратной совместимости (заголовки графиков)
+      label: p.label,            // короткий: "26.05.2024"
+      labelRange: p.labelRange,  // полный: "27.05.2023 — 26.05.2024"
+      year: p.year,              // для обратной совместимости (заголовки графиков)
       cases: 0, paid: 0, sum: 0, death: 0, uptHigh: 0,
     }));
     for (const c of recognized3y) {

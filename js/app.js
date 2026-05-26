@@ -1866,13 +1866,12 @@ const App = {
       const sumTotal = App.claims.analytics?.sumTotal3y || 0;
       const fmtTg = (v) => Utils.fmtMoney(v);
       const header = `За последние 3 года — <strong>${total} НС</strong> (сумма: ${fmtTg(sumTotal)})`;
-      // Метка периода: "DD.MM.YYYY" — конец 12-мес. скользящего окна
-      // (см. excel-reader.js: byYear теперь группирует не по календарным
-      // годам, а по периодам [today-Ny, today-(N-1)y]). Если по какой-то
-      // причине label отсутствует — fallback на старое число года.
+      // Полный диапазон периода: "27.05.2023 — 26.05.2024" — чтобы сразу
+      // было видно, из какой по какую дату посчитали 12-мес. период.
+      // Fallback на короткий label, потом на год (для устаревшего кэша).
       const yearLines = byYear
         .sort((a, b) => a.year - b.year)
-        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.label || b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
+        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.labelRange || b.label || b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
         .join('');
       nsHtml = `<div class="pi-claims-header">${header}</div>${yearLines}`;
     }
