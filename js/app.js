@@ -128,7 +128,14 @@ const App = {
     if (v === 'auto') {
       const z = App.zayavka;
       if (z && z.coeff != null) {
-        const decision = Utils.determineDecision(z.coeff, z.coeffDown);
+        // Используем ЭФФЕКТИВНЫЙ coeffDown — с учётом правил:
+        //   - НС за 3 года → скидка не применяется (coeffDown = 0)
+        //   - Компания < 3 лет → скидка не применяется
+        // Раньше брали z.coeffDown напрямую и для компании с НС
+        // получали «Принятие с пониженным», хотя по правилам — стандарт.
+        const effCoeff = App._effectiveCoeffInfo
+          ? App._effectiveCoeffInfo(z) : { coeffDown: z.coeffDown, noDiscountReason: null };
+        const decision = Utils.determineDecision(z.coeff, effCoeff.coeffDown);
         const predicted = Utils.resolveVerdict('auto', decision);
         const label = Utils.VERDICT_LABELS[predicted];
         state = predicted; // цвет = предсказанному решению
@@ -137,14 +144,15 @@ const App = {
           : predicted === 'accept_adjusted' ? 'С КОЭФФИЦИЕНТОМ'
           : predicted === 'reject' ? 'ОТКЛОНИТЬ'
           : predicted === 'defer' ? 'ОТЛОЖИТЬ' : '');
-        // Дополнительная подсказка по прогнозному КУ — если он плохой,
-        // предупреждаем что одного «принятия с коэффициентом» может быть мало.
-        // Это устраняет визуально странную «Авто-решение: «»» если бы label
-        // когда-нибудь оказался пустым (раньше сюда подставлялась пустая
-        // строка через `|| ''`, теперь явный fallback).
         const safeLabel = label || 'Принятие со стандартным коэффициентом';
+        // Поясняем, почему стандарт (если скидку срезали правила)
+        const noDiscountNote = effCoeff.noDiscountReason === 'claims'
+          ? ' (скидка не применяется — есть НС за 3 года)'
+          : effCoeff.noDiscountReason === 'young_company'
+            ? ' (скидка не применяется — компания младше 3 лет)'
+            : '';
         const lrWarn = App._verdictLrWarning();
-        hintText = `Авто-решение: «${safeLabel}»${lrWarn ? '. ' + lrWarn : ''}. Можно переопределить вручную в списке выше.`;
+        hintText = `Авто-решение: «${safeLabel}»${noDiscountNote}${lrWarn ? '. ' + lrWarn : ''}. Можно переопределить вручную в списке выше.`;
       } else {
         state = 'auto';
         icon = '🤖';
