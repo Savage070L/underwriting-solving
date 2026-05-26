@@ -311,8 +311,44 @@ const ExcelReader = {
     const now = new Date();
     const cutoff3y = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate());
 
+    // ============ Скользящие 12-мес. периоды (вместо календарных лет) ============
+    // Период 1 (newest): [today-1y, today]   — например 26.05.2025 → 26.05.2026
+    // Период 2:          [today-2y, today-1y] — 26.05.2024 → 26.05.2025
+    // Период 3 (oldest): [today-3y, today-2y] — 26.05.2023 → 26.05.2024
+    //
+    // Так данные привязаны к моменту анализа, а не к календарным летам,
+    // которые искажают картину в начале и конце года (53 НС в начале 2026 vs
+    // полный 2025 — некорректное сравнение).
+    const periodBounds = [];
+    for (let i = 0; i < 3; i++) {
+      const endY = now.getFullYear() - i;
+      const startY = now.getFullYear() - i - 1;
+      const periodEnd = new Date(endY, now.getMonth(), now.getDate());
+      const periodStart = new Date(startY, now.getMonth(), now.getDate());
+      const dd = String(periodEnd.getDate()).padStart(2, '0');
+      const mm = String(periodEnd.getMonth() + 1).padStart(2, '0');
+      periodBounds.push({
+        index: i,                    // 0 = newest, 2 = oldest
+        periodStart,
+        periodEnd,
+        // label: дата КОНЦА периода — "26.05.2026", "26.05.2025", "26.05.2024".
+        label: `${dd}.${mm}.${endY}`,
+        // year-alias: год конца периода, для обратной совместимости с
+        // существующими консьюмерами (графики, документы).
+        year: endY,
+      });
+    }
+    const findPeriod = (dt) => {
+      if (!dt || dt > now || dt < cutoff3y) return null;
+      // Период [periodStart, periodEnd): чтобы граничный день не попал в два сразу.
+      for (const p of periodBounds) {
+        if (dt >= p.periodStart && dt < p.periodEnd) return p.index;
+      }
+      return null;
+    };
+
     // ============ Compute analytics ============
-    const within3y = allCases.filter(c => c.dateSk && c.dateSk >= cutoff3y);
+    const within3y = allCases.filter(c => c.dateSk && c.dateSk >= cutoff3y && c.dateSk <= now);
     const recognized3y = within3y.filter(c => c.recognized);
     const paid3y = within3y.filter(c => c.paidAny);
 
@@ -336,23 +372,33 @@ const ExcelReader = {
       rznu: allCases.filter(c => c.rznu).length,
     };
 
-    // --- By year (3y) ---
-    const yearMap = new Map();
+    // --- По скользящим 12-мес. периодам (3 периода назад) ---
+    // Структура каждого bucket'а — как у старого byYear:
+    //   { year, cases, paid, sum, death, uptHigh }
+    // плюс новые поля: label ("26.05.2026"), periodStart, periodEnd, periodIndex.
+    // Полностью обратно совместимо со всеми консьюмерами, которые читают
+    // `.year`, `.cases`, `.sum`, `.death`, `.uptHigh`.
+    const periodBuckets = periodBounds.map(p => ({
+      periodIndex: p.index,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      label: p.label,
+      year: p.year,            // для обратной совместимости (заголовки графиков)
+      cases: 0, paid: 0, sum: 0, death: 0, uptHigh: 0,
+    }));
     for (const c of recognized3y) {
-      if (!c.dateSk) continue;
-      const y = c.dateSk.getFullYear();
-      let bucket = yearMap.get(y);
-      if (!bucket) {
-        bucket = { year: y, cases: 0, paid: 0, sum: 0, death: 0, uptHigh: 0 };
-        yearMap.set(y, bucket);
-      }
-      bucket.cases++;
-      if (c.paidAny) bucket.paid++;
-      bucket.sum += c.sum;
-      if (c.flags.has(11) || c.flags.has(19)) bucket.death++;
-      if (c.flags.has(13) || c.flags.has(14) || c.flags.has(15)) bucket.uptHigh++;
+      const pIdx = findPeriod(c.dateSk);
+      if (pIdx == null) continue;
+      const b = periodBuckets[pIdx];
+      b.cases++;
+      if (c.paidAny) b.paid++;
+      b.sum += c.sum;
+      if (c.flags.has(11) || c.flags.has(19)) b.death++;
+      if (c.flags.has(13) || c.flags.has(14) || c.flags.has(15)) b.uptHigh++;
     }
-    const byYear = Array.from(yearMap.values()).sort((a, b) => a.year - b.year);
+    // Сортируем от старого к новому (period 2 → 1 → 0), чтобы графики
+    // отображали хронологию слева направо.
+    const byYear = periodBuckets.slice().sort((a, b) => b.periodIndex - a.periodIndex);
 
     // --- Severity buckets (3y recognized) ---
     const sev = {
@@ -547,16 +593,23 @@ const ExcelReader = {
     }
     const mtbl = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
 
-    // --- Severity × Year pivot ---
+    // --- Severity × Period pivot (тоже по скользящим периодам) ---
     const sevByYear = {};
     for (const c of recognized3y) {
       if (!c.dateSk) continue;
-      const y = c.dateSk.getFullYear();
-      if (!sevByYear[y]) sevByYear[y] = { death: 0, uptHigh: 0, annuity: 0, other: 0, sumDeath: 0, sumUptHigh: 0, sumAnnuity: 0, sumOther: 0 };
-      if (c.flags.has(11) || c.flags.has(19)) { sevByYear[y].death++; sevByYear[y].sumDeath += c.sum; }
-      else if (c.flags.has(13) || c.flags.has(14) || c.flags.has(15)) { sevByYear[y].uptHigh++; sevByYear[y].sumUptHigh += c.sum; }
-      else if (c.flags.has(16) || c.flags.has(17)) { sevByYear[y].annuity++; sevByYear[y].sumAnnuity += c.sum; }
-      else { sevByYear[y].other++; sevByYear[y].sumOther += c.sum; }
+      const pIdx = findPeriod(c.dateSk);
+      if (pIdx == null) continue;
+      const p = periodBounds[pIdx];
+      const key = p.year;       // year = end-year of period — для совместимости
+      if (!sevByYear[key]) sevByYear[key] = {
+        label: p.label, periodIndex: p.index,
+        death: 0, uptHigh: 0, annuity: 0, other: 0,
+        sumDeath: 0, sumUptHigh: 0, sumAnnuity: 0, sumOther: 0,
+      };
+      if (c.flags.has(11) || c.flags.has(19)) { sevByYear[key].death++; sevByYear[key].sumDeath += c.sum; }
+      else if (c.flags.has(13) || c.flags.has(14) || c.flags.has(15)) { sevByYear[key].uptHigh++; sevByYear[key].sumUptHigh += c.sum; }
+      else if (c.flags.has(16) || c.flags.has(17)) { sevByYear[key].annuity++; sevByYear[key].sumAnnuity += c.sum; }
+      else { sevByYear[key].other++; sevByYear[key].sumOther += c.sum; }
     }
     const severityByYear = Object.entries(sevByYear)
       .map(([y, d]) => ({ year: parseInt(y), ...d }))
@@ -708,14 +761,18 @@ const ExcelReader = {
       .map(([status, count]) => ({ status, count, share: 100 * count / Math.max(within3y.length, 1) }))
       .sort((a, b) => b.count - a.count);
 
-    // --- Insurer × Year evolution matrix ---
+    // --- Insurer × Period evolution matrix (по скользящим периодам) ---
     const insYearMap = new Map();
     for (const c of recognized3y) {
-      if (!c.dateSk) continue;
-      const y = c.dateSk.getFullYear();
-      const key = c.company + '||' + y;
+      const pIdx = findPeriod(c.dateSk);
+      if (pIdx == null) continue;
+      const p = periodBounds[pIdx];
+      const key = c.company + '||' + p.year;
       let b = insYearMap.get(key);
-      if (!b) { b = { company: c.company, year: y, count: 0, sum: 0 }; insYearMap.set(key, b); }
+      if (!b) {
+        b = { company: c.company, year: p.year, label: p.label, periodIndex: p.index, count: 0, sum: 0 };
+        insYearMap.set(key, b);
+      }
       b.count++;
       b.sum += c.sum;
     }

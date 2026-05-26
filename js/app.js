@@ -93,6 +93,24 @@ const App = {
     auto: '🤖',
   },
 
+  // Возвращает строку-предупреждение по прогнозному КУ для auto-режима
+  // или пустую строку, если КУ нормальный/недоступен. Это дополняет
+  // auto-решение более осмысленной картиной — у компании с КУ > 200% явно
+  // не «принятие со стандартным коэф.», даже если формула этого не видит.
+  _verdictLrWarning() {
+    const z = App.zayavka;
+    if (!z) return '';
+    const a = App.claims && App.claims.analytics;
+    if (!a || !a.avgSumPerYear) return '';
+    const premium = z.premiumWithCoeff || z.premiumBase || 0;
+    if (premium <= 0) return '';
+    const lr = 100 * a.avgSumPerYear / premium;
+    if (lr >= 300) return `⚠ прогнозный КУ ${lr.toFixed(0)}% — фактический риск экстремальный, рекомендуется отклонение`;
+    if (lr >= 150) return `⚠ прогнозный КУ ${lr.toFixed(0)}% — высокий риск, целесообразно отложение или корректировка тарифа`;
+    if (lr >= 70)  return `прогнозный КУ ${lr.toFixed(0)}% — повышенный риск`;
+    return '';
+  },
+
   updateVerdictHint() {
     const select = document.getElementById('verdict');
     const hint = document.getElementById('verdict-hint');
@@ -112,14 +130,21 @@ const App = {
       if (z && z.coeff != null) {
         const decision = Utils.determineDecision(z.coeff, z.coeffDown);
         const predicted = Utils.resolveVerdict('auto', decision);
-        const label = Utils.VERDICT_LABELS[predicted] || '';
+        const label = Utils.VERDICT_LABELS[predicted];
         state = predicted; // цвет = предсказанному решению
         icon = App.VERDICT_ICONS[predicted] || '⚖';
         badgeText = '🤖 АВТО → ' + (predicted === 'accept_standard' ? 'СТАНДАРТ'
           : predicted === 'accept_adjusted' ? 'С КОЭФФИЦИЕНТОМ'
           : predicted === 'reject' ? 'ОТКЛОНИТЬ'
           : predicted === 'defer' ? 'ОТЛОЖИТЬ' : '');
-        hintText = `Авто-решение: «${label}». Можно переопределить вручную в списке выше.`;
+        // Дополнительная подсказка по прогнозному КУ — если он плохой,
+        // предупреждаем что одного «принятия с коэффициентом» может быть мало.
+        // Это устраняет визуально странную «Авто-решение: «»» если бы label
+        // когда-нибудь оказался пустым (раньше сюда подставлялась пустая
+        // строка через `|| ''`, теперь явный fallback).
+        const safeLabel = label || 'Принятие со стандартным коэффициентом';
+        const lrWarn = App._verdictLrWarning();
+        hintText = `Авто-решение: «${safeLabel}»${lrWarn ? '. ' + lrWarn : ''}. Можно переопределить вручную в списке выше.`;
       } else {
         state = 'auto';
         icon = '🤖';
@@ -1819,9 +1844,13 @@ const App = {
       const sumTotal = App.claims.analytics?.sumTotal3y || 0;
       const fmtTg = (v) => Utils.fmtMoney(v);
       const header = `За последние 3 года — <strong>${total} НС</strong> (сумма: ${fmtTg(sumTotal)})`;
+      // Метка периода: "DD.MM.YYYY" — конец 12-мес. скользящего окна
+      // (см. excel-reader.js: byYear теперь группирует не по календарным
+      // годам, а по периодам [today-Ny, today-(N-1)y]). Если по какой-то
+      // причине label отсутствует — fallback на старое число года.
       const yearLines = byYear
         .sort((a, b) => a.year - b.year)
-        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
+        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.label || b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
         .join('');
       nsHtml = `<div class="pi-claims-header">${header}</div>${yearLines}`;
     }

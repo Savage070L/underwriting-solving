@@ -617,10 +617,12 @@
           <div class="bc-bar" style="height: ${pct}%"></div>
         </div>`;
     }).join('');
-    const labels = years.map(y => `<div>${y.year}</div>`).join('');
+    // label = "DD.MM.YYYY" (конец 12-мес. периода); fallback на год для
+    // обратной совместимости.
+    const labels = years.map(y => `<div>${y.label || y.year}</div>`).join('');
     const tableRows = years.map(y => `
       <tr>
-        <td><strong>${y.year}</strong></td>
+        <td><strong>${y.label || y.year}</strong></td>
         <td class="num">${fmtInt(y.cases)}</td>
         <td class="num">${fmtInt(y.paid)}</td>
         <td class="num">${fmtMoneyShort(y.sum)}</td>
