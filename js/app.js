@@ -145,12 +145,26 @@ const App = {
           : predicted === 'reject' ? 'ОТКЛОНИТЬ'
           : predicted === 'defer' ? 'ОТЛОЖИТЬ' : '');
         const safeLabel = label || 'Принятие со стандартным коэффициентом';
-        // Поясняем, почему стандарт (если скидку срезали правила)
-        const noDiscountNote = effCoeff.noDiscountReason === 'claims'
-          ? ' (скидка не применяется — есть НС за 3 года)'
-          : effCoeff.noDiscountReason === 'young_company'
-            ? ' (скидка не применяется — компания младше 3 лет)'
-            : '';
+        // Поясняем, почему стандарт (если скидку срезали правила) + детали:
+        //  - claims: сколько НС (общая цифра по истории + сумма выплат)
+        //  - young_company: точная дата регистрации компании из statgov
+        let noDiscountNote = '';
+        if (effCoeff.noDiscountReason === 'claims') {
+          const total = App.claims?.totalClaims || 0;
+          const sumTotal = App.claims?.analytics?.sumTotal3y || 0;
+          const sumPart = sumTotal > 0 ? `, на сумму ${Utils.fmtMoney(sumTotal)}` : '';
+          noDiscountNote = ` (скидка не применяется — за 3 года ${total} НС${sumPart})`;
+        } else if (effCoeff.noDiscountReason === 'young_company') {
+          const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+            ? App.statgov : null;
+          const regDate = sg?.registrationDate
+            ? Utils.fmtDateShort(sg.registrationDate)
+            : null;
+          const age = effCoeff.ageYears != null ? `${effCoeff.ageYears.toFixed(1)} г.` : null;
+          const datePart = regDate ? `, зарегистрирована ${regDate}` : '';
+          const agePart = age ? ` (возраст ≈ ${age})` : '';
+          noDiscountNote = ` (скидка не применяется — компания младше 3 лет${datePart}${agePart})`;
+        }
         const lrWarn = App._verdictLrWarning();
         hintText = `Авто-решение: «${safeLabel}»${noDiscountNote}${lrWarn ? '. ' + lrWarn : ''}. Можно переопределить вручную в списке выше.`;
       } else {
