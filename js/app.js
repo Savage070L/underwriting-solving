@@ -1424,8 +1424,11 @@ const App = {
       document.getElementById('status-zayavka').textContent = `${file.name}`;
 
       App._persistCase();
-      App.updateButtons();
-      App.updateVerdictHint();
+      // Прогон зависимостей: превью, бейджи, verdict-hint, snapshot аналитики,
+      // перезагрузка inline-iframe аналитики (если открыт). Не вызывать
+      // отдельные шаги — иначе аналитика остаётся «застывшей» от предыдущего
+      // кейса.
+      App._refreshDerivedData();
     } catch (e) {
       console.error('Error loading zayavka:', e);
       App.showMsg(`Ошибка загрузки заявки: ${e.message}`, 'error');
@@ -1797,7 +1800,10 @@ const App = {
       document.getElementById('analytics-cta').classList.add('visible');
 
       App._persistCase();
-      App.updateButtons();
+      // Полный re-render: превью с новой статистикой НС, verdict-hint
+      // (LR-warning меняется при новых выплатах), пересчёт snapshot и
+      // принудительная перезагрузка inline-iframe аналитики.
+      App._refreshDerivedData();
     } catch (e) {
       console.error('Error loading claims:', e);
       App.showMsg(`Ошибка загрузки истории убытков: ${e.message}`, 'error');

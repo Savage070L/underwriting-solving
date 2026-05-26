@@ -434,11 +434,15 @@
 
     const components = [];
 
+    // Helper: log-based score, clamped [0..100]. Низкий ratio (fact << норматив)
+    // → val ~100. Высокий ratio (fact >> норматив) → val ~0. Раньше формула
+    // могла вернуть 150 или 133 — в итоге score становился «112 из 100».
+    const clamp = (v) => Math.max(0, Math.min(100, v));
     // Mortality component
     if (hasActivity && act.deathRate > 0) {
       const factDeath = (a.bySeverity.death.count / 3) * 1000 / z.workers;
       const ratio = factDeath / act.deathRate;
-      const val = Math.max(0, 100 - Math.log10(Math.max(ratio, 0.1)) * 50);
+      const val = clamp(100 - Math.log10(Math.max(ratio, 0.1)) * 50);
       components.push({ label: 'Mortality vs ОКЭД', sub: 'фактическая смертность ÷ норматив', val, weight: 0.30 });
     }
     // Loss ratio component
@@ -447,14 +451,14 @@
       let val;
       if (forecastLR <= 70) val = 100;
       else if (forecastLR >= 500) val = 0;
-      else val = Math.max(0, 100 - (forecastLR - 70) / 4.3);
+      else val = clamp(100 - (forecastLR - 70) / 4.3);
       components.push({ label: 'Прогноз КУ', sub: 'ожидаемый КУ vs целевой 70 %', val, weight: 0.30 });
     }
     // Frequency component
     if (hasActivity) {
       const factFreq = a.avgFreq * 1000 / z.workers;
       const ratio = factFreq / (act.deathRate + act.injuryRate);
-      const val = Math.max(0, 100 - Math.log10(Math.max(ratio, 0.1)) * 50);
+      const val = clamp(100 - Math.log10(Math.max(ratio, 0.1)) * 50);
       components.push({ label: 'Частота НС vs ОКЭД', sub: 'удельная частота на 1000 чел.', val, weight: 0.20 });
     }
     // Recognition rate component
@@ -482,7 +486,11 @@
     // Renormalize weights to sum to 1.0 (since some components may be absent)
     const totalWeight = components.reduce((s, c) => s + c.weight, 0);
     components.forEach(c => c.normWeight = c.weight / totalWeight);
-    const score = Math.round(components.reduce((s, c) => s + c.val * c.normWeight, 0));
+    // Финальный score тоже clamp'им — даже после исправления компонентов
+    // ошибка округления может дать 100.4 → лучше явно ограничить.
+    const score = Math.max(0, Math.min(100,
+      Math.round(components.reduce((s, c) => s + c.val * c.normWeight, 0))
+    ));
 
     let grade, gradeClass;
     if (score >= 80) { grade = 'Низкий риск'; gradeClass = 'low'; }
@@ -1263,8 +1271,21 @@
         <td class="num">${fmtMoneyShort(r.val)}</td>
       </tr>`).join('');
     // Annual catastrophic event probability
-    const annualCata = a.concentration && a.concentration.catastrophicCount > 0
-      ? (a.concentration.catastrophicCount / 3) : 0;
+    const cataCount = a.concentration?.catastrophicCount || 0;
+    const annualCata = cataCount > 0 ? (cataCount / 3) : 0;
+    const cataThreshold = a.concentration?.catastrophicThreshold || 50000000;
+    // Если катастрофических событий нет — выводим нейтральный текст, а не
+    // «в среднем 0,0 событий...» (выглядит как сломанная статика).
+    const cataBlock = cataCount > 0
+      ? `<div style="margin-top:12px;padding:10px 14px;background:linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);border-radius:8px;font-size:12px;color:#7f1d1d;line-height:1.55">
+           <strong>Катастрофический риск:</strong>
+           в среднем ${annualCata.toFixed(1).replace('.', ',')} событий с выплатой ≥ ${fmtMoneyShort(cataThreshold)} ежегодно.
+           Совокупно по таким событиям — ${fmtMoneyShort(a.concentration.catastrophicSum)} за 3 года.
+         </div>`
+      : `<div style="margin-top:12px;padding:10px 14px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;line-height:1.55">
+           <strong>Катастрофических событий нет:</strong>
+           ни одной выплаты ≥ ${fmtMoneyShort(cataThreshold)} за 3 года.
+         </div>`;
     document.getElementById('var-body').innerHTML = `
       <div class="var-table-wrap">
         <table class="t">
@@ -1274,11 +1295,7 @@
           <tbody>${tableRows}</tbody>
         </table>
       </div>
-      <div style="margin-top:12px;padding:10px 14px;background:linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);border-radius:8px;font-size:12px;color:#7f1d1d;line-height:1.55">
-        <strong>Катастрофический риск:</strong>
-        в среднем ${annualCata.toFixed(1).replace('.', ',')} событий с выплатой ≥ ${fmtMoneyShort(a.concentration.catastrophicThreshold)} ежегодно.
-        Совокупно по таким событиям — ${fmtMoneyShort(a.concentration.catastrophicSum)} за 3 года.
-      </div>`;
+      ${cataBlock}`;
   })();
 
   // ===== PIVOT: severity × year =====
