@@ -285,10 +285,17 @@
                    oninput="App.onManualInput('avg')" onblur="App.onManualMoneyBlur('avg')">
           </div>
         </div>
-        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.</div>
+        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.<br>Или нажмите «Только проверить» — нужен лишь БИН для проверки в реестрах.</div>
         <div class="manual-input-actions">
+          <button class="btn-manual-check" id="btn-manual-check" onclick="App.quickLookupByBin()" title="Проверить только по реестрам (statgov, гос. участие) — без расчёта тарифа">
+            🔎 Только проверить (БИН)
+          </button>
           <button class="btn-manual-apply" id="btn-manual-apply" onclick="App.applyManualZayavka()">Применить</button>
         </div>
+
+        <!-- Результаты быстрой проверки по реестрам. Скрыто по умолчанию,
+             показывается после нажатия «Только проверить». -->
+        <div class="quick-lookup-result" id="quick-lookup-result" style="display:none"></div>
       </div>
 
       <!-- Alert: средняя ЗП < 85 000 ₸ (информационный для андеррайтера).

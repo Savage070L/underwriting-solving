@@ -1650,6 +1650,107 @@ const App = {
     if (cls) hint.classList.add(cls);
   },
 
+  // ===== БЫСТРАЯ ПРОВЕРКА ПО БИН/ИИН =====
+  // Запускает три параллельные проверки в реестрах (БИН-лукап адреса /
+  // stat.gov.kz / гос. участие через e-qazyna) без создания заявки.
+  // Используется когда андеррайтеру нужно только посмотреть базовые сведения
+  // о компании или ИП по идентификатору, без расчёта тарифа и премии.
+  async quickLookupByBin() {
+    const binEl = document.getElementById('manualBin');
+    const bin = (binEl?.value || '').trim().replace(/\s+/g, '');
+    if (!/^\d{12}$/.test(bin)) {
+      App.showMsg('Введите БИН/ИИН (12 цифр) для проверки.', 'error');
+      binEl?.focus();
+      return;
+    }
+    const resultEl = document.getElementById('quick-lookup-result');
+    if (!resultEl) return;
+    resultEl.style.display = '';
+    resultEl.innerHTML = `<div class="qlr-loading"><span class="qlr-spinner"></span> Проверяем БИН ${bin} в реестрах…</div>`;
+    // Запускаем все 3 параллельно. Сохраняем результаты в App.binData /
+    // App.statgov (как при обычной загрузке заявки) — на случай если
+    // пользователь захочет затем заполнить ФОТ и нажать «Применить»:
+    // данные уже будут под рукой.
+    App.binData = { legalAddress: null, govParticipation: null, loading: true };
+    App.statgov = { loading: true, found: null };
+    App._renderQuickLookupResult(bin); // первый рендер: loading
+    // Запускаем параллельно. Каждый из autoLookup* сам обновляет App.binData/statgov
+    // и при готовности вызывает рендер других UI-секций.
+    await Promise.allSettled([
+      App.autoLookupBIN(bin),
+      App.autoLookupStatGov(bin),
+      App.autoLookupStatsnet(bin),
+    ]);
+    App._renderQuickLookupResult(bin);
+  },
+
+  // Рендер «карточки проверки» — собирает все данные из App.binData/statgov и
+  // выводит компактным списком. Вызывается дважды: сразу (показать spinner) и
+  // после allSettled (показать данные).
+  _renderQuickLookupResult(bin) {
+    const el = document.getElementById('quick-lookup-result');
+    if (!el) return;
+    const sg = App.statgov;
+    const bd = App.binData;
+    const stillLoading = (sg && sg.loading) || (bd && bd.loading);
+    const row = (label, val, opts = {}) => val ? `
+      <div class="qlr-row ${opts.warn ? 'qlr-row--warn' : ''}">
+        <span class="qlr-label">${label}</span>
+        <span class="qlr-val">${val}</span>
+      </div>` : '';
+    let sgBlock = '';
+    if (sg && sg.found === false) {
+      sgBlock = `<div class="qlr-row qlr-row--warn"><span class="qlr-label">Реестр stat.gov.kz</span><span class="qlr-val">— БИН не найден в реестре</span></div>`;
+    } else if (sg && !sg.loading && sg.error) {
+      // Расширение не установлено — мы всё равно можем показать что-то
+      // из binData (адрес, гос.участие через Cloudflare-прокси работают всегда).
+      sgBlock = `<div class="qlr-row qlr-row--warn"><span class="qlr-label">stat.gov.kz</span><span class="qlr-val" style="font-size:0.78rem">${sg.error}</span></div>`;
+    } else if (sg && !sg.loading && sg.name) {
+      sgBlock = [
+        row('Наименование', sg.name),
+        row('Дата регистрации', sg.registrationDate ? Utils.fmtDateShort(sg.registrationDate) : null),
+        row('Руководитель', sg.headFullname),
+        row('Юр. адрес', sg.legalAddress),
+        row('Регион/КАТО', sg.kato),
+        row('Основной ОКЭД', sg.okedPrimaryCode
+            ? `${sg.okedPrimaryCode}${sg.okedPrimaryName ? ' — ' + sg.okedPrimaryName : ''}` : null),
+        row('Вторичные ОКЭДы', (sg.okedSecondaryCodes || []).slice(0, 8).join(', ') || null),
+        row('КФС', sg.kfsCode ? `${sg.kfsCode}${sg.kfsName ? ' — ' + sg.kfsName : ''}` : null),
+        row('Сектор', sg.sectorCode ? `${sg.sectorCode}${sg.sectorName ? ' — ' + sg.sectorName : ''}` : null),
+        row('КРП (с филиалами)', sg.krpWithBranchesCode ? `${sg.krpWithBranchesCode}${sg.krpWithBranchesName ? ' — ' + sg.krpWithBranchesName : ''}` : null),
+      ].join('');
+    }
+    // Адрес из pk.uchet.kz (через Cloudflare-прокси) — работает даже без расширения.
+    const addrLine = (bd && !bd.loading && bd.legalAddress)
+      ? row('Юр. адрес (pk.uchet.kz)', bd.legalAddress)
+      : '';
+    // Гос. участие через e-qazyna (тоже Cloudflare-прокси, работает всегда).
+    const govLine = (bd && !bd.loading)
+      ? row('Гос. участие (e-qazyna)', bd.govParticipation || '—',
+            { warn: bd.govParticipation && bd.govParticipation !== 'Нет' })
+      : '';
+    // Аффилированность
+    const aff = App._isAffiliatedBin ? App._isAffiliatedBin(bin) : null;
+    const affLine = aff
+      ? `<div class="qlr-row qlr-row--warn"><span class="qlr-label">⚠ Аффилированное лицо</span><span class="qlr-val">${aff.name || 'да'}</span></div>`
+      : '';
+    el.innerHTML = `
+      <div class="qlr-head">
+        <span class="qlr-title">Проверка БИН ${bin}</span>
+        ${stillLoading ? '<span class="qlr-spinner"></span>' : ''}
+        <button class="qlr-close" title="Закрыть" onclick="document.getElementById('quick-lookup-result').style.display='none'">✕</button>
+      </div>
+      ${sgBlock || (stillLoading ? '<div class="qlr-loading">Загружаем данные…</div>' : '')}
+      ${addrLine}
+      ${govLine}
+      ${affLine}
+      ${!sgBlock && !addrLine && !govLine && !affLine && !stillLoading
+        ? '<div class="qlr-loading">Данные не получены. Проверьте БИН или повторите попытку.</div>'
+        : ''}
+      <div class="qlr-foot">Хотите рассчитать тариф/премию? Заполните «Кол-во работников» и «ФОТ годовой» / «Ср. зп», затем нажмите «Применить».</div>
+    `;
+  },
+
   applyManualZayavka() {
     const bin = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
     const workersStr = document.getElementById('manualWorkers')?.value;
