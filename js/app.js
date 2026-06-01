@@ -127,7 +127,9 @@ const App = {
 
     if (v === 'auto') {
       const z = App.zayavka;
-      if (z && z.coeff != null) {
+      // Режим быстрой проверки (_lookupOnly) — нет премии/тарифа, авто-вердикт
+      // не рассчитываем, показываем нейтральную подсказку.
+      if (z && !z._lookupOnly && z.coeff != null) {
         // Используем ЭФФЕКТИВНЫЙ coeffDown — с учётом правил:
         //   - НС за 3 года → скидка не применяется (coeffDown = 0)
         //   - Компания < 3 лет → скидка не применяется
@@ -330,6 +332,35 @@ const App = {
       `</div>`;
   },
 
+  // Обновляет alert «молодая компания» (моложе порога _getLimit('minCompanyAgeYears'),
+  // по умолчанию 3 года). Возраст считается на ТЕКУЩУЮ дату (сегодня − дата
+  // регистрации из stat.gov.kz). Срабатывает и в режиме быстрой проверки по
+  // БИН, и при загруженной заявке. Скидка для таких компаний не применяется.
+  _updateYoungCompanyAlert() {
+    const el = document.getElementById('young-company-alert');
+    if (!el) return;
+    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
+      ? App.statgov : null;
+    const regRaw = sg?.registrationDate || null;
+    if (!regRaw) { el.classList.remove('visible'); el.innerHTML = ''; return; }
+    // Возраст на сегодняшнюю дату (а не на дату договора) — для предупреждения.
+    const ageYears = Utils.companyAgeYears(regRaw, new Date());
+    const threshold = App._getLimit('minCompanyAgeYears');
+    if (ageYears == null || ageYears >= threshold) {
+      el.classList.remove('visible'); el.innerHTML = '';
+      return;
+    }
+    const regStr = Utils.fmtDateShort(regRaw);
+    const ageStr = ageYears.toFixed(1).replace('.', ',');
+    el.classList.add('visible');
+    el.innerHTML =
+      `<div class="asa-icon">⚠</div>` +
+      `<div class="asa-body">` +
+        `<div class="asa-title">Молодая компания — моложе ${threshold} лет</div>` +
+        `<div class="asa-desc">Дата регистрации <b>${regStr}</b>, возраст ≈ <b>${ageStr} лет</b>. Понижающая скидка не применяется (компания младше ${threshold} лет) — обратите внимание андеррайтера.</div>` +
+      `</div>`;
+  },
+
   // ===== UNIVERSAL DERIVED-STATE REFRESH =====
   // Прогоняет всю цепочку зависимостей: ОКЭД→классификатор→тариф→премия,
   // превью, таблица ОКЭДов компании, кнопки (орган зависит от активов),
@@ -349,6 +380,8 @@ const App = {
     App.updateVerdictHint();
     // 4b. Alert «средняя ЗП ниже 85 000 ₸» (информационный для андеррайтера)
     App._updateAvgSalaryAlert();
+    // 4c. Alert «молодая компания» (моложе 3 лет → скидка не применяется)
+    App._updateYoungCompanyAlert();
     // 5. Обновить snapshot аналитики, чтобы при повторном открытии
     //    standalone-окна / iframe — данные были свежие.
     if (App.claims && App.claims.analytics) {
@@ -1652,9 +1685,12 @@ const App = {
 
   // ===== БЫСТРАЯ ПРОВЕРКА ПО БИН/ИИН =====
   // Запускает три параллельные проверки в реестрах (БИН-лукап адреса /
-  // stat.gov.kz / гос. участие через e-qazyna) без создания заявки.
-  // Используется когда андеррайтеру нужно только посмотреть базовые сведения
-  // о компании или ИП по идентификатору, без расчёта тарифа и премии.
+  // stat.gov.kz / гос. участие через e-qazyna) без расчёта тарифа.
+  // Результаты выводятся в стандартную панель «Полный профиль компании»
+  // (#preview-panel) — ту же, что и при полном вводе, чтобы не дублировать
+  // данные отдельной карточкой. Для этого создаётся «лёгкая» зайавка с
+  // флагом _lookupOnly (без работников/ФОТ/премии); doc-кнопки для неё
+  // остаются выключенными (см. updateButtons / updateVerdictHint).
   async quickLookupByBin() {
     const binEl = document.getElementById('manualBin');
     const bin = (binEl?.value || '').trim().replace(/\s+/g, '');
@@ -1663,92 +1699,34 @@ const App = {
       binEl?.focus();
       return;
     }
-    const resultEl = document.getElementById('quick-lookup-result');
-    if (!resultEl) return;
-    resultEl.style.display = '';
-    resultEl.innerHTML = `<div class="qlr-loading"><span class="qlr-spinner"></span> Проверяем БИН ${bin} в реестрах…</div>`;
-    // Запускаем все 3 параллельно. Сохраняем результаты в App.binData /
-    // App.statgov (как при обычной загрузке заявки) — на случай если
-    // пользователь захочет затем заполнить ФОТ и нажать «Применить»:
-    // данные уже будут под рукой.
+    // Лёгкая зайавка только для проверки. docDate = сегодня, чтобы возраст
+    // компании в алерте «молодая компания» считался на текущую дату.
+    App.zayavka = {
+      bin,
+      _manual: true,
+      _lookupOnly: true,
+      workers: null,
+      insuranceSum: null,
+      premiumBase: null,
+      premiumWithCoeff: null,
+      coeffDown: 0,
+      coeff: 1,
+      docDate: new Date(),
+    };
     App.binData = { legalAddress: null, govParticipation: null, loading: true };
     App.statgov = { loading: true, found: null };
-    App._renderQuickLookupResult(bin); // первый рендер: loading
-    // Запускаем параллельно. Каждый из autoLookup* сам обновляет App.binData/statgov
-    // и при готовности вызывает рендер других UI-секций.
+    // Первый рендер: панель «Полный профиль компании» с «(поиск...)».
+    App._refreshDerivedData();
+    App.showMsg(`Проверяем БИН ${bin} в реестрах…`, 'success');
+    // Параллельные проверки. Каждая по готовности сама дёргает showPreview;
+    // финальный _refreshDerivedData ниже — чтобы всё сошлось (адрес, гос.
+    // участие, ОКЭДы, класс риска, алерт молодой компании).
     await Promise.allSettled([
       App.autoLookupBIN(bin),
       App.autoLookupStatGov(bin),
       App.autoLookupStatsnet(bin),
     ]);
-    App._renderQuickLookupResult(bin);
-  },
-
-  // Рендер «карточки проверки» — собирает все данные из App.binData/statgov и
-  // выводит компактным списком. Вызывается дважды: сразу (показать spinner) и
-  // после allSettled (показать данные).
-  _renderQuickLookupResult(bin) {
-    const el = document.getElementById('quick-lookup-result');
-    if (!el) return;
-    const sg = App.statgov;
-    const bd = App.binData;
-    const stillLoading = (sg && sg.loading) || (bd && bd.loading);
-    const row = (label, val, opts = {}) => val ? `
-      <div class="qlr-row ${opts.warn ? 'qlr-row--warn' : ''}">
-        <span class="qlr-label">${label}</span>
-        <span class="qlr-val">${val}</span>
-      </div>` : '';
-    let sgBlock = '';
-    if (sg && sg.found === false) {
-      sgBlock = `<div class="qlr-row qlr-row--warn"><span class="qlr-label">Реестр stat.gov.kz</span><span class="qlr-val">— БИН не найден в реестре</span></div>`;
-    } else if (sg && !sg.loading && sg.error) {
-      // Расширение не установлено — мы всё равно можем показать что-то
-      // из binData (адрес, гос.участие через Cloudflare-прокси работают всегда).
-      sgBlock = `<div class="qlr-row qlr-row--warn"><span class="qlr-label">stat.gov.kz</span><span class="qlr-val" style="font-size:0.78rem">${sg.error}</span></div>`;
-    } else if (sg && !sg.loading && sg.name) {
-      sgBlock = [
-        row('Наименование', sg.name),
-        row('Дата регистрации', sg.registrationDate ? Utils.fmtDateShort(sg.registrationDate) : null),
-        row('Руководитель', sg.headFullname),
-        row('Юр. адрес', sg.legalAddress),
-        row('Регион/КАТО', sg.kato),
-        row('Основной ОКЭД', sg.okedPrimaryCode
-            ? `${sg.okedPrimaryCode}${sg.okedPrimaryName ? ' — ' + sg.okedPrimaryName : ''}` : null),
-        row('Вторичные ОКЭДы', (sg.okedSecondaryCodes || []).slice(0, 8).join(', ') || null),
-        row('КФС', sg.kfsCode ? `${sg.kfsCode}${sg.kfsName ? ' — ' + sg.kfsName : ''}` : null),
-        row('Сектор', sg.sectorCode ? `${sg.sectorCode}${sg.sectorName ? ' — ' + sg.sectorName : ''}` : null),
-        row('КРП (с филиалами)', sg.krpWithBranchesCode ? `${sg.krpWithBranchesCode}${sg.krpWithBranchesName ? ' — ' + sg.krpWithBranchesName : ''}` : null),
-      ].join('');
-    }
-    // Адрес из pk.uchet.kz (через Cloudflare-прокси) — работает даже без расширения.
-    const addrLine = (bd && !bd.loading && bd.legalAddress)
-      ? row('Юр. адрес (pk.uchet.kz)', bd.legalAddress)
-      : '';
-    // Гос. участие через e-qazyna (тоже Cloudflare-прокси, работает всегда).
-    const govLine = (bd && !bd.loading)
-      ? row('Гос. участие (e-qazyna)', bd.govParticipation || '—',
-            { warn: bd.govParticipation && bd.govParticipation !== 'Нет' })
-      : '';
-    // Аффилированность
-    const aff = App._isAffiliatedBin ? App._isAffiliatedBin(bin) : null;
-    const affLine = aff
-      ? `<div class="qlr-row qlr-row--warn"><span class="qlr-label">⚠ Аффилированное лицо</span><span class="qlr-val">${aff.name || 'да'}</span></div>`
-      : '';
-    el.innerHTML = `
-      <div class="qlr-head">
-        <span class="qlr-title">Проверка БИН ${bin}</span>
-        ${stillLoading ? '<span class="qlr-spinner"></span>' : ''}
-        <button class="qlr-close" title="Закрыть" onclick="document.getElementById('quick-lookup-result').style.display='none'">✕</button>
-      </div>
-      ${sgBlock || (stillLoading ? '<div class="qlr-loading">Загружаем данные…</div>' : '')}
-      ${addrLine}
-      ${govLine}
-      ${affLine}
-      ${!sgBlock && !addrLine && !govLine && !affLine && !stillLoading
-        ? '<div class="qlr-loading">Данные не получены. Проверьте БИН или повторите попытку.</div>'
-        : ''}
-      <div class="qlr-foot">Хотите рассчитать тариф/премию? Заполните «Кол-во работников» и «ФОТ годовой» / «Ср. зп», затем нажмите «Применить».</div>
-    `;
+    App._refreshDerivedData();
   },
 
   applyManualZayavka() {
@@ -3041,7 +3019,9 @@ const App = {
   },
 
   updateButtons() {
-    const hasZayavka = !!App.zayavka;
+    // Лёгкая «зайавка только для проверки» (_lookupOnly) не должна включать
+    // кнопки генерации документов — у неё нет работников/премии.
+    const hasZayavka = !!App.zayavka && !App.zayavka._lookupOnly;
     document.getElementById('btnAR').disabled = !hasZayavka;
     document.getElementById('btnZakl').disabled = !hasZayavka;
     const btnProto = document.getElementById('btnProtocol');
