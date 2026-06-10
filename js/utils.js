@@ -174,6 +174,27 @@ const Utils = {
     return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
   },
 
+  // ===== Russian pluralization =====
+  // \u0412\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u0444\u043e\u0440\u043c\u0443 \u0441\u043b\u043e\u0432\u0430, \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u043d\u0443\u044e \u0441 \u0447\u0438\u0441\u043b\u043e\u043c:
+  //   plural(1, '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a', '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u0430', '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u043e\u0432') \u2192 '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a'
+  //   plural(3, ...) \u2192 '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u0430';  plural(5, ...) \u2192 '\u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u043e\u0432'
+  // \u041f\u0440\u0430\u0432\u0438\u043b\u0430: n%10==1 && n%100!=11 \u2192 one; n%10 in 2..4 && n%100 not in 12..14 \u2192 few;
+  // \u0438\u043d\u0430\u0447\u0435 many. \u0414\u0440\u043e\u0431\u043d\u044b\u0435 \u0447\u0438\u0441\u043b\u0430 (2,5) \u0432\u0441\u0435\u0433\u0434\u0430 \u043f\u043e\u043b\u0443\u0447\u0430\u044e\u0442 \u0444\u043e\u0440\u043c\u0443 few (\u00ab2,5 \u0433\u043e\u0434\u0430\u00bb).
+  plural(n, one, few, many) {
+    const abs = Math.abs(Number(n) || 0);
+    if (!Number.isInteger(abs)) return few;
+    const m10 = abs % 10;
+    const m100 = abs % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+  },
+
+  // \u0427\u0438\u0441\u043b\u043e (\u0441 \u0433\u0440\u0443\u043f\u043f\u0438\u0440\u043e\u0432\u043a\u043e\u0439 \u0440\u0430\u0437\u0440\u044f\u0434\u043e\u0432) + \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0441\u043b\u043e\u0432\u043e: \u00ab3 \u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u0430\u00bb, \u00ab5 \u0440\u0430\u0431\u043e\u0442\u043d\u0438\u043a\u043e\u0432\u00bb.
+  pluralize(n, one, few, many) {
+    return `${Utils.fmtInteger(n)} ${Utils.plural(n, one, few, many)}`;
+  },
+
   // Parse Excel serial date number to JS Date
   // ===== Payment installment schedule =====
   // Returns array of Dates: 1st tranche = today+1, subsequent = +freq step,
@@ -242,7 +263,8 @@ const Utils = {
     }
     const first = tranches.slice(0, 3).map((d, i) => `${i + 1} транш — ${fmt(d)}`);
     const last = `${N} транш — ${fmt(tranches[N - 1])}`;
-    return `${first.join('; ')}; … ; ${last} (всего ${N} траншей, ${freqLabel})`;
+    // «всего 52 транша», «всего 365 траншей» — слово согласуется с числом
+    return `${first.join('; ')}; … ; ${last} (всего ${Utils.pluralize(N, 'транш', 'транша', 'траншей')}, ${freqLabel})`;
   },
 
   parseExcelDate(value) {

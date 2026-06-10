@@ -450,7 +450,13 @@ body {
 body.is-inline .dash { padding-top: 12px; padding-bottom: 32px; }
 body.is-inline .hero-top { display: none; }
 body.is-inline .hero { padding-top: 0; }
-body.is-inline .ai-fab { bottom: 20px; right: 20px; }
+/* Во встроенном (iframe) режиме высота iframe = высоте контента, поэтому
+   position:fixed «прилипает» к низу всего документа — FAB оказывался в самом
+   конце аналитики. Кнопку и панель в inline-режиме предоставляет родительская
+   страница (index.html), внутренние — прячем полностью. */
+body.is-inline .ai-fab,
+body.is-inline .ai-panel,
+body.is-inline .ai-overlay { display: none !important; }
 
 /* ===== HERO ===== */
 .hero {

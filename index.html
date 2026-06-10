@@ -421,6 +421,11 @@
             <span class="ba-label">Открыть в новой вкладке</span>
             <span class="ba-hint">отдельной страницей</span>
           </button>
+          <button class="btn-analytics btn-analytics--ai" onclick="App.AI.open()">
+            <span class="ba-icon">🤖</span>
+            <span class="ba-label">Спросить ИИ</span>
+            <span class="ba-hint">второе мнение → справа</span>
+          </button>
         </div>
       </div>
 
@@ -509,6 +514,61 @@
     </div>
   </div>
 
+  <!-- AI Consultant: плавающая кнопка (видна, пока развёрнута встроенная аналитика)
+       + слайд-овер панель справа. Разметка идентична analytics.html — управляется
+       общим контроллером createAIConsultant (js/ai-consultant.js). -->
+  <button class="ai-fab" id="ai-fab" onclick="App.AI.toggle()" aria-label="Спросить ИИ">
+    <svg class="ai-fab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
+      <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+    </svg>
+    <span class="ai-fab-label">Спросить&nbsp;ИИ</span>
+    <span class="ai-fab-dot"></span>
+  </button>
+
+  <aside class="ai-panel" id="ai-panel" aria-hidden="true">
+    <div class="ai-panel-head">
+      <div class="ai-panel-title">
+        <span class="ai-panel-emoji">🤖</span>
+        <div>
+          <h3>ИИ-консультант второго мнения</h3>
+          <p>Скопируйте промпт и вставьте в ChatGPT / Claude / Gemini — ИИ выступит в роли «второго андеррайтера» и даст независимую оценку</p>
+        </div>
+      </div>
+      <button class="ai-close" onclick="App.AI.close()" aria-label="Закрыть">×</button>
+    </div>
+    <div class="ai-panel-actions">
+      <button class="ai-btn ai-btn--primary" id="ai-copy-btn" onclick="App.AI.copy()">
+        <span class="ai-btn-icon">📋</span> Скопировать промпт
+      </button>
+      <button class="ai-btn ai-btn--secondary" onclick="App.AI.sendTo('chatgpt')">→ ChatGPT</button>
+      <button class="ai-btn ai-btn--secondary" onclick="App.AI.sendTo('claude')">→ Claude</button>
+      <button class="ai-btn ai-btn--secondary" onclick="App.AI.sendTo('gemini')">→ Gemini</button>
+      <button class="ai-btn ai-btn--secondary" onclick="App.AI.sendTo('perplexity')">→ Perplexity</button>
+    </div>
+    <div class="ai-toast" id="ai-toast"></div>
+    <textarea class="ai-prompt-text" id="ai-prompt-text" readonly></textarea>
+    <div class="ai-panel-foot">
+      <span id="ai-prompt-stats">—</span>
+      <span class="ai-tip">Tip: после вставки можно задать дополнительные вопросы — у ИИ будет весь контекст</span>
+    </div>
+  </aside>
+  <div class="ai-overlay" id="ai-overlay" onclick="App.AI.close()"></div>
+
+  <!-- Confirm dialog — подтверждение разрушающих действий (очистка кэша,
+       удаление справочника, сброс). Управляется App.confirmDialog(). -->
+  <div class="confirm-overlay" id="confirm-overlay">
+    <div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="confirm-icon" id="confirm-icon">⚠️</div>
+      <div class="confirm-title" id="confirm-title"></div>
+      <div class="confirm-text" id="confirm-text"></div>
+      <div class="confirm-actions">
+        <button class="confirm-btn confirm-btn--cancel" id="confirm-cancel">Отмена</button>
+        <button class="confirm-btn confirm-btn--ok" id="confirm-ok">Удалить</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/lib/xlsx.full.min.js"></script>
   <script src="js/lib/docx.min.js"></script>
   <script src="js/lib/FileSaver.min.js"></script>
@@ -516,6 +576,8 @@
        html2canvas + jsPDF подгружаются по требованию изнутри analytics.js — здесь
        ничего загружать не надо. -->
   <script src="js/utils.js"></script>
+  <script src="js/ai-prompt.js"></script>
+  <script src="js/ai-consultant.js"></script>
   <script src="js/excel-reader.js"></script>
   <script src="js/ar-generator.js"></script>
   <script src="js/zakl-generator.js"></script>

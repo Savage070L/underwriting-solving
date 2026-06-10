@@ -61,6 +61,8 @@ Four generators in `js/`, all consume the same `data` object produced by `App._c
 
 To add a field to documents, edit `_collectData()` in `js/app.js` (single source of truth for document inputs), then reference `data.<field>` in the generator(s).
 
+When interpolating a count next to a Russian noun («3 работника», «5 траншей»), use `Utils.plural(n, one, few, many)` / `Utils.pluralize(...)` — never hard-code one form. Destructive UI actions (clearing reference/case files, section reset) must go through `App.confirmDialog({title, text, confirmLabel})` (markup `#confirm-overlay` in index.html).
+
 ### Resilient parsers (important)
 
 Reference files like КУ по классам get **monthly updates** — rows shift, new classes get added, columns sometimes reorder. The parsers in `js/excel-reader.js` are designed to find data **by content** (label text), not by hard-coded coordinates. When extending or fixing parsers:
@@ -110,9 +112,16 @@ All docx generators use **A4 with symmetric 2 cm margins** (1134 twips). The ava
 
 AR uses a 3-column invisible-border table for the signature block so name/line/date columns align vertically across all members — see `ar-generator.js` `sigRow()` helper. Don't replace this with manually-spaced paragraphs.
 
-## AI consultant (analytics dashboard)
+## AI consultant ("Спросить ИИ")
 
-The dashboard has a floating "Спросить ИИ" FAB that opens a side panel with a generated prompt (~9K chars) containing all analytics in anonymized form. The prompt deliberately:
+Split into two shared modules used by **both pages**:
+
+- `js/ai-prompt.js` — `AIPrompt.build(snap)` builds the ~9K-char prompt from an analytics *snapshot* only (no DOM/App access).
+- `js/ai-consultant.js` — `createAIConsultant(getPrompt, opts)` drives the right-side slide-over panel (same element ids on both pages: `ai-panel`, `ai-overlay`, `ai-prompt-text`, …).
+
+On `analytics.html` (standalone tab) the floating FAB works as before. In **inline mode** (`body.is-inline`, iframe on index.html) the in-iframe FAB/panel are hidden entirely — `position: fixed` inside the auto-height iframe would land at the very bottom of the content. Instead `index.html` provides its own "Спросить ИИ" button in the analytics CTA row plus a parent-page FAB (visible while `body.inline-analytics-open`), both opening `App.AI` — a `createAIConsultant` instance that builds the prompt on the fly from `App._buildAnalyticsSnapshot()`.
+
+The prompt deliberately:
 - Excludes identifying data (no insurer name, no BIN, no address)
 - Asks the AI to recompute key actuarial metrics independently (don't pre-compute and present)
 - References KZ legislation (Закон РК № 30-III от 07.02.2005, Соц. кодекс ст. 195-1, АРРФР, Solvency II)

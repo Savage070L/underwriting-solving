@@ -23,6 +23,15 @@ const App = {
 
   // ===== INITIALIZATION =====
   init() {
+    // ИИ-консультант «второго мнения» — слайд-овер панель справа.
+    // Промпт строится на лету из текущих данных формы (AIPrompt.build),
+    // контроллер общий с дашбордом (createAIConsultant, js/ai-consultant.js).
+    App.AI = createAIConsultant(
+      () => (App.claims && App.claims.analytics)
+        ? AIPrompt.build(App._buildAnalyticsSnapshot())
+        : null,
+      { onUnavailable: () => App.showMsg('Сначала загрузите историю убытков.', 'error') }
+    );
     App.restoreCache();
     App._restoreCase();
     App.restoreVerdict();
@@ -351,13 +360,16 @@ const App = {
       return;
     }
     const regStr = Utils.fmtDateShort(regRaw);
+    // После дробного числа — род. падеж ед.ч.: «≈ 2,6 года». Для порога —
+    // «моложе 3 лет», «моложе 1 года» (согласование с целым числом).
     const ageStr = ageYears.toFixed(1).replace('.', ',');
+    const thresholdWord = Utils.plural(threshold, 'года', 'лет', 'лет');
     el.classList.add('visible');
     el.innerHTML =
       `<div class="asa-icon">⚠</div>` +
       `<div class="asa-body">` +
-        `<div class="asa-title">Молодая компания — моложе ${threshold} лет</div>` +
-        `<div class="asa-desc">Дата регистрации <b>${regStr}</b>, возраст ≈ <b>${ageStr} лет</b>. Понижающая скидка не применяется (компания младше ${threshold} лет) — обратите внимание андеррайтера.</div>` +
+        `<div class="asa-title">Молодая компания — моложе ${threshold} ${thresholdWord}</div>` +
+        `<div class="asa-desc">Дата регистрации <b>${regStr}</b>, возраст ≈ <b>${ageStr} года</b>. Понижающая скидка не применяется (компания младше ${threshold} ${thresholdWord}) — обратите внимание андеррайтера.</div>` +
       `</div>`;
   },
 
@@ -500,8 +512,57 @@ const App = {
     }
   },
 
+  // Русские названия справочников — для сообщений и подтверждений.
+  REF_LABELS: {
+    popravka: 'Поправочные коэффициенты',
+    normativ: 'Норматив',
+    ku: 'КУ по классам',
+    calculator: 'Калькулятор рентабельности',
+    classifier: 'Классификатор ОКЭД',
+    affiliated: 'Аффилированные лица',
+  },
+
+  // ===== CONFIRM DIALOG =====
+  // Стилизованное подтверждение разрушающего действия. Возвращает Promise<boolean>.
+  // Закрытие по Esc / клику по фону / «Отмена» → false.
+  confirmDialog({ title, text, confirmLabel = 'Удалить', icon = '⚠️' } = {}) {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('confirm-overlay');
+      if (!overlay) { resolve(window.confirm(`${title}\n\n${text || ''}`)); return; }
+      document.getElementById('confirm-icon').textContent = icon;
+      document.getElementById('confirm-title').textContent = title || '';
+      document.getElementById('confirm-text').textContent = text || '';
+      const okBtn = document.getElementById('confirm-ok');
+      const cancelBtn = document.getElementById('confirm-cancel');
+      okBtn.textContent = confirmLabel;
+
+      const done = (result) => {
+        overlay.classList.remove('is-open');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        overlay.removeEventListener('click', onOverlay);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      };
+      const onOk = () => done(true);
+      const onCancel = () => done(false);
+      const onOverlay = (e) => { if (e.target === overlay) done(false); };
+      const onKey = (e) => { if (e.key === 'Escape') done(false); };
+
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      overlay.addEventListener('click', onOverlay);
+      document.addEventListener('keydown', onKey);
+
+      overlay.classList.add('is-open');
+      // Фокус на «Отмена» — случайный Enter не удалит данные
+      cancelBtn.focus();
+    });
+  },
+
   // Очищает один справочник (по типу) — для кнопки ❌ на карточке.
-  clearOneRef(type, ev) {
+  // С подтверждением: случайный клик по ❌ не должен удалять файл из кэша.
+  async clearOneRef(type, ev) {
     if (ev) ev.stopPropagation();
     const keys = {
       popravka: 'ref_popravka',
@@ -512,6 +573,15 @@ const App = {
       affiliated: 'ref_affiliated',
     };
     if (!keys[type]) return;
+    const label = App.REF_LABELS[type] || type;
+    const fileName = localStorage.getItem(`ref_${type}_name`);
+    const ok = await App.confirmDialog({
+      title: `Удалить справочник «${label}»?`,
+      text: (fileName ? `Файл: ${fileName}\n` : '') +
+        'Данные будут удалены из кэша браузера — файл придётся загрузить заново.',
+      confirmLabel: 'Удалить',
+    });
+    if (!ok) return;
     localStorage.removeItem(keys[type]);
     localStorage.removeItem(`ref_${type}_name`);
     // Снимаем и ручные override для норматива/КУ — иначе после очистки файла
@@ -537,7 +607,7 @@ const App = {
     App.updateRefStatus(type, false);
     App.updateRefBadge();
     App._refreshDerivedData();
-    App.showMsg(`Справочник «${type}» очищен.`, 'success');
+    App.showMsg(`Справочник «${label}» очищен.`, 'success');
   },
 
   // Извлекает дату из имени файла справочника. Поддерживает форматы:
@@ -1209,8 +1279,17 @@ const App = {
 
   // Сброс только третьего блока: описание рисков (свободный текст) + вердикт.
   // Не трогает заявку, период, ОКЭД и пр. — только пользовательский ввод этого блока.
-  resetSection3() {
+  // С подтверждением — в описании рисков может быть вручную набранный текст.
+  async resetSection3() {
     const riskEl = document.getElementById('riskText');
+    const hasText = !!(riskEl && riskEl.value.trim());
+    const ok = await App.confirmDialog({
+      title: 'Сбросить описание рисков и решение?',
+      text: (hasText ? 'Введённый текст описания рисков будет удалён без возможности восстановления. ' : '') +
+        'Решение по риску вернётся к «Авто».',
+      confirmLabel: 'Сбросить',
+    });
+    if (!ok) return;
     if (riskEl) riskEl.value = '';
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
@@ -1280,8 +1359,19 @@ const App = {
   },
 
   // Удаляет файл по кейсу (заявка ИЛИ история убытков).
-  clearCaseFile(which, ev) {
-    if (ev) ev.stopPropagation();
+  // Подтверждение запрашивается только при клике из UI (передан ev) —
+  // программные вызовы (например, из resetManualForm) проходят без диалога.
+  async clearCaseFile(which, ev) {
+    if (ev) {
+      ev.stopPropagation();
+      const label = which === 'zayavka' ? 'Заявка' : 'История убытков';
+      const ok = await App.confirmDialog({
+        title: `Удалить файл «${label}»?`,
+        text: 'Связанные данные (превью, аналитика) будут сброшены — файл придётся загрузить заново.',
+        confirmLabel: 'Удалить',
+      });
+      if (!ok) return;
+    }
     if (which === 'zayavka') {
       App.zayavka = null;
       App.statgov = null;
@@ -1297,6 +1387,7 @@ const App = {
       document.getElementById('status-claims').textContent = 'Загрузите .xls файл';
       document.getElementById('analytics-cta')?.classList.remove('visible');
       document.getElementById('analytics-inline')?.classList.remove('is-open');
+      document.body.classList.remove('inline-analytics-open');
     }
     App._persistCase();
     // При удалении файла кейса (заявка/история) тоже надо прокатить
@@ -1391,7 +1482,14 @@ const App = {
       }
     } catch (e) { console.warn('Restore case failed:', e); }
   },
-  clearCaseCache() {
+  // «Очистить кейс» — удаляет заявку и историю убытков разом. С подтверждением.
+  async clearCaseCache() {
+    const ok = await App.confirmDialog({
+      title: 'Очистить файлы кейса?',
+      text: 'Заявка и история убытков будут удалены, превью и аналитика — сброшены.',
+      confirmLabel: 'Очистить',
+    });
+    if (!ok) return;
     localStorage.removeItem('case_state');
     App.zayavka = null;
     App.claims = null;
@@ -1404,6 +1502,7 @@ const App = {
     document.getElementById('status-claims').textContent = 'Загрузите .xls файл';
     document.getElementById('analytics-cta')?.classList.remove('visible');
     document.getElementById('analytics-inline')?.classList.remove('is-open');
+    document.body.classList.remove('inline-analytics-open');
     document.getElementById('preview-panel')?.classList.remove('visible');
     App._refreshDerivedData();
     App.showMsg('Файлы кейса очищены.', 'success');
@@ -2627,12 +2726,16 @@ const App = {
     const iframe = document.getElementById('analytics-iframe');
     if (container.classList.contains('is-open')) {
       container.classList.remove('is-open');
+      document.body.classList.remove('inline-analytics-open');
       hint.textContent = '↓ показать';
       return;
     }
     localStorage.setItem('analytics_snapshot', JSON.stringify(App._buildAnalyticsSnapshot()));
     iframe.src = 'analytics.html#inline=1&t=' + Date.now(); // force reload via hash
     container.classList.add('is-open');
+    // FAB «Спросить ИИ» на родительской странице — виден, пока аналитика развёрнута
+    // (внутри iframe position:fixed не работает: iframe растянут на высоту контента).
+    document.body.classList.add('inline-analytics-open');
     hint.textContent = '↑ свернуть';
     // Auto-resize iframe to its content's height so внутренний скроллбар не появляется.
     // Same-origin iframe — можно читать contentDocument напрямую.
@@ -3597,7 +3700,21 @@ const App = {
     }
   },
 
-  clearCache() {
+  // «Очистить кэш» в шапке раздела «Справочники». Удаляет ВСЕ справочники
+  // и связанные настройки — поэтому обязательно с подтверждением.
+  async clearCache() {
+    const loaded = ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated']
+      .filter(t => !!App.refData[t])
+      .map(t => App.REF_LABELS[t] || t);
+    const ok = await App.confirmDialog({
+      title: 'Очистить весь кэш справочников?',
+      text: (loaded.length
+        ? `Будут удалены все загруженные справочники (${loaded.length} из 6):\n${loaded.join(', ')}.\n`
+        : 'Будут удалены все сохранённые данные справочников.\n') +
+        'А также ручные вводы, лимиты и подписанты. Файлы придётся загрузить заново.',
+      confirmLabel: 'Очистить всё',
+    });
+    if (!ok) return;
     localStorage.removeItem('ref_popravka');
     localStorage.removeItem('ref_normativ_raw');
     localStorage.removeItem('ref_ku');

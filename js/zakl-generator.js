@@ -174,11 +174,11 @@ const ZaklGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
 
-    // Insured workers
+    // Insured workers — слово согласуется с числом: «1 работник», «3 работника», «5 работников»
     paragraphs.push(new Paragraph({
       children: [
         trB('Застрахованные: '),
-        tr(`${Utils.fmtInteger(data.workers)} работников`),
+        tr(Utils.pluralize(data.workers, 'работник', 'работника', 'работников')),
       ],
       alignment: AlignmentType.JUSTIFIED,
       spacing: { before: 100, after: 100 },
@@ -384,15 +384,18 @@ const ZaklGenerator = {
       ? 'наиболее подвержены к риску травматизма, чем риску смерти'
       : 'наиболее подвержены к риску смерти, чем риску травматизма';
 
+    // «на N человек(а)» — винительный падеж после «на»: «на 1 человека»,
+    // «на 3 человека», «на 5 человек», «на 21 человека».
+    const naWorkers = Utils.pluralize(data.workers, 'человека', 'человека', 'человек');
     paragraphs.push(new Paragraph({
       children: [tr(
         `Учитывая специфику действия предприятия, статистику за последние 3-х лет, ` +
         `вероятность несчастного случая данного класса риска ${riskWord}, ` +
         `исходя из данных Агентства статистики РК количество пострадавших в данном виде деятельности ` +
         `коэффициент травматизма составляет ${injuryRateStr} на 1 000 человек, ` +
-        `в нашем случае риск получения травмы на данном предприятии составляет ${injuryOnPlantStr} на ${Utils.fmtInteger(data.workers)} человек, ` +
+        `в нашем случае риск получения травмы на данном предприятии составляет ${injuryOnPlantStr} на ${naWorkers}, ` +
         `при этом смертельные случаи по данному виду в статистики Агентства РК составляет ${deathRateStr} на 1 000 человек, ` +
-        `в нашем случае риск смертельного исхода на данном предприятии составляет ${deathOnPlantStr} на ${Utils.fmtInteger(data.workers)} человека. ` +
+        `в нашем случае риск смертельного исхода на данном предприятии составляет ${deathOnPlantStr} на ${naWorkers}. ` +
         `Таким образом сотрудники данного предприятия ${comparisonText}.`
       )],
       alignment: AlignmentType.JUSTIFIED,
