@@ -329,9 +329,9 @@
       <div class="section-collapsible-body" id="batch-body">
         <p class="batch-desc">
           Загрузите ежедневную выгрузку договоров (Excel). Для каждого договора ОСНС будет
-          сформировано заполненное Андеррайтинговое решение в PDF (имя «АР&nbsp;{БИН}.pdf»),
-          пакетом в ZIP. Данные берутся из выгрузки; по БИНу в фоне подтягивается
-          stat.gov.kz (официальное название, адрес, дата регистрации).
+          сформировано заполненное Андеррайтинговое решение в редактируемом Word (.docx,
+          имя «АР&nbsp;{БИН}.docx»), пакетом в ZIP. Данные берутся из выгрузки; по БИНу в фоне
+          подтягивается stat.gov.kz (официальное название, адрес, дата регистрации).
         </p>
 
         <div class="upload-zone-main batch-upload" id="zone-batch" onclick="document.getElementById('batch-file-input').click()">
@@ -371,7 +371,7 @@
                 <th class="batch-c-num2">Премия с ПК</th>
                 <th class="batch-c-center">Решение</th>
                 <th class="batch-c-sg">stat.gov.kz</th>
-                <th class="batch-c-act">PDF</th>
+                <th class="batch-c-act">Word</th>
               </tr>
             </thead>
             <tbody id="batch-tbody"></tbody>

@@ -1,8 +1,9 @@
 // batch-ar.js — контроллер массовой генерации Андеррайтинговых решений (АР).
 //
 // Поток: загрузка ежедневного реестра (.xlsx) → BatchReader.parse → превью-
-// таблица → генерация заполненных PDF по форме ARForm (html2canvas + jsPDF),
-// поодиночке или пакетом в ZIP (JSZip). Имена файлов — «АР {БИН}.pdf».
+// таблица → генерация заполненных .docx по форме ARForm (docx-библиотека,
+// редактируемые таблицы), поодиночке или пакетом в ZIP (JSZip). Имена файлов —
+// «АР {БИН}.docx». Генерация быстрая — просто сборка docx-объектов, без рендера.
 //
 // Параллельно (в фоне, с лимитом параллельности) по каждому БИНу запрашивается
 // statgov: подтягивается официальное название/адрес и дата регистрации. Если
@@ -14,10 +15,8 @@ const BatchAR = {
   _busy: false,
   _statgovRunning: false,
 
-  // CDN-библиотеки грузим по требованию (как в экспорте аналитики).
+  // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
   CDN: {
-    html2canvas: 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
-    jspdf: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
     jszip: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
   },
 
@@ -33,27 +32,12 @@ const BatchAR = {
     });
   },
 
-  async _ensureLibs(withZip) {
-    if (typeof window.html2canvas === 'undefined') await BatchAR._loadScript(BatchAR.CDN.html2canvas);
-    if (typeof window.jspdf === 'undefined') await BatchAR._loadScript(BatchAR.CDN.jspdf);
-    if (withZip && typeof window.JSZip === 'undefined') await BatchAR._loadScript(BatchAR.CDN.jszip);
+  async _ensureZip() {
+    if (typeof window.JSZip === 'undefined') await BatchAR._loadScript(BatchAR.CDN.jszip);
   },
 
   _youngThreshold() {
     return (window.App && App._getLimit) ? (App._getLimit('minCompanyAgeYears') || 3) : 3;
-  },
-
-  // Offscreen-контейнер для рендера формы (создаётся один раз).
-  _host() {
-    let h = document.getElementById('arf-render-host');
-    if (!h) {
-      h = document.createElement('div');
-      h.id = 'arf-render-host';
-      h.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;background:#fff;z-index:-1;';
-      document.body.appendChild(h);
-    }
-    ARForm.injectStyles(document);
-    return h;
   },
 
   // ===== Загрузка файла реестра =====
@@ -116,7 +100,7 @@ const BatchAR = {
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-center">${decision}</td>
         <td class="batch-c-sg">${sgBadge}</td>
-        <td class="batch-c-act"><button class="batch-pdf-btn" onclick="BatchAR.generateOne(${i}, this)">PDF</button></td>
+        <td class="batch-c-act"><button class="batch-pdf-btn" onclick="BatchAR.generateOne(${i}, this)">Word</button></td>
       </tr>`;
     }).join('');
   },
@@ -209,63 +193,35 @@ const BatchAR = {
       (withDiscount ? `, из них со скидкой (ПК&lt;1): <b>${withDiscount}</b> — проверьте, скидка могла быть применена ошибочно.` : '.');
   },
 
-  // ===== Рендер одной формы в PDF (Blob) =====
-  async _renderPdfBlob(row) {
-    await BatchAR._ensureLibs(false);
-    const host = BatchAR._host();
-    host.innerHTML = ARForm.buildHTML(row, { printAlert: false });
-    const node = host.firstElementChild;
-    // Дать браузеру выполнить лейаут перед захватом
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    // scale 1.6 + JPEG 0.85 — чёткий текст (~1440px на форму ≈ 190 DPI на A4)
-    // при умеренном весе (~0,3 МБ/док), чтобы ZIP из ~115 PDF был разумного размера.
-    const canvas = await window.html2canvas(node, {
-      scale: 1.6, backgroundColor: '#ffffff',
-      width: node.offsetWidth, height: node.offsetHeight,
-      windowWidth: node.scrollWidth,
-    });
-    host.innerHTML = '';
-
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
-    const pageW = 210, pageH = 297, margin = 8;
-    const usableW = pageW - margin * 2;   // 194
-    const usableH = pageH - margin * 2;   // 281
-    const pxW = canvas.width, pxH = canvas.height;
-    // Вписываем целиком на одну A4-страницу, сохраняя пропорции.
-    let w = usableW;
-    let h = pxH * usableW / pxW;
-    if (h > usableH) { h = usableH; w = pxW * usableH / pxH; }
-    const x = margin + (usableW - w) / 2;
-    const img = canvas.toDataURL('image/jpeg', 0.85);
-    pdf.addImage(img, 'JPEG', x, margin, w, h);
-    return pdf.output('blob');
+  // ===== Сборка одной формы в .docx (Blob) =====
+  _genBlob(row) {
+    return ARForm.buildDocx(row, { printAlert: false });
   },
 
   _fileName(row, taken) {
-    let base = `АР ${row.bin}`;
-    let name = `${base}.pdf`;
+    const base = `АР ${row.bin}`;
+    let name = `${base}.docx`;
     if (taken) {
       let k = 2;
-      while (taken.has(name)) { name = `${base} (${k}).pdf`; k++; }
+      while (taken.has(name)) { name = `${base} (${k}).docx`; k++; }
       taken.add(name);
     }
     return name;
   },
 
-  // ===== Скачать PDF одной строки =====
+  // ===== Скачать .docx одной строки =====
   async generateOne(i, btn) {
     const row = BatchAR.rows[i];
     if (!row) return;
     const prev = btn ? btn.textContent : null;
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
-      const blob = await BatchAR._renderPdfBlob(row);
+      const blob = await BatchAR._genBlob(row);
       saveAs(blob, BatchAR._fileName(row));
       if (btn) { btn.textContent = '✓'; setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200); }
     } catch (e) {
-      console.error('PDF generate error:', e);
-      App.showMsg && App.showMsg('Ошибка генерации PDF: ' + e.message, 'error');
+      console.error('DOCX generate error:', e);
+      App.showMsg && App.showMsg('Ошибка генерации документа: ' + e.message, 'error');
       if (btn) { btn.textContent = prev; btn.disabled = false; }
     }
   },
@@ -280,7 +236,7 @@ const BatchAR = {
     const txt = document.getElementById('batch-progress-text');
     if (progress) progress.style.display = 'block';
     try {
-      await BatchAR._ensureLibs(true);
+      await BatchAR._ensureZip();
       const zip = new window.JSZip();
       const taken = new Set();
       const N = BatchAR.rows.length;
@@ -288,18 +244,19 @@ const BatchAR = {
         const row = BatchAR.rows[i];
         if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — АР ${row.bin}`;
         if (bar) bar.style.width = Math.round((i / N) * 100) + '%';
-        const blob = await BatchAR._renderPdfBlob(row);
-        zip.file(BatchAR._fileName(row, taken), blob);
-        // Уступаем поток UI
-        await new Promise(r => setTimeout(r, 0));
+        const blob = await BatchAR._genBlob(row);
+        // .docx уже сжат (zip) — храним без перекомпрессии (STORE) — быстрее.
+        zip.file(BatchAR._fileName(row, taken), blob, { compression: 'STORE' });
+        // Изредка уступаем поток UI (каждые 10 документов)
+        if (i % 10 === 9) await new Promise(r => setTimeout(r, 0));
       }
       if (txt) txt.textContent = 'Упаковка ZIP…';
       if (bar) bar.style.width = '100%';
-      const out = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const out = await zip.generateAsync({ type: 'blob' });
       const today = new Date();
       const stamp = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
       saveAs(out, `АР пакет ${stamp} (${N}).zip`);
-      if (txt) txt.textContent = `Готово: ${N} PDF в архиве`;
+      if (txt) txt.textContent = `Готово: ${N} документов в архиве`;
     } catch (e) {
       console.error('Batch ZIP error:', e);
       if (txt) txt.textContent = 'Ошибка: ' + e.message;
