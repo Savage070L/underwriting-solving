@@ -2457,6 +2457,39 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   line-height: 1.5;
 }
 
+/* Статус проверки stat.gov.kz (гейт генерации) */
+.batch-verify {
+  margin: 12px 0 0;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.batch-verify--load { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.batch-verify--ok   { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.batch-verify--warn { background: #fff7ed; border: 1px solid #fed7aa; border-left: 4px solid #f59e0b; color: #9a3412; }
+.batch-verify--err  { background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; color: #991b1b; }
+.batch-verify-retry {
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.batch-verify-retry:hover { opacity: 0.75; }
+.batch-verify-retry:disabled { opacity: 0.5; cursor: wait; }
+
 .batch-controls {
   display: flex;
   gap: 10px;

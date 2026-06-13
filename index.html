@@ -341,17 +341,18 @@
           <input type="file" id="batch-file-input" accept=".xlsx,.xls" style="display:none" onchange="BatchAR.loadFile(this.files[0])">
         </div>
 
-        <!-- statgov-расширение недоступно -->
-        <div class="batch-note" id="batch-statgov-note" style="display:none">
-          ⓘ Расширение «Standard Life — мост к stat.gov.kz» не активно — PDF сформируются из
-          данных выгрузки, но без проверки даты регистрации (алерт «моложе 3 лет» не показывается).
+        <!-- Статус проверки stat.gov.kz. Генерация доступна только после того,
+             как все БИН успешно проверены (без подключения — недоступна). -->
+        <div class="batch-verify" id="batch-verify" style="display:none">
+          <span id="batch-verify-text"></span>
+          <button class="batch-verify-retry" id="batch-verify-retry" style="display:none" onclick="BatchAR.retryStatgov()">Повторить проверку</button>
         </div>
         <!-- сводка по молодым компаниям -->
         <div class="batch-alert-summary" id="batch-alert-summary" style="display:none"></div>
 
         <div class="batch-controls">
           <button class="btn-generate batch-gen-all" id="batch-gen-all" onclick="BatchAR.generateAll(this)" disabled>
-            Сгенерировать все PDF → ZIP
+            Сгенерировать Рекомендации АР
           </button>
         </div>
         <div class="batch-progress" id="batch-progress" style="display:none">

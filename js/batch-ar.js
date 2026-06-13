@@ -14,6 +14,7 @@ const BatchAR = {
   rows: [],
   _busy: false,
   _statgovRunning: false,
+  _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
 
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
   CDN: {
@@ -100,7 +101,7 @@ const BatchAR = {
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-center">${decision}</td>
         <td class="batch-c-sg">${sgBadge}</td>
-        <td class="batch-c-act"><button class="batch-pdf-btn" onclick="BatchAR.generateOne(${i}, this)">Word</button></td>
+        <td class="batch-c-act"><button class="batch-pdf-btn" ${r.statgovStatus === 'done' ? '' : 'disabled title="Доступно после проверки stat.gov.kz"'} onclick="BatchAR.generateOne(${i}, this)">Word</button></td>
       </tr>`;
     }).join('');
   },
@@ -131,33 +132,50 @@ const BatchAR = {
       nameCell.title = ARForm._esc(r.insurerName);
     }
     tr.classList.toggle('batch-row--alert', !!r.youngAlert);
+    // Кнопка «Word» доступна только после успешной проверки stat.gov.kz по этому БИН.
+    const wbtn = tr.querySelector('.batch-pdf-btn');
+    if (wbtn && !BatchAR._busy) {
+      const ok = r.statgovStatus === 'done';
+      wbtn.disabled = !ok;
+      if (ok) wbtn.removeAttribute('title');
+      else wbtn.title = 'Доступно после проверки stat.gov.kz';
+    }
   },
 
-  // ===== Фоновый statgov по всем БИНам =====
-  async startStatgov() {
+  // ===== Проверка БИНов через stat.gov.kz =====
+  // Генерация документов разрешена только после успешной проверки ВСЕХ БИН.
+  // indices — подмножество для повторной проверки (по умолчанию все строки).
+  async startStatgov(indices) {
     if (BatchAR._statgovRunning) return;
-    if (typeof StatGovClient === 'undefined') {
-      BatchAR.rows.forEach((r, i) => { r.statgovStatus = 'skip'; BatchAR._refreshRow(i); });
-      return;
-    }
-    // Проверяем доступность расширения (без него лукапы бессмысленны).
-    const ping = await StatGovClient.ping(1800).catch(() => ({ ok: false }));
-    if (!ping.ok) {
-      BatchAR.rows.forEach((r, i) => { r.statgovStatus = 'skip'; BatchAR._refreshRow(i); });
-      const note = document.getElementById('batch-statgov-note');
-      if (note) note.style.display = '';
-      return;
-    }
-    BatchAR._statgovRunning = true;
-    const queue = BatchAR.rows.map((_, i) => i);
-    const threshold = BatchAR._youngThreshold();
+    const targets = indices && indices.length ? indices : BatchAR.rows.map((_, i) => i);
 
+    // Нет моста к stat.gov.kz → генерация недоступна (по требованию: без
+    // подключения документы не формируем).
+    const markUnavailable = () => {
+      BatchAR._statgovConnected = false;
+      targets.forEach(i => { BatchAR.rows[i].statgovStatus = 'skip'; BatchAR._refreshRow(i); });
+      BatchAR._updateVerify();
+      BatchAR._updateControls();
+    };
+    if (typeof StatGovClient === 'undefined') { markUnavailable(); return; }
+    const ping = await StatGovClient.ping(1800).catch(() => ({ ok: false }));
+    if (!ping.ok) { markUnavailable(); return; }
+
+    BatchAR._statgovConnected = true;
+    BatchAR._statgovRunning = true;
+    targets.forEach(i => { BatchAR.rows[i].statgovStatus = 'pending'; BatchAR._refreshRow(i); });
+    BatchAR._updateVerify();
+    BatchAR._updateControls();
+
+    const queue = targets.slice();
+    const threshold = BatchAR._youngThreshold();
     const worker = async () => {
       while (queue.length) {
         const i = queue.shift();
         const r = BatchAR.rows[i];
         r.statgovStatus = 'loading';
         BatchAR._refreshRow(i);
+        BatchAR._updateVerify();
         try {
           const data = await StatGovClient.lookup(r.bin);
           r.statgov = data || {};
@@ -175,11 +193,77 @@ const BatchAR = {
         }
         BatchAR._refreshRow(i);
         BatchAR._updateAlertSummary();
+        BatchAR._updateVerify();
+        BatchAR._updateControls();
       }
     };
     const n = Math.max(1, BatchAR.STATGOV_CONCURRENCY);
     await Promise.all(Array.from({ length: n }, worker));
     BatchAR._statgovRunning = false;
+    BatchAR._updateVerify();
+    BatchAR._updateControls();
+  },
+
+  // Повторить проверку для непройденных (error/skip/pending) БИН.
+  retryStatgov() {
+    if (BatchAR._statgovRunning) return;
+    const idx = BatchAR.rows
+      .map((r, i) => (r.statgovStatus !== 'done' ? i : -1))
+      .filter(i => i >= 0);
+    if (!idx.length) return;
+    BatchAR.startStatgov(idx);
+  },
+
+  // Готовность к генерации: соединение есть и ВСЕ БИН успешно проверены.
+  _verifyComplete() {
+    return BatchAR.rows.length > 0
+      && BatchAR._statgovConnected
+      && BatchAR.rows.every(r => r.statgovStatus === 'done');
+  },
+
+  _verifyCounts() {
+    let done = 0, err = 0, pending = 0;
+    for (const r of BatchAR.rows) {
+      if (r.statgovStatus === 'done') done++;
+      else if (r.statgovStatus === 'error') err++;
+      else pending++; // pending | loading | skip
+    }
+    return { done, err, pending, total: BatchAR.rows.length };
+  },
+
+  // Полоса/строка статуса проверки stat.gov.kz над кнопкой генерации.
+  _updateVerify() {
+    const box = document.getElementById('batch-verify');
+    const txt = document.getElementById('batch-verify-text');
+    const retry = document.getElementById('batch-verify-retry');
+    if (!box || !txt || !retry) return;
+    if (!BatchAR.rows.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const { done, err, total } = BatchAR._verifyCounts();
+
+    if (!BatchAR._statgovConnected) {
+      box.className = 'batch-verify batch-verify--err';
+      txt.innerHTML = '✕ Нет подключения к stat.gov.kz — генерация недоступна. Активируйте расширение-мост «Standard Life — мост к stat.gov.kz» и повторите проверку.';
+      retry.style.display = '';
+      retry.disabled = false;
+      return;
+    }
+    if (BatchAR._statgovRunning) {
+      box.className = 'batch-verify batch-verify--load';
+      txt.innerHTML = `⏳ Проверка stat.gov.kz: <b>${done}</b> из <b>${total}</b>… Кнопка генерации станет доступна, когда все БИН пройдут проверку.`;
+      retry.style.display = 'none';
+      return;
+    }
+    if (err > 0) {
+      box.className = 'batch-verify batch-verify--warn';
+      txt.innerHTML = `⚠ Проверено: <b>${done}</b> из <b>${total}</b>. Не пройдено: <b>${err}</b>. Генерация станет доступна после успешной проверки всех БИН.`;
+      retry.style.display = '';
+      retry.disabled = false;
+    } else {
+      box.className = 'batch-verify batch-verify--ok';
+      txt.innerHTML = `✓ Все <b>${total}</b> БИН проверены через stat.gov.kz — можно генерировать.`;
+      retry.style.display = 'none';
+    }
   },
 
   _updateAlertSummary() {
@@ -229,6 +313,10 @@ const BatchAR = {
   // ===== Сгенерировать все → ZIP =====
   async generateAll(btn) {
     if (BatchAR._busy || !BatchAR.rows.length) return;
+    if (!BatchAR._verifyComplete()) {
+      App.showMsg && App.showMsg('Генерация недоступна: дождитесь проверки всех БИН через stat.gov.kz.', 'error');
+      return;
+    }
     BatchAR._busy = true;
     BatchAR._updateControls();
     const progress = document.getElementById('batch-progress');
@@ -271,10 +359,15 @@ const BatchAR = {
   _updateControls() {
     const btnAll = document.getElementById('batch-gen-all');
     if (btnAll) {
-      btnAll.disabled = BatchAR._busy || !BatchAR.rows.length;
+      const ready = BatchAR._verifyComplete();
+      btnAll.disabled = BatchAR._busy || !ready;
       btnAll.textContent = BatchAR._busy
         ? 'Генерация…'
-        : `Сгенерировать все PDF${BatchAR.rows.length ? ` (${BatchAR.rows.length}) → ZIP` : ''}`;
+        : (!BatchAR.rows.length
+            ? 'Сгенерировать Рекомендации АР'
+            : (ready
+                ? `Сгенерировать Рекомендации АР (${BatchAR.rows.length})`
+                : 'Ожидание проверки stat.gov.kz…'));
     }
     const btnClear = document.getElementById('batch-clear');
     if (btnClear) btnClear.style.display = BatchAR.rows.length ? '' : 'none';
@@ -287,6 +380,7 @@ const BatchAR = {
     if (!ok) return;
     BatchAR.rows = [];
     BatchAR._statgovRunning = false;
+    BatchAR._statgovConnected = false;
     const zone = document.getElementById('zone-batch');
     if (zone) zone.classList.remove('loaded');
     const input = document.getElementById('batch-file-input');
@@ -294,7 +388,7 @@ const BatchAR = {
     const statusEl = document.getElementById('batch-status');
     if (statusEl) statusEl.textContent = 'Файл не загружен';
     document.getElementById('batch-alert-summary')?.setAttribute('style', 'display:none');
-    document.getElementById('batch-statgov-note')?.setAttribute('style', 'display:none');
+    document.getElementById('batch-verify')?.setAttribute('style', 'display:none');
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
