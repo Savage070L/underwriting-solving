@@ -72,6 +72,14 @@ const App = {
     localStorage.setItem('refs_section_open', open ? '1' : '0');
   },
 
+  // Клик по заголовку «Массовая генерация АР» — раскрыть/свернуть.
+  toggleBatchSection(event) {
+    if (event && event.target && event.target.closest('.btn-clear')) return;
+    const section = document.getElementById('batch-section');
+    if (!section) return;
+    section.classList.toggle('is-open', !section.classList.contains('is-open'));
+  },
+
   // ===== VERDICT SELECTOR =====
   restoreVerdict() {
     const saved = localStorage.getItem('manual_verdict');

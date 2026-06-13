@@ -85,6 +85,16 @@ Returns `{oked, riskClass, activity, source}`. Class and activity are resolved t
 1. Exact match first (e.g. `'07298'` → cls 21, even if `'07xxx'` would match cls 11).
 2. Then prefix match (`'72xxx'` matches input starting with `72`), but **skips** the row if the input is listed in column D exceptions.
 
+## Batch AR generation (реестр → PDF)
+
+A separate workflow from the single-case form: upload the daily contracts export (one `.xlsx`, ~115 rows) and generate a filled **Андеррайтинговое решение** PDF per ОСНС contract, named `АР {БИН}.pdf`, bundled into a ZIP. Lives in its own collapsible section on `index.html` (`#batch-section`). Three modules:
+
+- `js/batch-reader.js` — `BatchReader.parse(arrayBuffer)`. Finds columns **by header text** (row 1) with column-letter fallback (export is stable but resilient anyway). Filters to ОСНС rows with a valid 12-digit БИН. Key mapping (confirmed against a real export): БИН=H, Номер договора=D, Страхователь=BR, даты=B/K/L, Страховая сумма=V, ФОТ→ГФОТ=BY, Количество объектов→workers=AL, Класс проф риска=AK, Код ОКЭД=AJ, Вид деятельнсти Андеррайтеры=CA, **Поправочный Коэфициент=CM (1→standard, 0,9→discount)**, **Страховая премия без коэф=CU (premium before)**, **Страховая премия=W (premium with ПК = CU×ПК)**. `tariff = CU / V` (self-consistent with the risk class — no popravka reference needed).
+- `js/ar-form.js` — `ARForm.buildHTML(row, opts)` renders the 3-section form from the `Андеррешение_ОСНС.XLS` template sheet «АРешение» (Рекомендация ДАиП → Заключение по управлению рисками → Андеррайтинговое решение) with the horizontal financial table. Fixed underwriter **Джелкобаев Т.К.**; document № = contract number (col D). Self-contained styles via `ARForm.injectStyles()`.
+- `js/batch-ar.js` — `BatchAR` controller: parse → preview table → PDF per row via **html2canvas + jsPDF** (libs lazy-loaded from CDN, same pattern as analytics PDF export; offscreen `#arf-render-host`, fit-to-one-A4-page), batch → **JSZip** (also CDN). statgov runs **in the background** for every БИН via `StatGovClient` (concurrency `STATGOV_CONCURRENCY=2`) — fills official name/address and computes company age for the **young-company alert** (`< minCompanyAgeYears`, default 3). The alert is UI-only (preview table + summary banner), not printed on the PDF (`opts.printAlert` defaults false); it flags rows where a discount (ПК<1) may have been applied to a company younger than 3 years. If the extension isn't active, all rows are marked `skip` and a note is shown — PDFs still generate from the export data.
+
+PDFs are raster (html2canvas image on an A4 page) — fine for a print-and-sign document. Duplicate БИНs get `(2)`, `(3)` suffixes in the ZIP.
+
 ## BIN lookup architecture (CORS-critical)
 
 The address (`pk.uchet.kz`) and gov-participation (`gr5.e-qazyna.kz`) APIs are blocked by CORS from any browser. A Cloudflare Worker (`worker/index.js`) proxies these requests with `Access-Control-Allow-Origin: *`. The Worker URL is hardcoded in `js/app.js` as `App.WORKER_URL`.
