@@ -84,7 +84,9 @@ const BatchAR = {
   // Лукап гос. участия через e-Qazyna (Cloudflare-воркер). Возвращает
   // { status, found, share }. Логика: само НАЛИЧИЕ компании в реестре e-Qazyna
   // означает гос. участие (Да) — даже если доля 0,000%. Не найден по БИН/ИИН —
-  // значит НЕ гос. участник (Нет). Доля — справочно. Не блокирует генерацию.
+  // значит НЕ гос. участник (Нет). Долю в UI НЕ показываем (только Да/Нет) —
+  // она нужна лишь чтобы вывести «найден» при отсутствии явного gov.found.
+  // Не блокирует генерацию.
   async _lookupEgov(bin) {
     const url = (typeof App !== 'undefined' && App.WORKER_URL) ? App.WORKER_URL : null;
     if (!url) return { status: 'error', found: null, share: null };
@@ -120,17 +122,22 @@ const BatchAR = {
     // ГФОТ · Страх. сумма · Страх. Премия (до ПК) · ПК · Премия с ПК ·
     // Дата рег. · Гос. участие.
     tbody.innerHTML = BatchAR.rows.map((r, i) => {
+      const okedErr = BatchAR._okedError(r);
       const cDiff = BatchAR._classDiff(r);
       const gDiff = BatchAR._govDiff(r);
-      const classDiff = cDiff ? ' batch-cell--diff' : '';
-      const govDiff = gDiff ? ' batch-cell--diff' : '';
-      const rowDiff = (cDiff || gDiff) ? ' class="batch-row--diff"' : '';
-      return `<tr data-idx="${i}"${rowDiff}>
+      // ОКЭД ошибочный → красный; класс: красный, если из-за ошибочного ОКЭД,
+      // иначе жёлтый (мягкое расхождение); гос. участие при расхождении → красный.
+      const okedCls = okedErr ? ' batch-cell--err' : '';
+      const classCls = cDiff ? (okedErr ? ' batch-cell--err' : ' batch-cell--warn') : '';
+      const govCls = gDiff ? ' batch-cell--err' : '';
+      const level = BatchAR._rowLevel(r);
+      const rowCls = level ? ` class="batch-row--${level}"` : '';
+      return `<tr data-idx="${i}"${rowCls}>
         <td class="batch-c-num">${i + 1}</td>
         <td class="batch-c-bin">${r.bin}</td>
         <td class="batch-c-name" title="${ARForm._esc(r.insurerName)}">${ARForm._esc(r.insurerName)}</td>
-        <td class="batch-c-oked">${BatchAR._okedCell(r)}</td>
-        <td class="batch-c-class${classDiff}">${BatchAR._classCell(r)}</td>
+        <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
+        <td class="batch-c-class${classCls}">${BatchAR._classCell(r)}</td>
         <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.insuranceSum)}</td>
@@ -138,7 +145,7 @@ const BatchAR = {
         <td class="batch-c-center">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
-        <td class="batch-c-gov${govDiff}">${BatchAR._govCell(r)}</td>
+        <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
       </tr>`;
     }).join('');
   },
@@ -151,17 +158,53 @@ const BatchAR = {
     return `<span class="${cls}" title="${title}">${v}</span>`;
   },
 
-  // Расхождение класса: вычисленный по ОКЭД ≠ класс из выгрузки.
+  // Нормализованный ОКЭД — только цифры (устойчиво к точкам/пробелам/суффиксам).
+  _normOked(x) {
+    const m = String(x == null ? '' : x).match(/\d{3,}/);
+    return m ? m[0] : '';
+  },
+
+  // Подтверждён ли ОКЭД из выгрузки по stat.gov.kz?
+  //   null  — проверить нельзя (statgov не дал кодов / нет кода в выгрузке);
+  //   true  — код есть среди ОКЭД компании;
+  //   false — кода компании НЕТ → ОКЭД в выгрузке ошибочный.
+  _okedConfirmed(r) {
+    const codes = BatchAR._statgovOkeds(r).map(BatchAR._normOked).filter(Boolean);
+    if (!codes.length) return null;
+    const our = BatchAR._normOked(r.oked);
+    if (!our) return null;
+    return codes.includes(our);
+  },
+
+  // ОКЭД ошибочный (КРАСНЫЙ): stat.gov.kz дал коды, но кода из выгрузки среди
+  // них нет → класс риска, посчитанный по нему, тоже ошибочный → точно ошибка.
+  _okedError(r) {
+    return BatchAR._okedConfirmed(r) === false;
+  },
+
+  // Расхождение класса: вычисленный по ОКЭД (макс.) ≠ класс из выгрузки.
   _classDiff(r) {
     const comp = BatchAR._computedClass(r);
     return comp != null && String(comp) !== String(r.riskClass || '').trim();
   },
 
-  // Расхождение гос. участия: вывод e-Qazyna (найден/не найден) ≠ выгрузка.
+  // Расхождение гос. участия (КРАСНЫЙ): вывод e-Qazyna (найден/не найден) ≠ выгрузка.
   _govDiff(r) {
     const eg = r.egov;
     if (!eg || eg.status !== 'done' || eg.found == null) return false;
     return eg.found !== !!r.govParticipation;
+  },
+
+  // Уровень подсветки строки:
+  //   'err'  (красный) — точная ошибка данных: ошибочный ОКЭД (→ ошибочный класс)
+  //                      или расхождение гос. участия;
+  //   'warn' (жёлтый)  — мягкое расхождение класса: ОКЭД подтверждён, но класс
+  //                      не совпал (у компании несколько ОКЭД, выбран не тот);
+  //   null             — расхождений нет.
+  _rowLevel(r) {
+    if (BatchAR._okedError(r) || BatchAR._govDiff(r)) return 'err';
+    if (BatchAR._classDiff(r)) return 'warn';
+    return null;
   },
 
   // Все ОКЭД компании из stat.gov.kz (primary + secondary), без дублей.
@@ -206,6 +249,7 @@ const BatchAR = {
   },
 
   // ОКЭД: сверху — из выгрузки, снизу в скобках — из stat.gov.kz (все коды по порядку).
+  // Если кода из выгрузки нет среди ОКЭД компании — список снизу краснеет (ошибка).
   _okedCell(r) {
     const top = ARForm._esc(r.oked || '—');
     let bottom = '';
@@ -213,7 +257,13 @@ const BatchAR = {
       bottom = '<span class="batch-sub batch-sub--load">⏳ statgov…</span>';
     } else {
       const list = BatchAR._okedList(r);
-      if (list.length) bottom = `<span class="batch-sub">(${ARForm._esc(list.join(', '))})</span>`;
+      if (list.length) {
+        const err = BatchAR._okedError(r);
+        const title = err
+          ? 'ОКЭД из выгрузки не найден среди ОКЭД компании по stat.gov.kz — код ошибочный'
+          : 'ОКЭД компании по stat.gov.kz';
+        bottom = `<span class="batch-sub ${err ? 'batch-sub--err' : ''}" title="${title}">(${ARForm._esc(list.join(', '))})</span>`;
+      }
     }
     return `<div class="batch-stack"><span class="batch-stack-top batch-oked-code">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
@@ -230,7 +280,12 @@ const BatchAR = {
       if (list.length) {
         const classes = list.map(o => { const c = BatchAR._classOf(o); return c == null ? '?' : c; });
         const diff = BatchAR._classDiff(r);
-        bottom = `<span class="batch-sub ${diff ? 'batch-sub--diff' : ''}" title="${diff ? 'Макс. класс по ОКЭД не совпадает с выгрузкой' : 'классы по каждому ОКЭД'}">(${classes.join(', ')})</span>`;
+        const err = diff && BatchAR._okedError(r);
+        const subCls = err ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
+        const title = err
+          ? 'Класс ошибочный: ОКЭД из выгрузки отсутствует у компании по stat.gov.kz'
+          : (diff ? 'Макс. класс по ОКЭД не совпадает с выгрузкой — выбран не тот ОКЭД из нескольких' : 'классы по каждому ОКЭД');
+        bottom = `<span class="batch-sub ${subCls}" title="${title}">(${classes.join(', ')})</span>`;
       }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -310,7 +365,9 @@ const BatchAR = {
   },
 
   // Гос. участие: сверху — из выгрузки, снизу в скобках — вывод по e-Qazyna.
-  // По e-Qazyna: найден в реестре → «Да» (даже при доле 0%); не найден → «Нет».
+  // По e-Qazyna: найден в реестре → «Да», не найден → «Нет» (долю НЕ показываем).
+  // Подсветка — только при РАСХОЖДЕНИИ выгрузки и e-Qazyna (корректность данных),
+  // а не за само наличие гос. участия.
   _govCell(r) {
     const reg = !!r.govParticipation;
     const top = reg
@@ -325,12 +382,11 @@ const BatchAR = {
         bottom = '<span class="batch-sub" title="e-Qazyna: нет данных">(н/д)</span>';
       } else {
         const diff = eg.found !== reg; // расхождение выгрузки и e-Qazyna
-        const shareTxt = (eg.found && eg.share) ? ` · ${ARForm._esc(eg.share)}` : '';
         const verdict = eg.found ? 'Да' : 'Нет';
-        const title = eg.found
-          ? `e-Qazyna: найден в реестре гос. участия${eg.share ? ', доля ' + ARForm._esc(eg.share) : ''}`
-          : 'e-Qazyna: не найден';
-        bottom = `<span class="batch-sub ${diff ? 'batch-sub--diff' : ''}" title="${title}">(${verdict}${shareTxt})</span>`;
+        const title = diff
+          ? `Расхождение: в выгрузке «${reg ? 'Да' : 'Нет'}», по e-Qazyna «${verdict}»`
+          : (eg.found ? 'e-Qazyna: гос. участник (совпадает с выгрузкой)' : 'e-Qazyna: не гос. участник (совпадает с выгрузкой)');
+        bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${title}">(${verdict})</span>`;
       }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -351,12 +407,22 @@ const BatchAR = {
       nameCell.innerHTML = ARForm._esc(r.insurerName);
       nameCell.title = ARForm._esc(r.insurerName);
     }
-    // Подсветка расхождений: отдельные ячейки + вся строка красным.
+    // Подсветка расхождений: красный — точная ошибка (ошибочный ОКЭД/класс,
+    // расхождение гос. участия); жёлтый — мягкое расхождение класса.
+    const okedErr = BatchAR._okedError(r);
     const cDiff = BatchAR._classDiff(r);
     const gDiff = BatchAR._govDiff(r);
-    tr.querySelector('.batch-c-class')?.classList.toggle('batch-cell--diff', cDiff);
-    tr.querySelector('.batch-c-gov')?.classList.toggle('batch-cell--diff', gDiff);
-    tr.classList.toggle('batch-row--diff', cDiff || gDiff);
+    const okedCell = tr.querySelector('.batch-c-oked');
+    if (okedCell) okedCell.classList.toggle('batch-cell--err', okedErr);
+    const classCell = tr.querySelector('.batch-c-class');
+    if (classCell) {
+      classCell.classList.toggle('batch-cell--err', cDiff && okedErr);
+      classCell.classList.toggle('batch-cell--warn', cDiff && !okedErr);
+    }
+    tr.querySelector('.batch-c-gov')?.classList.toggle('batch-cell--err', gDiff);
+    const level = BatchAR._rowLevel(r);
+    tr.classList.toggle('batch-row--err', level === 'err');
+    tr.classList.toggle('batch-row--warn', level === 'warn');
   },
 
   // ===== Проверка БИНов через stat.gov.kz =====

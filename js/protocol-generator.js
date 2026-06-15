@@ -74,6 +74,13 @@ const ProtocolGenerator = {
     const companyName = Utils.formatCompanyName(data.insurerName);
     const docNumber = data.docNumber || '13';
 
+    // Решение по риску из блока «Решение по риску» (ручной выбор или авто).
+    // Финальная формулировка «Принято РЕШЕНИЕ» должна идти именно из него —
+    // иначе протокол расходится с принятым решением (стандарт/со скидкой/откл.).
+    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
+    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
+    const conditionText = Utils.acceptanceConditionText(verdict, autoDecision);
+
     // Page width A4 - 2×1134 twips margins = 9638 twips usable
     const COL_TOTAL = 9638;
 
@@ -192,12 +199,25 @@ const ProtocolGenerator = {
     paragraphs.push(emptyP());
 
     // === Принято РЕШЕНИЕ — БЕЗ красной строки ===
+    // Формулировка зависит от решения по риску (verdict):
+    //   принятие → «заключить договор … <условия>, в соответствии с Заключением…»
+    //   отклонение → «отказать в заключении договора … в связи со степенью риска.»
+    //   отложение → «отложить заключение договора … на определенный срок.»
+    const contractClause =
+      `по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}`;
+    let decisionText;
+    if (verdict === 'reject') {
+      decisionText = `отказать в заключении договора ${contractClause} в связи со степенью риска.`;
+    } else if (verdict === 'defer') {
+      decisionText = `отложить заключение договора ${contractClause} на определенный срок.`;
+    } else {
+      decisionText =
+        `заключить договор ${contractClause} ${conditionText}, ` +
+        `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
+    }
     paragraphs.push(p([
       trB('Принято РЕШЕНИЕ: '),
-      tr(
-        `заключить договор по обязательному страхованию работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, ` +
-        `в соответствии с Заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`
-      ),
+      tr(decisionText),
     ]));
 
     paragraphs.push(emptyPF());

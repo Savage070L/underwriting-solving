@@ -2568,14 +2568,21 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-c-class .batch-stack,
 .batch-c-oked .batch-stack { align-items: center; }
 
-/* Подсветка ячеек с расхождением (класс из выгрузки ≠ вычисленный; гос. участие
-   из выгрузки ≠ e-Qazyna) — чтобы поймать возможную ошибку в выгрузке. */
-.batch-cell--diff { background: #fffbeb !important; box-shadow: inset 3px 0 0 #f59e0b; }
-.batch-table tbody tr:hover .batch-cell--diff { background: #fef9e7 !important; }
+/* Подсветка расхождений — два уровня:
+   • КРАСНЫЙ (--err): точная ошибка данных — ОКЭД из выгрузки отсутствует среди
+     ОКЭД компании (→ ошибочный класс) либо расхождение гос. участия с e-Qazyna.
+   • ЖЁЛТЫЙ (--warn): мягкое расхождение класса — ОКЭД у компании есть, но класс
+     не совпал (у компании несколько ОКЭД, выбран не тот). */
+.batch-cell--warn { background: #fffbeb !important; box-shadow: inset 3px 0 0 #f59e0b; }
+.batch-cell--err  { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #ef4444; }
+.batch-table tbody tr:hover .batch-cell--warn { background: #fef9e7 !important; }
+.batch-table tbody tr:hover .batch-cell--err  { background: #fee2e2 !important; }
 
-/* Вся строка подсвечивается красным, если есть хоть одно расхождение. */
-.batch-row--diff > td { background: #fef2f2; }
-.batch-table tbody tr.batch-row--diff:hover > td { background: #fee2e2; }
+/* Вся строка: жёлтая — мягкое расхождение класса, красная — точная ошибка. */
+.batch-row--warn > td { background: #fffbeb; }
+.batch-table tbody tr.batch-row--warn:hover > td { background: #fef9e7; }
+.batch-row--err > td { background: #fef2f2; }
+.batch-table tbody tr.batch-row--err:hover > td { background: #fee2e2; }
 
 /* Предупреждение «моложе N лет» — под датой регистрации. */
 .batch-young { color: #b45309; font-weight: 700; white-space: nowrap; }
@@ -2596,7 +2603,8 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-stack-bot { margin-top: 1px; }
 .batch-sub { font-size: 0.68rem; color: #94a3b8; white-space: normal; }
 .batch-sub--load { color: #b45309; }
-.batch-sub--diff { color: #b45309; font-weight: 700; }
+.batch-sub--warn { color: #b45309; font-weight: 700; }
+.batch-sub--err { color: #b91c1c; font-weight: 700; }
 .batch-c-class .batch-stack { align-items: center; }
 
 /* ОКЭД */
@@ -2619,16 +2627,9 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-reg { font-variant-numeric: tabular-nums; color: #1f2937; }
 .batch-reg--young { color: #b91c1c; font-weight: 700; }
 
-/* Гос. участие */
-.batch-gov-yes {
-  display: inline-block;
-  padding: 1px 9px;
-  border-radius: 100px;
-  background: #fef3c7;
-  color: #92400e;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
+/* Гос. участие из выгрузки — нейтральный текст, без выделения: само наличие
+   гос. участия не ошибка. Подсвечиваем (красным) только РАСХОЖДЕНИЕ с e-Qazyna. */
+.batch-gov-yes { color: #1f2937; font-weight: 600; }
 .batch-gov-no { color: #cbd5e1; }
 
 .batch-alert {

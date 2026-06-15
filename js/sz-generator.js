@@ -34,6 +34,14 @@ const SZGenerator = {
     const companyName = Utils.formatCompanyName(data.insurerName);
     const docNumber = data.docNumber || '—';
 
+    // Решение по риску из блока «Решение по риску» (ручной выбор или авто).
+    // Проект решения и условия в СЗ должны идти именно из него — иначе записка
+    // расходится с принятым решением (стандарт / со скидкой / отклонение).
+    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
+    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
+    const conditionText = Utils.acceptanceConditionText(verdict, autoDecision);
+    const verdictLabel = Utils.VERDICT_LABELS[verdict] || Utils.VERDICT_LABELS.accept_standard;
+
     // Recipient block
     const isPravlenie = (mode === 'pravlenie');
     const recipientRole = isPravlenie
@@ -51,11 +59,27 @@ const SZGenerator = {
           ? 'О заключении с аффилированным лицом договора ОСРНС'
           : 'О заключении договора ОСРНС');
 
-    const projectDecision = isPravlenie
-      ? (isAff
-          ? `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с аффилированным лицом с компанией – ${companyName}.`
-          : `Рассмотреть и утвердить Правлением заключение договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей сделки с компанией – ${companyName}.`)
-      : `Заключить договор обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей с ${companyName}, в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
+    // Проект решения зависит от решения по риску (verdict). Условия принятия
+    // (стандарт / со скидкой / с повышением) подставляются из conditionText.
+    const ctrGen = 'договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
+    const ctrAcc = 'договор обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
+    const counterpartyPravl = isAff
+      ? `с аффилированным лицом с компанией – ${companyName}`
+      : `сделки с компанией – ${companyName}`;
+    let projectDecision;
+    if (verdict === 'reject') {
+      projectDecision = isPravlenie
+        ? `Отказать в заключении ${ctrGen} ${counterpartyPravl} в связи со степенью риска.`
+        : `Отказать в заключении ${ctrGen} с ${companyName} в связи со степенью риска.`;
+    } else if (verdict === 'defer') {
+      projectDecision = isPravlenie
+        ? `Отложить заключение ${ctrGen} ${counterpartyPravl} на определенный срок.`
+        : `Отложить заключение ${ctrGen} с ${companyName} на определенный срок.`;
+    } else {
+      projectDecision = isPravlenie
+        ? `Рассмотреть и утвердить Правлением заключение ${ctrGen} ${counterpartyPravl} ${conditionText}.`
+        : `Заключить ${ctrAcc} с ${companyName} ${conditionText}, в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
+    }
 
     const approverRole = isPravlenie ? Utils.UPRAV_DIR_ROLE : Utils.PRAVLENIE_CHAIR_ROLE;
     const approverName = isPravlenie ? Utils.UPRAV_DIR_NAME : Utils.PRAVLENIE_CHAIR_NAME;
@@ -90,7 +114,12 @@ const SZGenerator = {
     const claimsLine = (data.claims && data.claims.detailedSummary && data.claims.detailedSummary !== 'НС не было')
       ? data.claims.detailedSummary
       : (data.claimsSummary || 'НС не было');
-    const premWithCoeff = data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase
+    // Премию «с учётом ПК» показываем ТОЛЬКО если решение действительно со
+    // скидкой/повышением (accept_adjusted с ненулевым coeffDown). При стандарте
+    // или отклонении — прочерк: иначе записка противоречила бы решению по риску
+    // (показывала бы скидку там, где принято «со стандартным коэффициентом»).
+    const useAdjusted = (verdict === 'accept_adjusted') && data.coeffDown != null && data.coeffDown !== 0;
+    const premWithCoeff = (useAdjusted && data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase)
       ? Utils.fmtMoney(data.premiumWithCoeff) : '-';
 
     const detailLine = (label, value) => justifyP([trB(`${label}: `), tr(String(value))]);
@@ -105,6 +134,7 @@ const SZGenerator = {
       detailLine('Оплата', data.paymentOrder || '—'),
       detailLine('Статистика НС за последние 3-х лет', claimsLine),
       detailLine('Организация с государственным участием', `– ${data.govParticipation || '—'}`),
+      detailLine('Решение по риску', `– ${verdictLabel}`),
     ];
 
     // ============ Build the main table ============

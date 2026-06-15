@@ -340,6 +340,25 @@ const Utils = {
     return verdict === 'accept_standard' || verdict === 'accept_adjusted';
   },
 
+  // Формулировка условий принятия риска для ФИНАЛЬНЫХ документов по лимитам
+  // (Протокол АС/Правления, Служебная записка). Единый источник правды, чтобы
+  // решение из блока «Решение по риску» одинаково звучало во всех документах:
+  //   accept_standard            → «со стандартным коэффициентом»
+  //   accept_adjusted (lowered)  → «с пониженным коэффициентом»
+  //   accept_adjusted (raised)   → «с повышенным коэффициентом»
+  //   accept_adjusted (неизв.)   → «с повышенным или пониженным коэффициентом»
+  //   авто-принятие              → по вычисленному decision
+  // verdict — из resolveVerdict(); decision — из determineDecision().
+  acceptanceConditionText(verdict, decision) {
+    if (verdict === 'accept_standard') return 'со стандартным коэффициентом';
+    if (verdict === 'accept_adjusted') {
+      return (decision === 'lowered' || decision === 'raised')
+        ? Utils.getDecisionText(decision)
+        : 'с повышенным или пониженным коэффициентом';
+    }
+    return Utils.getDecisionText(decision);
+  },
+
   // Get organ name in Russian (genitive case)
   getOrganName(organ) {
     switch (organ) {
