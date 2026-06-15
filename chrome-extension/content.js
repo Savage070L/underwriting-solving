@@ -64,4 +64,20 @@ window.addEventListener('message', (event) => {
       );
     });
   }
+
+  if (data.type === 'KYC_LOOKUP') {
+    chrome.runtime.sendMessage({ type: 'KYC_LOOKUP', bin: data.bin }, (response) => {
+      window.postMessage(
+        {
+          source: SOURCE_BRIDGE,
+          type: 'KYC_LOOKUP_RESULT',
+          requestId: data.requestId,
+          ok: !!(response && response.ok),
+          data: response && response.data,
+          error: response && response.error,
+        },
+        '*',
+      );
+    });
+  }
 });

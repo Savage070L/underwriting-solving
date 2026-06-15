@@ -2487,6 +2487,10 @@ const App = {
     }
     try {
       const data = await StatGovClient.lookup(bin);
+      // Для ИП (и части ТОО) поля «Юридический адрес» нет — берём «Местонахождение».
+      if (data && !data.error && !data.legalAddress) {
+        data.legalAddress = Utils.statgovLegalAddress(data);
+      }
       App.statgov = { ...data, loading: false };
     } catch (e) {
       App.statgov = { error: e.message, loading: false };

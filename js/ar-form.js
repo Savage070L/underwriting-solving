@@ -17,6 +17,7 @@ const ARForm = {
   ],
 
   UNDERWRITER: 'Джелкобаев Т.К.',
+  RISK_MANAGER: 'Осинцев Р.С.',
   RISK_TEXT: 'Обязательное страхование работника от несчастного случая при исполнении им трудовых (служебных) обязанностей',
   CLASS_TEXT: 'Страхование от несчастных случаев',
 
@@ -157,8 +158,13 @@ const ARForm = {
 
     // Данные
     const sg = row.statgov && !row.statgov.error ? row.statgov : null;
-    const name = (sg && sg.name) || row.insurerName || '';
-    const addr = (sg && sg.legalAddress) || '';
+    const kyc = row.kyc && !row.kyc.error && row.kyc.found !== false ? row.kyc : null;
+    const name = (sg && sg.name) || (kyc && kyc.name) || row.insurerName || '';
+    // Юр. адрес: stat.gov (вкл. «Местонахождение» для ИП) → fallback kyc.kz.
+    let addr = (typeof Utils !== 'undefined' && Utils.statgovLegalAddress)
+      ? Utils.statgovLegalAddress(sg)
+      : ((sg && sg.legalAddress) || '');
+    if (!addr && kyc && kyc.legalAddress) addr = String(kyc.legalAddress).trim();
     const nameCell = addr ? `${name}, ${addr}` : name;
     const docNo = row.contractNumber || '';
     const docDate = ARForm._dateRu(row.dateContract);
@@ -187,7 +193,7 @@ const ARForm = {
     rows.push(labelRow('Класс профессионального риска', 'соответствует'));
     rows.push(labelRow('Страховой тариф', 'соответствует'));
     rows.push(labelRow('Источник данных по статистике страховых случаев Страхователя', 'Единая Страховая База Данных'));
-    rows.push(labelRow('Риск-менеджер', 'ФИО / должность   _______________ Подпись'));
+    rows.push(labelRow('Риск-менеджер', `${ARForm.RISK_MANAGER}   _______________ Подпись`));
 
     // ===== СЕКЦИЯ 3: АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ =====
     rows.push(sectionRow('АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ', docNo, docDate));

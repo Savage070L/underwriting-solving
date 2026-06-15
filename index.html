@@ -224,6 +224,68 @@
       </div>
     </div>
 
+    <!-- ============ Массовая генерация АР из реестра ============ -->
+    <!-- Загрузка ежедневной выгрузки договоров (.xlsx) → заполненные .docx
+         «Андеррайтинговое решение» по каждой строке (форма «АРешение»).
+         Имена файлов «АР {БИН}.docx», пакетом в ZIP. Открыта по умолчанию. -->
+    <div class="section section-collapsible is-open" id="batch-section">
+      <div class="section-title section-title--clickable" onclick="App.toggleBatchSection(event)">
+        <span class="section-chevron" id="batch-chevron">▸</span>
+        Массовая генерация Рекомендации ДАиП (Андеррайтинговое решение)
+        <span class="badge" id="batch-badge">из выгрузки</span>
+        <button class="btn-clear" id="batch-clear" style="display:none" onclick="BatchAR.clear(); event.stopPropagation()">Очистить</button>
+      </div>
+      <div class="section-collapsible-body" id="batch-body">
+        <div class="upload-zone-main batch-upload" id="zone-batch" onclick="document.getElementById('batch-file-input').click()">
+          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg></span>
+          <div class="uz-label">Реестр договоров (.xlsx)</div>
+          <div class="uz-status" id="batch-status">Файл не загружен</div>
+          <input type="file" id="batch-file-input" accept=".xlsx,.xls" style="display:none" onchange="BatchAR.loadFile(this.files[0])">
+        </div>
+
+        <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th class="batch-c-num">#</th>
+                <th class="batch-c-bin">БИН</th>
+                <th class="batch-c-name">Страхователь</th>
+                <th class="batch-c-oked" title="Сверху — ОКЭД из выгрузки, снизу — из stat.gov.kz">ОКЭД</th>
+                <th class="batch-c-class" title="Сверху — класс из выгрузки, снизу — вычисленный по ОКЭД">Класс</th>
+                <th class="batch-c-num2">Кол-во<br>сотрудников</th>
+                <th class="batch-c-num2">ФОТ</th>
+                <th class="batch-c-num2">Страх. сумма</th>
+                <th class="batch-c-num2" title="Страховая премия до поправочного коэффициента">Страх. Премия</th>
+                <th class="batch-c-center" title="Поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой">ПК</th>
+                <th class="batch-c-num2">Премия с ПК</th>
+                <th class="batch-c-reg">Дата рег.</th>
+                <th class="batch-c-gov">Гос. участие</th>
+              </tr>
+            </thead>
+            <tbody id="batch-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Статус проверки stat.gov.kz — под таблицей. Генерация доступна только
+             после того, как все БИН успешно проверены (без подключения — недоступна). -->
+        <div class="batch-verify" id="batch-verify" style="display:none">
+          <span id="batch-verify-text"></span>
+          <button class="batch-verify-retry" id="batch-verify-retry" style="display:none" onclick="BatchAR.retryStatgov()">Повторить проверку</button>
+        </div>
+
+        <!-- Кнопка генерации — под таблицей. Активна только когда все БИН проверены. -->
+        <div class="batch-controls">
+          <button class="btn-generate batch-gen-all" id="batch-gen-all" onclick="BatchAR.generateAll(this)" disabled>
+            Сгенерировать Рекомендации АР
+          </button>
+        </div>
+        <div class="batch-progress" id="batch-progress" style="display:none">
+          <div class="batch-progress-track"><div class="batch-progress-bar" id="batch-progress-bar"></div></div>
+          <div class="batch-progress-text" id="batch-progress-text"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Per-case files -->
     <div class="section">
       <div class="section-title">
@@ -313,72 +375,6 @@
         <span class="ba-icon">🔄</span>
         <span class="ba-label">Обновить данные</span>
       </button>
-    </div>
-
-    <!-- ============ Массовая генерация АР из реестра ============ -->
-    <!-- Загрузка ежедневной выгрузки договоров (.xlsx) → заполненные PDF
-         «Андеррайтинговое решение» по каждой строке (форма «АРешение»).
-         Имена файлов «АР {БИН}.pdf», пакетом в ZIP. -->
-    <div class="section section-collapsible" id="batch-section">
-      <div class="section-title section-title--clickable" onclick="App.toggleBatchSection(event)">
-        <span class="section-chevron" id="batch-chevron">▸</span>
-        Массовая генерация АР (реестр)
-        <span class="badge" id="batch-badge">из выгрузки</span>
-        <button class="btn-clear" id="batch-clear" style="display:none" onclick="BatchAR.clear(); event.stopPropagation()">Очистить</button>
-      </div>
-      <div class="section-collapsible-body" id="batch-body">
-        <p class="batch-desc">
-          Загрузите ежедневную выгрузку договоров (Excel). Для каждого договора ОСНС будет
-          сформировано заполненное Андеррайтинговое решение в редактируемом Word (.docx,
-          имя «АР&nbsp;{БИН}.docx»), пакетом в ZIP. Данные берутся из выгрузки; по БИНу в фоне
-          подтягивается stat.gov.kz (официальное название, адрес, дата регистрации).
-        </p>
-
-        <div class="upload-zone-main batch-upload" id="zone-batch" onclick="document.getElementById('batch-file-input').click()">
-          <span class="uz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg></span>
-          <div class="uz-label">Реестр договоров (.xlsx)</div>
-          <div class="uz-status" id="batch-status">Файл не загружен</div>
-          <input type="file" id="batch-file-input" accept=".xlsx,.xls" style="display:none" onchange="BatchAR.loadFile(this.files[0])">
-        </div>
-
-        <!-- Статус проверки stat.gov.kz. Генерация доступна только после того,
-             как все БИН успешно проверены (без подключения — недоступна). -->
-        <div class="batch-verify" id="batch-verify" style="display:none">
-          <span id="batch-verify-text"></span>
-          <button class="batch-verify-retry" id="batch-verify-retry" style="display:none" onclick="BatchAR.retryStatgov()">Повторить проверку</button>
-        </div>
-        <!-- сводка по молодым компаниям -->
-        <div class="batch-alert-summary" id="batch-alert-summary" style="display:none"></div>
-
-        <div class="batch-controls">
-          <button class="btn-generate batch-gen-all" id="batch-gen-all" onclick="BatchAR.generateAll(this)" disabled>
-            Сгенерировать Рекомендации АР
-          </button>
-        </div>
-        <div class="batch-progress" id="batch-progress" style="display:none">
-          <div class="batch-progress-track"><div class="batch-progress-bar" id="batch-progress-bar"></div></div>
-          <div class="batch-progress-text" id="batch-progress-text"></div>
-        </div>
-
-        <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
-          <table class="batch-table">
-            <thead>
-              <tr>
-                <th class="batch-c-num">#</th>
-                <th class="batch-c-bin">БИН</th>
-                <th class="batch-c-name">Страхователь</th>
-                <th class="batch-c-center">Класс</th>
-                <th class="batch-c-num2">Страх. сумма</th>
-                <th class="batch-c-num2">Премия с ПК</th>
-                <th class="batch-c-center">Решение</th>
-                <th class="batch-c-sg">stat.gov.kz</th>
-                <th class="batch-c-act">Word</th>
-              </tr>
-            </thead>
-            <tbody id="batch-tbody"></tbody>
-          </table>
-        </div>
-      </div>
     </div>
 
     <!-- ============ Шаг 1: Параметры страхования ============ -->

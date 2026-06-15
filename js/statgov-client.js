@@ -127,6 +127,44 @@ const StatGovClient = {
       }, StatGovClient._pendingTimeoutMs);
     });
   },
+
+  // Лукап карточки компании через kyc.kz (мост KYC_LOOKUP). Без ЭЦП — обычный GET.
+  // Используется как fallback, когда stat.gov.kz не отдаёт дату регистрации/адрес.
+  async lookupKyc(bin) {
+    const cleanBin = String(bin || '').trim();
+    if (!/^\d{12}$/.test(cleanBin)) {
+      throw new Error('БИН должен содержать 12 цифр');
+    }
+    if (!StatGovClient._ready) {
+      const p = await StatGovClient.ping();
+      if (!p.ok) throw new Error('Расширение «Standard Life — мост к stat.gov.kz» не установлено или не активно');
+    }
+    const requestId = 'kyc-' + Math.random().toString(36).slice(2);
+    const timeoutMs = 20000; // kyc.kz — одна GET-страница ~250 КБ
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        const d = event.data;
+        if (!d || d.source !== StatGovClient.SOURCE_BRIDGE) return;
+        if (d.type !== 'KYC_LOOKUP_RESULT' || d.requestId !== requestId) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        if (d.ok) resolve(d.data);
+        else reject(new Error(d.error || 'Неизвестная ошибка моста (kyc)'));
+      };
+      window.addEventListener('message', handler);
+      window.postMessage(
+        { source: StatGovClient.SOURCE_APP, type: 'KYC_LOOKUP', requestId, bin: cleanBin },
+        '*',
+      );
+      setTimeout(() => {
+        if (done) return;
+        window.removeEventListener('message', handler);
+        reject(new Error('Таймаут запроса к kyc.kz (' + timeoutMs + ' мс)'));
+      }, timeoutMs);
+    });
+  },
 };
 
 document.addEventListener('DOMContentLoaded', () => StatGovClient.init());

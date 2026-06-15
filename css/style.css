@@ -68,7 +68,7 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   /* Layout */
-  --content-max: 1200px;
+  --content-max: 1560px;
 }
 
 /* ==========================================================================
@@ -2540,7 +2540,6 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   background: #f8fafc;
   color: #344054;
   font-weight: 700;
-  text-align: left;
   padding: 9px 10px;
   border-bottom: 1px solid #e2e8f0;
   white-space: nowrap;
@@ -2552,28 +2551,85 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   vertical-align: middle;
 }
 .batch-table tbody tr:hover { background: #f8fafc; }
-.batch-c-num  { width: 36px; color: #98a2b3; text-align: right; }
-.batch-c-bin  { width: 116px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.batch-c-name { min-width: 220px; max-width: 320px; }
-.batch-c-name { overflow: hidden; text-overflow: ellipsis; }
-.batch-c-center { text-align: center; white-space: nowrap; }
-.batch-c-num2 { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.batch-c-sg   { width: 130px; white-space: nowrap; }
-.batch-c-act  { width: 56px; text-align: center; }
+/* Выравнивание задаётся классом колонки и применяется к ЗАГОЛОВКУ и значению
+   одинаково — чтобы название столбца и его значения всегда совпадали. */
+/* БИН, Страхователь, Дата рег. — слева; все остальные столбцы — по центру
+   (и заголовок, и значения, чтобы они совпадали). */
+.batch-c-num  { width: 36px; color: #98a2b3; text-align: center; vertical-align: top; }
+.batch-c-bin  { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+/* Страхователь — вдвое уже прежнего (было 200–340px); длинные имена обрезаются. */
+.batch-c-name { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+.batch-c-oked { width: 110px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-class { width: 64px; text-align: center; white-space: nowrap; vertical-align: top; }
+.batch-c-num2 { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-reg  { width: 116px; text-align: left; white-space: nowrap; vertical-align: top; }
+.batch-c-gov  { width: 104px; text-align: center; white-space: nowrap; vertical-align: top; }
+.batch-c-gov .batch-stack,
+.batch-c-class .batch-stack,
+.batch-c-oked .batch-stack { align-items: center; }
+
+/* Подсветка ячеек с расхождением (класс из выгрузки ≠ вычисленный; гос. участие
+   из выгрузки ≠ e-Qazyna) — чтобы поймать возможную ошибку в выгрузке. */
+.batch-cell--diff { background: #fffbeb !important; box-shadow: inset 3px 0 0 #f59e0b; }
+.batch-table tbody tr:hover .batch-cell--diff { background: #fef9e7 !important; }
+
+/* Вся строка подсвечивается красным, если есть хоть одно расхождение. */
+.batch-row--diff > td { background: #fef2f2; }
+.batch-table tbody tr.batch-row--diff:hover > td { background: #fee2e2; }
+
+/* Предупреждение «моложе N лет» — под датой регистрации. */
+.batch-young { color: #b45309; font-weight: 700; white-space: nowrap; }
+/* Метка источника даты (statsnet) */
+.batch-regsrc {
+  display: inline-block; margin-left: 4px; padding: 0 4px;
+  font-size: 0.6rem; font-weight: 700; color: #7c3aed;
+  background: #f3e8ff; border-radius: 4px; vertical-align: middle; cursor: help;
+}
+.batch-activity { color: #475467; }
 
 .batch-row--alert { background: #fef2f2 !important; }
 .batch-row--alert:hover { background: #fee2e2 !important; }
 
-.batch-tag {
+/* Двухстрочная ячейка: значение из выгрузки сверху, вычисленное/statgov снизу */
+.batch-stack { display: flex; flex-direction: column; line-height: 1.25; }
+.batch-stack-top { font-weight: 600; color: #1f2937; }
+.batch-stack-bot { margin-top: 1px; }
+.batch-sub { font-size: 0.68rem; color: #94a3b8; white-space: normal; }
+.batch-sub--load { color: #b45309; }
+.batch-sub--diff { color: #b45309; font-weight: 700; }
+.batch-c-class .batch-stack { align-items: center; }
+
+/* ОКЭД */
+.batch-oked-code { font-weight: 600; color: #1f2937; }
+
+/* ПК / решение (1 или 0,9) */
+.batch-pk {
   display: inline-block;
+  min-width: 34px;
   padding: 2px 8px;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.batch-pk--standard { background: #ecfdf5; color: #047857; }
+.batch-pk--discount { background: #eff6ff; color: #1d4ed8; }
+
+/* Дата регистрации */
+.batch-reg { font-variant-numeric: tabular-nums; color: #1f2937; }
+.batch-reg--young { color: #b91c1c; font-weight: 700; }
+
+/* Гос. участие */
+.batch-gov-yes {
+  display: inline-block;
+  padding: 1px 9px;
   border-radius: 100px;
+  background: #fef3c7;
+  color: #92400e;
   font-size: 0.72rem;
   font-weight: 700;
-  white-space: nowrap;
 }
-.batch-tag--standard { background: #ecfdf5; color: #047857; }
-.batch-tag--discount { background: #eff6ff; color: #1d4ed8; }
+.batch-gov-no { color: #cbd5e1; }
 
 .batch-alert {
   display: inline-block;
@@ -2592,18 +2648,3 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-sg--load { color: #b45309; }
 .batch-sg--ok   { color: #047857; }
 .batch-sg--err  { color: #b42318; }
-
-.batch-pdf-btn {
-  background: #4361ee;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 5px 11px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: inherit;
-  transition: opacity 0.15s, transform 0.15s;
-}
-.batch-pdf-btn:hover { opacity: 0.9; transform: translateY(-1px); }
-.batch-pdf-btn:disabled { opacity: 0.6; cursor: wait; transform: none; }

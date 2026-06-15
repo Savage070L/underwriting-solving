@@ -289,6 +289,230 @@ async function fetchStatsnetIndustry(bin) {
   }
 }
 
+// ============================================================
+// kyc.kz — базовая карточка компании из window.__NUXT__ (Nuxt SSR).
+// Без авторизации/ЭЦП/cookies: GET страницы → парсинг __NUXT__ строками.
+// __NUXT__ — это минифицированный IIFE: (function(a,b,..){return {...}}(args)).
+// Часть значений в объекте — ссылки на параметры (a,b,..), которые подставляются
+// хвостовыми аргументами вызова. eval/new Function в MV3 запрещены, поэтому
+// разбираем сбалансированными скобками + резолвим плейсхолдеры из карты args.
+// ============================================================
+const KYC_URL = 'https://kyc.kz/search/company/';
+
+async function fetchKyc(bin) {
+  if (!/^\d{12}$/.test(bin)) throw new Error('Invalid BIN — must be 12 digits');
+  const resp = await fetch(KYC_URL + bin, {
+    method: 'GET',
+    credentials: 'omit',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+  if (!resp.ok) throw new Error('kyc.kz вернул ' + resp.status);
+  const html = await resp.text();
+  return parseKycNuxt(html, bin);
+}
+
+// Индекс парной закрывающей скобки для открывающей по openIdx (с учётом строк).
+function kycMatchBracket(s, openIdx) {
+  const open = s[openIdx];
+  const close = open === '{' ? '}' : open === '(' ? ')' : open === '[' ? ']' : null;
+  if (!close) return -1;
+  let depth = 0, inStr = false, q = '', esc = false;
+  for (let i = openIdx; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === q) inStr = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = true; q = ch; continue; }
+    if (ch === open) depth++;
+    else if (ch === close) { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+// Разбить по запятым верхнего уровня (с учётом строк и вложенных скобок).
+function kycSplitTopLevel(s) {
+  const parts = [];
+  let depth = 0, inStr = false, q = '', esc = false, start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === q) inStr = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = true; q = ch; continue; }
+    if (ch === '{' || ch === '[' || ch === '(') depth++;
+    else if (ch === '}' || ch === ']' || ch === ')') depth--;
+    else if (ch === ',' && depth === 0) { parts.push(s.slice(start, i)); start = i + 1; }
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+// Разделить «key:value» по первому двоеточию верхнего уровня.
+function kycSplitKeyVal(seg) {
+  let depth = 0, inStr = false, q = '', esc = false;
+  for (let i = 0; i < seg.length; i++) {
+    const ch = seg[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === q) inStr = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = true; q = ch; continue; }
+    if (ch === '{' || ch === '[' || ch === '(') depth++;
+    else if (ch === '}' || ch === ']' || ch === ')') depth--;
+    else if (ch === ':' && depth === 0) return [seg.slice(0, i).trim(), seg.slice(i + 1).trim()];
+  }
+  return [seg.trim(), ''];
+}
+
+// Резолв значения: литерал (строка/число/bool/null) или плейсхолдер (a,b,..→subMap).
+function kycResolveValue(raw, subMap) {
+  if (raw == null) return null;
+  raw = String(raw).trim();
+  if (raw === '') return null;
+  const first = raw[0], last = raw[raw.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    try {
+      if (first === "'") {
+        const inner = raw.slice(1, -1).replace(/\\'/g, "'").replace(/"/g, '\\"');
+        return JSON.parse('"' + inner + '"');
+      }
+      return JSON.parse(raw); // двойные кавычки ≈ JSON: декодирует <, / и т.п.
+    } catch (e) {
+      return raw.slice(1, -1);
+    }
+  }
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null' || raw === 'undefined' || raw === 'void 0') return null;
+  if (/^[A-Za-z_$][\w$]*$/.test(raw)) {
+    return (subMap && Object.prototype.hasOwnProperty.call(subMap, raw)) ? subMap[raw] : null;
+  }
+  return raw; // вложенный объект/массив/выражение — нам не нужно
+}
+
+function kycStrOrNull(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+
+// Запасное имя из <title> / og:title: «<Название>, БИН <бин> …».
+function kycNameFromMeta(html) {
+  const m = html.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+         || html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (!m) return null;
+  let t = m[1].trim().replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  t = t.replace(/[,—-]?\s*(БИН|ИИН)\b.*$/i, '').trim();
+  return t || null;
+}
+
+function parseKycNuxt(html, bin) {
+  const notFound = () => ({ bin, found: false, _source: 'kyc.kz', _fetchedAt: new Date().toISOString() });
+  if (!html) return notFound();
+  try {
+    const nx = html.match(/window\.__NUXT__\s*=\s*([\s\S]*?)<\/script>/);
+    const nameFallback = kycNameFromMeta(html);
+    if (!nx) return notFound();
+    const expr = nx[1];
+
+    // Параметры IIFE и хвостовые аргументы → карта подстановки плейсхолдеров.
+    const subMap = {};
+    const pm = expr.match(/function\s*\(([^)]*)\)/);
+    const params = pm ? pm[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (params.length) {
+      const bodyOpen = expr.indexOf('{', pm.index + pm[0].length);
+      const bodyClose = bodyOpen >= 0 ? kycMatchBracket(expr, bodyOpen) : -1;
+      if (bodyClose >= 0) {
+        const callOpen = expr.indexOf('(', bodyClose);
+        const callClose = callOpen >= 0 ? kycMatchBracket(expr, callOpen) : -1;
+        if (callClose >= 0) {
+          const argVals = kycSplitTopLevel(expr.slice(callOpen + 1, callClose)).map(a => kycResolveValue(a, {}));
+          params.forEach((p, idx) => { subMap[p] = argVals[idx]; });
+        }
+      }
+    }
+
+    // Объект result внутри data:[{result:{...}}].
+    let resultOpen = -1;
+    const dataM = expr.match(/data\s*:\s*\[/);
+    if (dataM) {
+      const rm = expr.slice(dataM.index).match(/result\s*:\s*\{/);
+      if (rm) resultOpen = expr.indexOf('{', dataM.index + rm.index + rm[0].length - 1);
+    }
+    if (resultOpen < 0) {
+      const rm = expr.match(/result\s*:\s*\{/);
+      if (rm) resultOpen = expr.indexOf('{', rm.index + rm[0].length - 1);
+    }
+    if (resultOpen < 0) return notFound(); // нет карточки → не найдено
+
+    const resultClose = kycMatchBracket(expr, resultOpen);
+    if (resultClose < 0) return notFound();
+    const body = expr.slice(resultOpen + 1, resultClose);
+
+    const fields = {};
+    for (const seg of kycSplitTopLevel(body)) {
+      const [k, v] = kycSplitKeyVal(seg);
+      if (!k) continue;
+      fields[k.replace(/^["']|["']$/g, '')] = v;
+    }
+    const rv = (k) => kycResolveValue(fields[k], subMap);
+    const resolved = {};
+    for (const k in fields) resolved[k] = kycResolveValue(fields[k], subMap);
+
+    let name = kycStrOrNull(rv('title')) || kycStrOrNull(rv('short_name_ru'));
+    if (name === '-') name = null;                 // плейсхолдер пустой карточки
+    name = name || nameFallback || null;
+
+    const okedPrimaryCode = kycStrOrNull(rv('okat'));   // okat в kyc.kz — это ОКЭД
+    const legalAddress = kycStrOrNull(rv('official_address'));
+    const registrationDate = kycStrOrNull(rv('dt_registration'));
+    const headFullname = kycStrOrNull(rv('chief_name'));
+
+    // «Не найдено»: kyc.kz отдаёт 200 даже для несуществующего БИН, но с пустой
+    // карточкой (id:0, title:"-", остальные поля null). Считаем найденным, если
+    // есть реальный id (>0) либо имя + хотя бы одно поле карточки.
+    const idNum = Number(rv('id')) || 0;
+    const isFound = idNum > 0 || (!!name && (!!okedPrimaryCode || !!legalAddress || !!registrationDate || !!headFullname));
+    if (!isFound) return notFound();
+
+    return {
+      bin: kycStrOrNull(rv('bin')) || bin,
+      name,
+      isIndividual: rv('is_individual') === true,
+      okedPrimaryCode,
+      okedPrimaryName: kycStrOrNull(rv('main_activity')),
+      okedSecondary: kycStrOrNull(rv('okat_secondary')),
+      kato: kycStrOrNull(rv('kato')),
+      krpCode: kycStrOrNull(rv('code_krp_full')),
+      krpName: kycStrOrNull(rv('title_krp')),
+      registrationDate,
+      headFullname,
+      legalAddress,
+      status: kycStrOrNull(rv('reorg_status')),
+      isActive: rv('is_active') === true,
+      payNds: rv('pay_nds'),
+      found: true,
+      _source: 'kyc.kz',
+      _fetchedAt: new Date().toISOString(),
+      _raw: resolved,
+    };
+  } catch (e) {
+    return Object.assign(notFound(), { _error: String(e && e.message || e) });
+  }
+}
+
 // === Message handler: получает запросы из content script ===
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'STATGOV_LOOKUP' && typeof msg.bin === 'string') {
@@ -299,6 +523,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'STATSNET_LOOKUP' && typeof msg.bin === 'string') {
     fetchStatsnetIndustry(msg.bin.trim())
+      .then(data => sendResponse({ ok: true, data }))
+      .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
+    return true;
+  }
+  if (msg && msg.type === 'KYC_LOOKUP' && typeof msg.bin === 'string') {
+    fetchKyc(msg.bin.trim())
       .then(data => sendResponse({ ok: true, data }))
       .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
     return true;

@@ -489,6 +489,21 @@ const Utils = {
     return age < 3;
   },
 
+  // Юридический адрес из statgov-объекта. Для ИП (и части ТОО) поля
+  // «Юридический адрес» в stat.gov.kz нет, но есть «Местонахождение …» —
+  // это тот же адрес. Если legalAddress пуст, берём его из сырых пар (_raw).
+  // Возвращает строку (или '').
+  statgovLegalAddress(sg) {
+    if (!sg) return '';
+    if (sg.legalAddress) return String(sg.legalAddress).trim();
+    const raw = Array.isArray(sg._raw) ? sg._raw : null;
+    if (raw) {
+      const hit = raw.find(p => Array.isArray(p) && /местонахожд/i.test(String(p[0] || '')));
+      if (hit && hit[1] != null && String(hit[1]).trim()) return String(hit[1]).trim();
+    }
+    return '';
+  },
+
   // Format company name properly: "Жасыл ел тараз тоо" → "ТОО «Жасыл Ел-Тараз»"
   formatCompanyName(raw) {
     if (!raw) return '';
