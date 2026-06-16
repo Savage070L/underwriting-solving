@@ -15,6 +15,7 @@ const BatchAR = {
   _busy: false,
   _statgovRunning: false,
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
+  _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
 
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
   CDN: {
@@ -53,8 +54,9 @@ const BatchAR = {
     try {
       if (statusEl) statusEl.textContent = 'Чтение файла…';
       const buf = await file.arrayBuffer();
-      const { rows, total, skipped } = BatchReader.parse(buf);
+      const { rows, total, skipped, header } = BatchReader.parse(buf);
       BatchAR.rows = rows;
+      BatchAR._rawHeader = header || [];   // исходный заголовок (для выгрузки превышений)
       const zone = document.getElementById('zone-batch');
       if (zone) zone.classList.add('loaded');
       if (statusEl) {
@@ -111,13 +113,16 @@ const BatchAR = {
   renderTable() {
     const wrap = document.getElementById('batch-table-wrap');
     const tbody = document.getElementById('batch-tbody');
+    const toolbar = document.getElementById('batch-toolbar');
     if (!wrap || !tbody) return;
     if (!BatchAR.rows.length) {
       wrap.style.display = 'none';
+      if (toolbar) toolbar.style.display = 'none';
       tbody.innerHTML = '';
       return;
     }
     wrap.style.display = 'block';
+    if (toolbar) toolbar.style.display = '';
     // Порядок столбцов: # · БИН · Страхователь · ОКЭД · Класс · Кол-во сотр. ·
     // ГФОТ · Страх. сумма · Страх. Премия (до ПК) · ПК · Премия с ПК ·
     // Дата рег. · Гос. участие.
@@ -130,32 +135,113 @@ const BatchAR = {
       const okedCls = okedErr ? ' batch-cell--err' : '';
       const classCls = cDiff ? (okedErr ? ' batch-cell--err' : ' batch-cell--warn') : '';
       const govCls = gDiff ? ' batch-cell--err' : '';
+      // Молодая компания (< порога) со скидкой → ПК подсвечиваем красным.
+      const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
+      // СС/премия: жёлтым, если расходятся с расчётом по методологии.
+      const sumCls = BatchAR._sumDiff(r) ? ' batch-cell--warn' : '';
+      const premCls = BatchAR._premiumDiff(r) ? ' batch-cell--warn' : '';
       const level = BatchAR._rowLevel(r);
       const rowCls = level ? ` class="batch-row--${level}"` : '';
+      const nm = ARForm._effName(r);
       return `<tr data-idx="${i}"${rowCls}>
         <td class="batch-c-num">${i + 1}</td>
+        <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
         <td class="batch-c-bin">${r.bin}</td>
-        <td class="batch-c-name" title="${ARForm._esc(r.insurerName)}">${ARForm._esc(r.insurerName)}</td>
+        <td class="batch-c-name" title="${ARForm._esc(nm)}">${ARForm._esc(nm)}</td>
         <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
         <td class="batch-c-class${classCls}">${BatchAR._classCell(r)}</td>
         <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
-        <td class="batch-c-num2">${BatchAR._fmtMoney(r.insuranceSum)}</td>
-        <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumBase)}</td>
-        <td class="batch-c-center">${BatchAR._pkCell(r)}</td>
+        <td class="batch-c-num2 batch-c-sum${sumCls}">${BatchAR._sumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-prem${premCls}">${BatchAR._premiumCellHtml(r)}</td>
+        <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
+        <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
       </tr>`;
     }).join('');
+    BatchAR._tableVersion++;
   },
 
   // ПК: 1 (стандарт, зелёный) или 0,9 (со скидкой, синий).
   _pkCell(r) {
     const v = String(r.coeff).replace('.', ',');
     const cls = r.decision === 'discount' ? 'batch-pk batch-pk--discount' : 'batch-pk batch-pk--standard';
-    const title = r.decision === 'discount' ? 'Принятие с понижающим коэффициентом' : 'Принятие со стандартным тарифом';
+    const title = BatchAR._pkYoungError(r)
+      ? 'Скидка при компании моложе 3 лет — не должна применяться'
+      : (r.decision === 'discount' ? 'Принятие с понижающим коэффициентом' : 'Принятие со стандартным тарифом');
     return `<span class="${cls}" title="${title}">${v}</span>`;
+  },
+
+  // Молодая компания (моложе порога) со скидкой (ПК<1): скидка применяться не
+  // должна → ошибка, подсвечиваем ячейку ПК (и строку) красным.
+  _pkYoungError(r) {
+    return !!r.youngAlert && r.coeff != null && r.coeff < 1;
+  },
+
+  // ===== Проверка страховой суммы и премии (методология) =====
+  // Месячный ФОТ = ФОТ/12; Ср.ЗП = месячный ФОТ / кол-во работников;
+  // Премия = Ср.ЗП, но не меньше 85 000; СС = премия / тариф (тариф — по классу).
+  _minPremium() {
+    return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minAvgSalary') || 85000) : 85000;
+  },
+  _avgSalaryMonthly(r) {
+    return (r.gfot > 0 && r.workers > 0) ? (r.gfot / 12 / r.workers) : null;
+  },
+  // Ожидаемая премия = max(Ср.ЗП мес., 85 000).
+  _expectedPremium(r) {
+    const a = BatchAR._avgSalaryMonthly(r);
+    return a != null ? Math.max(a, BatchAR._minPremium()) : null;
+  },
+  // Тариф для проверки: по вычисленному классу из справочника «Поправочные
+  // коэффициенты»; если справочника нет — тариф из выгрузки (премия/СС).
+  _checkTariff(r) {
+    const cls = BatchAR._computedClass(r);
+    const c = (cls != null) ? cls : (parseInt(r.riskClass, 10) || 0);
+    const rr = (typeof App !== 'undefined' && App.refData && App.refData.popravka) ? App.refData.popravka.riskRates : null;
+    if (rr && c) { const t = rr.get(c); if (Number.isFinite(t) && t > 0) return t; }
+    return (r.tariff && r.tariff > 0) ? r.tariff : null;
+  },
+  // Ожидаемая СС = ожидаемая премия / тариф (до тиынов, не округляем до целого).
+  _expectedSum(r) {
+    const p = BatchAR._expectedPremium(r), t = BatchAR._checkTariff(r);
+    return (p != null && t) ? Math.round(p / t * 100) / 100 : null;
+  },
+  // Относительное расхождение > 1% (и не меньше 1 ₸) — считаем значимым.
+  _moneyDiff(a, b) {
+    return a != null && b != null && Math.abs(a - b) > Math.max(1, 0.01 * Math.abs(b));
+  },
+  _premiumDiff(r) {
+    return BatchAR._moneyDiff(BatchAR._expectedPremium(r), r.premiumBase);
+  },
+  _sumDiff(r) {
+    return BatchAR._moneyDiff(BatchAR._expectedSum(r), r.insuranceSum);
+  },
+
+  // СС: сверху — из выгрузки, снизу в скобках — расчётная (премия/тариф).
+  _sumCellHtml(r) {
+    const top = BatchAR._fmtMoney(r.insuranceSum);
+    const exp = BatchAR._expectedSum(r);
+    let bottom = '';
+    if (exp != null) {
+      const diff = BatchAR._sumDiff(r);
+      const title = diff ? 'Расчётная СС (премия / тариф) не совпадает с выгрузкой' : 'Расчётная СС (премия / тариф)';
+      bottom = `<span class="batch-sub ${diff ? 'batch-sub--warn' : ''}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
+    }
+    return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+  },
+  // Премия: сверху — из выгрузки, снизу в скобках — расчётная (Ср.ЗП мес., мин. 85к).
+  _premiumCellHtml(r) {
+    const top = BatchAR._fmtMoney(r.premiumBase);
+    const exp = BatchAR._expectedPremium(r);
+    let bottom = '';
+    if (exp != null) {
+      const diff = BatchAR._premiumDiff(r);
+      const title = diff ? 'Расчётная премия (Ср.ЗП мес., мин. 85 000) не совпадает с выгрузкой' : 'Расчётная премия (Ср.ЗП мес., мин. 85 000)';
+      bottom = `<span class="batch-sub ${diff ? 'batch-sub--warn' : ''}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
+    }
+    return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
 
   // Нормализованный ОКЭД — только цифры (устойчиво к точкам/пробелам/суффиксам).
@@ -202,7 +288,7 @@ const BatchAR = {
   //                      не совпал (у компании несколько ОКЭД, выбран не тот);
   //   null             — расхождений нет.
   _rowLevel(r) {
-    if (BatchAR._okedError(r) || BatchAR._govDiff(r)) return 'err';
+    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)) return 'err';
     if (BatchAR._classDiff(r)) return 'warn';
     return null;
   },
@@ -370,9 +456,10 @@ const BatchAR = {
   // а не за само наличие гос. участия.
   _govCell(r) {
     const reg = !!r.govParticipation;
+    // Сверху — из выгрузки: есть гос. участие → «✓», нет → «—».
     const top = reg
-      ? '<span class="batch-gov-yes">Да</span>'
-      : '<span class="batch-gov-no">—</span>';
+      ? '<span class="batch-gov-yes" title="В выгрузке: гос. участие есть">✓</span>'
+      : '<span class="batch-gov-no" title="В выгрузке: гос. участия нет">—</span>';
     let bottom = '';
     const eg = r.egov;
     if (eg) {
@@ -381,12 +468,13 @@ const BatchAR = {
       } else if (eg.status === 'error' || eg.found == null) {
         bottom = '<span class="batch-sub" title="e-Qazyna: нет данных">(н/д)</span>';
       } else {
+        // Снизу — из e-Qazyna: найден → «(✓)», не найден → «(—)».
         const diff = eg.found !== reg; // расхождение выгрузки и e-Qazyna
-        const verdict = eg.found ? 'Да' : 'Нет';
+        const mark = eg.found ? '✓' : '—';
         const title = diff
-          ? `Расхождение: в выгрузке «${reg ? 'Да' : 'Нет'}», по e-Qazyna «${verdict}»`
+          ? `Расхождение: в выгрузке «${reg ? 'есть' : 'нет'}», по e-Qazyna «${eg.found ? 'есть' : 'нет'}»`
           : (eg.found ? 'e-Qazyna: гос. участник (совпадает с выгрузкой)' : 'e-Qazyna: не гос. участник (совпадает с выгрузкой)');
-        bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${title}">(${verdict})</span>`;
+        bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${title}">(${mark})</span>`;
       }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -402,10 +490,14 @@ const BatchAR = {
     set('.batch-c-class', BatchAR._classCell(r));
     set('.batch-c-reg', BatchAR._regCell(r));
     set('.batch-c-gov', BatchAR._govCell(r));
+    // СС/премия зависят от вычисленного класса/тарифа → обновляем после statgov.
+    set('.batch-c-sum', BatchAR._sumCellHtml(r));
+    set('.batch-c-prem', BatchAR._premiumCellHtml(r));
     const nameCell = tr.querySelector('.batch-c-name');
     if (nameCell) {
-      nameCell.innerHTML = ARForm._esc(r.insurerName);
-      nameCell.title = ARForm._esc(r.insurerName);
+      const nm = ARForm._effName(r);
+      nameCell.innerHTML = ARForm._esc(nm);
+      nameCell.title = ARForm._esc(nm);
     }
     // Подсветка расхождений: красный — точная ошибка (ошибочный ОКЭД/класс,
     // расхождение гос. участия); жёлтый — мягкое расхождение класса.
@@ -420,9 +512,15 @@ const BatchAR = {
       classCell.classList.toggle('batch-cell--warn', cDiff && !okedErr);
     }
     tr.querySelector('.batch-c-gov')?.classList.toggle('batch-cell--err', gDiff);
+    // ПК красным, если молодая компания (< порога) со скидкой.
+    tr.querySelector('.batch-c-center')?.classList.toggle('batch-cell--err', BatchAR._pkYoungError(r));
+    // СС/премия жёлтым при расхождении с расчётом по методологии.
+    tr.querySelector('.batch-c-sum')?.classList.toggle('batch-cell--warn', BatchAR._sumDiff(r));
+    tr.querySelector('.batch-c-prem')?.classList.toggle('batch-cell--warn', BatchAR._premiumDiff(r));
     const level = BatchAR._rowLevel(r);
     tr.classList.toggle('batch-row--err', level === 'err');
     tr.classList.toggle('batch-row--warn', level === 'warn');
+    BatchAR._tableVersion++;
   },
 
   // ===== Проверка БИНов через stat.gov.kz =====
@@ -639,8 +737,9 @@ const BatchAR = {
     return ARForm.buildDocx(row, { printAlert: false });
   },
 
-  _fileName(row, taken) {
-    const base = `АР ${row.bin}`;
+  _fileName(contractNumber, taken) {
+    const safe = String(contractNumber || 'без_номера').replace(/[\\/:*?"<>|]/g, '_');
+    const base = `АР ${safe}`;
     let name = `${base}.docx`;
     if (taken) {
       let k = 2;
@@ -648,6 +747,101 @@ const BatchAR = {
       taken.add(name);
     }
     return name;
+  },
+
+  // Группировка строк по номеру договора: один документ АР на договор.
+  // Несколько строк одного договора = филиалы (Map сохраняет порядок встречи).
+  _groupByContract() {
+    const groups = new Map();
+    BatchAR.rows.forEach((r, i) => {
+      const key = r.contractNumber || `__no_${r.bin}_${i}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    });
+    return groups;
+  },
+
+  _contractCount() {
+    return BatchAR._groupByContract().size;
+  },
+
+  // Договор превышает лимиты АС: класс 1–15 и СС свыше 2 млрд, либо
+  // класс 16–22 и СС свыше 1,5 млрд (СС = сумма по всем филиалам договора).
+  // Класс берём ВЫЧИСЛЕННЫЙ по ОКЭД из stat.gov.kz (а не из выгрузки); макс. по
+  // филиалам. Если вычислить нельзя (нет классификатора/ОКЭД) — fallback на выгрузку.
+  _exceedsAsLimit(group) {
+    const totalSum = group.reduce((a, r) => a + (Number(r.insuranceSum) || 0), 0);
+    const cls = Math.max(0, ...group.map(r => {
+      const c = BatchAR._computedClass(r);
+      return c != null ? c : (parseInt(r.riskClass, 10) || 0);
+    }));
+    const low1_15 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls1_15') : 2000000000;
+    const low16_22 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls16_22') : 1500000000;
+    if (cls >= 1 && cls <= 15 && totalSum > low1_15) return true;
+    if (cls >= 16 && cls <= 22 && totalSum > low16_22) return true;
+    return false;
+  },
+
+  // xlsx-список договоров, превысивших лимиты АС, в ИСХОДНОМ формате выгрузки:
+  // тот же заголовок и те же строки (все филиалы), что в загруженном файле.
+  // Возвращает ArrayBuffer.
+  _buildOverLimitXlsx(overLimit) {
+    const header = (BatchAR._rawHeader && BatchAR._rawHeader.length) ? BatchAR._rawHeader : [];
+    const aoa = [header];
+    for (const [, group] of overLimit) {
+      for (const r of group) {
+        if (r._raw) aoa.push(r._raw);
+      }
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Превышение лимитов АС');
+    return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  },
+
+  // Открыть таблицу-превью в отдельной вкладке — полная ширина окна, все строки.
+  // Окно ЖИВОЕ: пока открыто, отражает актуальную таблицу (обновляется по мере
+  // проверки stat.gov.kz), а не статический снимок на момент открытия.
+  openInNewTab() {
+    if (!BatchAR.rows.length) {
+      App.showMsg && App.showMsg('Сначала загрузите реестр договоров.', 'error');
+      return;
+    }
+    const wrap = document.getElementById('batch-table-wrap');
+    if (!wrap) return;
+    const cssHref = new URL('css/style.css', location.href).href;
+    const win = window.open('', '_blank');
+    if (!win) {
+      App.showMsg && App.showMsg('Разрешите всплывающие окна, чтобы открыть таблицу в новой вкладке.', 'error');
+      return;
+    }
+    win.document.write(
+      '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<title>Реестр договоров — просмотр</title>' +
+      '<link rel="stylesheet" href="' + cssHref + '">' +
+      '<style>body{margin:0;padding:24px;background:#fff;font-family:system-ui,-apple-system,sans-serif}' +
+      'h1{font-size:1.05rem;margin:0 0 16px;color:#1f2937}' +
+      '.batch-table-wrap{display:block!important;max-height:none!important;overflow:auto;border:1px solid #e5e7eb;border-radius:10px}</style>' +
+      '</head><body><h1 id="batch-mirror-title"></h1>' +
+      '<div class="batch-table-wrap" id="batch-mirror"></div></body></html>'
+    );
+    win.document.close();
+    // Живое зеркало: копируем актуальную таблицу, пока окно открыто и таблица меняется.
+    let lastVer = -1;
+    const sync = () => {
+      if (!win || win.closed) { clearInterval(timer); return; }
+      if (BatchAR._tableVersion === lastVer) return;     // без изменений — не копируем
+      lastVer = BatchAR._tableVersion;
+      try {
+        const title = win.document.getElementById('batch-mirror-title');
+        const mirror = win.document.getElementById('batch-mirror');
+        if (title) title.textContent = `Массовая генерация — реестр (${BatchAR.rows.length} строк)`;
+        if (mirror) mirror.innerHTML = wrap.innerHTML;   // wrap.innerHTML = <table class="batch-table">…
+      } catch (e) { clearInterval(timer); }
+    };
+    sync();
+    const timer = setInterval(sync, 700);
   },
 
   // ===== Сгенерировать все → ZIP =====
@@ -667,16 +861,28 @@ const BatchAR = {
       await BatchAR._ensureZip();
       const zip = new window.JSZip();
       const taken = new Set();
-      const N = BatchAR.rows.length;
+      // Группируем по номеру договора: один документ АР на договор (филиалы — внутри).
+      const groups = [...BatchAR._groupByContract().entries()];
+      const overLimit = [];   // договоры свыше лимитов АС → отдельная папка
+      const toGenerate = [];  // остальные → стандартный АР
+      for (const entry of groups) {
+        (BatchAR._exceedsAsLimit(entry[1]) ? overLimit : toGenerate).push(entry);
+      }
+      const N = toGenerate.length;
       for (let i = 0; i < N; i++) {
-        const row = BatchAR.rows[i];
-        if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — АР ${row.bin}`;
+        const [cn, group] = toGenerate[i];
+        if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — АР ${cn}`;
         if (bar) bar.style.width = Math.round((i / N) * 100) + '%';
-        const blob = await BatchAR._genBlob(row);
+        const blob = await ARForm.buildDocx(group[0], { printAlert: false, filials: group.slice(1) });
         // .docx уже сжат (zip) — храним без перекомпрессии (STORE) — быстрее.
-        zip.file(BatchAR._fileName(row, taken), blob, { compression: 'STORE' });
+        zip.file(BatchAR._fileName(cn, taken), blob, { compression: 'STORE' });
         // Изредка уступаем поток UI (каждые 10 документов)
         if (i % 10 === 9) await new Promise(r => setTimeout(r, 0));
+      }
+      // Договоры свыше лимитов АС — отдельная папка с отфильтрованным xlsx.
+      if (overLimit.length) {
+        const xlsxBuf = BatchAR._buildOverLimitXlsx(overLimit);
+        zip.file(`Превышение лимитов АС/Превышение лимитов АС (${overLimit.length}).xlsx`, xlsxBuf, { compression: 'STORE' });
       }
       if (txt) txt.textContent = 'Упаковка ZIP…';
       if (bar) bar.style.width = '100%';
@@ -684,7 +890,7 @@ const BatchAR = {
       const today = new Date();
       const stamp = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
       saveAs(out, `АР пакет ${stamp} (${N}).zip`);
-      if (txt) txt.textContent = `Готово: ${N} документов в архиве`;
+      if (txt) txt.textContent = `Готово: ${N} документов${overLimit.length ? ` + ${overLimit.length} на АС (отдельная папка)` : ''}`;
     } catch (e) {
       console.error('Batch ZIP error:', e);
       if (txt) txt.textContent = 'Ошибка: ' + e.message;
@@ -706,7 +912,7 @@ const BatchAR = {
         : (!BatchAR.rows.length
             ? 'Сгенерировать Рекомендации АР'
             : (ready
-                ? `Сгенерировать Рекомендации АР (${BatchAR.rows.length})`
+                ? `Сгенерировать Рекомендации АР (${BatchAR._contractCount()})`
                 : 'Ожидание проверки stat.gov.kz…'));
     }
     const btnClear = document.getElementById('batch-clear');

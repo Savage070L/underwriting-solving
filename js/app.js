@@ -169,7 +169,7 @@ const App = {
         //  - young_company: точная дата регистрации компании из statgov
         let noDiscountNote = '';
         if (effCoeff.noDiscountReason === 'claims') {
-          const total = App.claims?.totalClaims || 0;
+          const total = App.claims?.totalClaims || App._effectiveClaimsCount(z) || 0;
           const sumTotal = App.claims?.analytics?.sumTotal3y || 0;
           const sumPart = sumTotal > 0 ? `, на сумму ${Utils.fmtMoney(sumTotal)}` : '';
           noDiscountNote = ` (скидка не применяется — за 3 года ${total} НС${sumPart})`;
@@ -276,7 +276,8 @@ const App = {
   // Возвращает { coeffDown, premiumWithCoeff, noDiscountReason, ageYears }.
   _effectiveCoeffInfo(z) {
     if (!z) return { coeffDown: 0, premiumWithCoeff: 0, noDiscountReason: null, ageYears: null };
-    const claimsCount = App.claims ? App.claims.totalClaims : 0;
+    // Кол-во НС: из файла истории убытков, иначе из ручного ввода (z._manualClaimsCount).
+    const claimsCount = App._effectiveClaimsCount(z);
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
     const regDateRaw = sg?.registrationDate || null;
@@ -286,10 +287,24 @@ const App = {
     const noDiscountReason = (claimsCount > 0)
       ? 'claims'
       : (isYoung ? 'young_company' : null);
-    const coeffDown = noDiscountReason ? 0 : (z.coeffDown || 0);
-    const premiumWithCoeff = (noDiscountReason && z.premiumBase)
-      ? z.premiumBase
-      : (z.premiumWithCoeff != null ? z.premiumWithCoeff : z.premiumBase);
+    // Понижающий коэффициент (скидка):
+    //   • явно заданный в заявке (D16 > 0) — приоритет;
+    //   • иначе авто-скидка за чистую историю (нет НС) — _getLimit('defaultDiscount'),
+    //     по умолчанию 0,1 (ПК 0,9); работает и в ручном вводе (там z.coeffDown=0);
+    //   • снимается в 0, если есть НС или компания моложе порога.
+    const explicitDown = (z.coeffDown != null && z.coeffDown > 0) ? z.coeffDown : 0;
+    const autoDown = App._getLimit('defaultDiscount') || 0;
+    const coeffDown = noDiscountReason ? 0 : (explicitDown || autoDown);
+    // Премия с ПК пересчитывается от ЭФФЕКТИВНОГО коэффициента — иначе авто-скидка
+    // не отразилась бы в сумме (z.premiumWithCoeff мог быть посчитан без скидки —
+    // в ручном вводе или при пустом D16). coeffUp (повышающий) учитываем всегда.
+    const coeffUp = (z.coeff != null && Number.isFinite(z.coeff)) ? z.coeff : 1;
+    let premiumWithCoeff;
+    if (z.premiumBase != null && Number.isFinite(z.premiumBase)) {
+      premiumWithCoeff = App._round2(z.premiumBase * coeffUp * (1 - coeffDown));
+    } else {
+      premiumWithCoeff = (z.premiumWithCoeff != null ? z.premiumWithCoeff : z.premiumBase);
+    }
     return { coeffDown, premiumWithCoeff, noDiscountReason, ageYears };
   },
 
@@ -313,6 +328,7 @@ const App = {
   LIMITS_DEFAULTS: {
     minCompanyAgeYears: 3,           // < 3 лет → скидка не применяется
     minAvgSalary: 85000,             // порог alert «низкая ЗП»
+    defaultDiscount: 0.1,            // авто-скидка за чистую историю (нет НС) → ПК 0,9
     limitAsLowCls1_15: 2000000000,   // АС: нижний порог, классы 1–15
     limitAsLowCls16_22: 1500000000,  // АС: нижний порог, классы 16–22
     limitAsHigh: 10000000000,        // АС: верхний порог
@@ -381,6 +397,51 @@ const App = {
       `</div>`;
   },
 
+  // Alert «не загружены Страховые случаи» — информационный, ни на что не влияет
+  // (как alert низкой ЗП). Показывается, когда кейс загружен, но история убытков
+  // не приложена: авто-решение исходит из того, что НС не было, и применяет
+  // скидку — андеррайтеру стоит приложить файл (или убедиться, что НС не было).
+  _updateClaimsNotLoadedAlert() {
+    const el = document.getElementById('claims-not-loaded-alert');
+    if (!el) return;
+    const z = App.zayavka;
+    // Скрыт, если кейса нет / быстрая проверка / НС загружены / андеррайтер
+    // подтвердил галочкой, что НС не было.
+    const show = !!z && !z._lookupOnly && App.claims == null && !z._noClaimsAck && z._manualClaimsCount == null;
+    if (!show) { el.classList.remove('visible'); el.innerHTML = ''; return; }
+    el.classList.add('visible');
+    el.innerHTML =
+      `<div class="asa-icon">⚠</div>` +
+      `<div class="asa-body">` +
+        `<div class="asa-title">Вы не загрузили «Страховые случаи»</div>` +
+        `<div class="asa-desc">Без приложенной истории убытков расчёт исходит из того, что НС не было (применяется авто-скидка). Пока файл не загружен или не отмечено «Не было страховых случаев», сформировать пакет документов нельзя.</div>` +
+        `<label class="asa-ack"><input type="checkbox" onchange="App.ackNoClaims(this.checked)"> Не было страховых случаев</label>` +
+      `</div>`;
+  },
+
+  // «Ворота» по страховым случаям: формировать пакет документов можно, только
+  // когда по НС есть определённость — файл «Страховые случаи» загружен ИЛИ
+  // андеррайтер отметил галочкой, что НС не было. Для быстрой проверки по БИН
+  // (_lookupOnly) и при отсутствии кейса — не блокирует (кнопки и так выключены).
+  _claimsConfirmed() {
+    const z = App.zayavka;
+    if (!z || z._lookupOnly) return true;
+    // Определённость по НС: файл загружен, подтверждено галочкой в алерте, или
+    // указано в ручном вводе (z._manualClaimsCount — 0 «не было» либо число).
+    return App.claims != null || !!z._noClaimsAck || z._manualClaimsCount != null;
+  },
+
+  // Галочка «Не было страховых случаев» в алерте: подтверждает чистую историю,
+  // скрывает напоминание и ОТКРЫВАЕТ формирование пакета документов. Флаг живёт
+  // на кейсе (z._noClaimsAck) — персистится и сбрасывается при загрузке нового
+  // кейса (новый объект zayavka без флага).
+  ackNoClaims(checked) {
+    if (App.zayavka) App.zayavka._noClaimsAck = !!checked;
+    App._persistCase();
+    App._updateClaimsNotLoadedAlert();
+    App.updateButtons(); // ворота: пере-включить/выключить кнопки генерации
+  },
+
   // ===== UNIVERSAL DERIVED-STATE REFRESH =====
   // Прогоняет всю цепочку зависимостей: ОКЭД→классификатор→тариф→премия,
   // превью, таблица ОКЭДов компании, кнопки (орган зависит от активов),
@@ -402,6 +463,8 @@ const App = {
     App._updateAvgSalaryAlert();
     // 4c. Alert «молодая компания» (моложе 3 лет → скидка не применяется)
     App._updateYoungCompanyAlert();
+    // 4d. Alert «не загружены Страховые случаи» (информационный)
+    App._updateClaimsNotLoadedAlert();
     // 5. Обновить snapshot аналитики, чтобы при повторном открытии
     //    standalone-окна / iframe — данные были свежие.
     if (App.claims && App.claims.analytics) {
@@ -841,6 +904,7 @@ const App = {
   _LIMIT_INPUTS: {
     minCompanyAgeYears: { id: 'lim-minAge',     toStored: v => v,        toDisplay: v => v },
     minAvgSalary:       { id: 'lim-minSalary',  toStored: v => v,        toDisplay: v => v },
+    defaultDiscount:    { id: 'lim-discount',   toStored: v => v / 100,  toDisplay: v => v * 100 },
     limitAsLowCls1_15:  { id: 'lim-asLow1_15',  toStored: v => v,        toDisplay: v => v },
     limitAsLowCls16_22: { id: 'lim-asLow16_22', toStored: v => v,        toDisplay: v => v },
     limitAsHigh:        { id: 'lim-asHigh',     toStored: v => v,        toDisplay: v => v },
@@ -897,7 +961,7 @@ const App = {
     const el = document.getElementById('status-limits');
     if (!el) return;
     const count = Object.keys(App.refData.limits || {}).length;
-    el.textContent = count === 0 ? 'По умолчанию' : `Изменено: ${count} из 6`;
+    el.textContent = count === 0 ? 'По умолчанию' : `Изменено: ${count} из 7`;
   },
 
   // Форматирование числа с пробелами в качестве разделителей разрядов.
@@ -1423,8 +1487,12 @@ const App = {
     } catch (e) { console.warn('Persist case failed:', e); }
   },
   _zayavkaToJson(z) {
+    // _noClaimsAck — транзиентное подтверждение алерта (по сессии), НЕ персистим:
+    // после перезагрузки напоминание о незагруженных «Страховых случаях» должно
+    // появиться снова (иначе оно бы показывалось ровно один раз за всё время).
+    const { _noClaimsAck, ...rest } = z;
     return {
-      ...z,
+      ...rest,
       docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
       periodFrom: z.periodFrom ? new Date(z.periodFrom).toISOString() : null,
       periodTo: z.periodTo ? new Date(z.periodTo).toISOString() : null,
@@ -1478,6 +1546,13 @@ const App = {
           if (fEl) fEl.value = fotVal != null ? App._formatMoney(fotVal) : '';
           if (aEl) aEl.value = App.zayavka.avgSalary != null ? App._formatMoney(App.zayavka.avgSalary) : '';
           if (dEl) dEl.value = App.zayavka.docDate ? App._dateToInputValue(App.zayavka.docDate) : '';
+          // Восстановить блок страховых случаев (галочка + количество).
+          const chkEl = document.getElementById('manualHasClaims');
+          const cntEl = document.getElementById('manualClaimsCount');
+          const hasClaims = App.zayavka._manualHasClaims !== false; // умолчание — ВКЛ
+          if (chkEl) chkEl.checked = hasClaims;
+          if (cntEl) cntEl.value = (hasClaims && App.zayavka._manualClaimsCount) ? String(App.zayavka._manualClaimsCount) : '';
+          App.onManualClaimsToggle();
           App._manualPrimary = App.zayavka._manualPrimary || 'fot';
           App._syncManualFields();
           App._updateManualHint();
@@ -1658,8 +1733,34 @@ const App = {
     if (App.zayavka && App.zayavka._manual) {
       App.clearCaseFile('zayavka');
     }
+    // Сброс блока страховых случаев: галочка ВКЛ (по умолчанию), поле пустое.
+    const chk = document.getElementById('manualHasClaims');
+    if (chk) chk.checked = true;
+    const cnt = document.getElementById('manualClaimsCount');
+    if (cnt) cnt.value = '';
+    App.onManualClaimsToggle();
     App._updateManualHint();
     App.showMsg('Поля ручного ввода очищены.', 'success');
+  },
+
+  // Галочка «Были страховые случаи» в ручном вводе: ВКЛ — показываем поле
+  // количества НС; ВЫКЛ — НС не было (поле скрыто). Значение читается на «Применить».
+  onManualClaimsToggle() {
+    const chk = document.getElementById('manualHasClaims');
+    const wrap = document.getElementById('manual-claims-count-wrap');
+    const lbl = document.getElementById('manualClaimsLabel');
+    const on = !!(chk && chk.checked);
+    if (wrap) wrap.style.display = on ? '' : 'none';
+    // Подпись отражает состояние: ВКЛ — «Были …», ВЫКЛ — «Не было …».
+    if (lbl) lbl.textContent = on ? 'Были страховые случаи (НС)' : 'Не было страховых случаев';
+  },
+
+  // Эффективное количество НС за 3 года: из загруженного файла истории убытков,
+  // иначе — из ручного ввода (z._manualClaimsCount). 0, если данных нет.
+  _effectiveClaimsCount(z) {
+    if (App.claims) return App.claims.totalClaims || 0;
+    const zz = z || App.zayavka;
+    return (zz && zz._manualClaimsCount != null) ? zz._manualClaimsCount : 0;
   },
 
   // Главный обработчик input для полей ручного ввода.
@@ -1669,6 +1770,24 @@ const App = {
     const avgEl = document.getElementById('manualAvgSalary');
     const wEl = document.getElementById('manualWorkers');
     if (!fotEl || !avgEl || !wEl) return;
+
+    // Смена БИН — потенциально новая компания: переспрашиваем про страховые
+    // случаи заново (возвращаем галочку к умолчанию «Были НС» и снимаем
+    // подтверждение «НС не было», чтобы напоминание/ворота переоценились).
+    if (source === 'bin') {
+      const chk = document.getElementById('manualHasClaims');
+      if (chk && !chk.checked) {
+        chk.checked = true;
+        const cnt = document.getElementById('manualClaimsCount');
+        if (cnt) cnt.value = '';
+        App.onManualClaimsToggle();
+      }
+      if (App.zayavka && App.zayavka._noClaimsAck) {
+        App.zayavka._noClaimsAck = false;
+        App._updateClaimsNotLoadedAlert();
+        App.updateButtons();
+      }
+    }
 
     // Определить primary, исходя из событий пользователя
     if (source === 'fot') {
@@ -1840,6 +1959,13 @@ const App = {
     const bin = (document.getElementById('manualBin')?.value || '').trim().replace(/\s+/g, '');
     const workersStr = document.getElementById('manualWorkers')?.value;
     const dateStr = document.getElementById('manualDocDate')?.value || '';
+    // Страховые случаи: галочка ВКЛ → берём введённое количество; ВЫКЛ → НС не было (0).
+    const hasClaimsEl = document.getElementById('manualHasClaims');
+    const claimsCntEl = document.getElementById('manualClaimsCount');
+    const manualHasClaims = hasClaimsEl ? hasClaimsEl.checked : true;
+    const manualClaimsCount = manualHasClaims
+      ? Math.max(0, Math.round(Number(claimsCntEl?.value) || 0))
+      : 0;
 
     if (!/^\d{12}$/.test(bin)) {
       App.showMsg('Введите корректный БИН (12 цифр).', 'error');
@@ -1918,6 +2044,10 @@ const App = {
       // Доп. поля — для UI/аналитики, не используются напрямую генераторами
       fot: fot,
       avgSalary: avgSalary,
+      // Страховые случаи из ручного ввода (нет файла истории убытков): влияет на
+      // авто-скидку (есть НС → скидки нет) и снимает «ворота» генерации пакета.
+      _manualHasClaims: manualHasClaims,
+      _manualClaimsCount: manualClaimsCount,
     };
 
     // Пересчитать норматив на дату договора (если справочник загружен)
@@ -3099,7 +3229,13 @@ const App = {
       premiumWithCoeff,
       tariff,
       claims: App.claims,
-      claimsSummary: App.claims ? App.claims.summaryText : 'НС не было',
+      // Сводка НС: из файла истории убытков; иначе из ручного ввода
+      // (z._manualClaimsCount). Без данных и при 0 — «НС не было».
+      claimsSummary: App.claims
+        ? App.claims.summaryText
+        : (z._manualClaimsCount > 0
+            ? `За последние 3 года: ${Utils.pluralize(z._manualClaimsCount, 'страховой случай', 'страховых случая', 'страховых случаев')}`
+            : 'НС не было'),
       normativ: App.refData.normativ,
       ku: App.refData.ku,
       selectedActivity,
@@ -3137,8 +3273,11 @@ const App = {
     // Лёгкая «зайавка только для проверки» (_lookupOnly) не должна включать
     // кнопки генерации документов — у неё нет работников/премии.
     const hasZayavka = !!App.zayavka && !App.zayavka._lookupOnly;
-    document.getElementById('btnAR').disabled = !hasZayavka;
-    document.getElementById('btnZakl').disabled = !hasZayavka;
+    // Формирование пакета документов заблокировано, пока не сняты «ворота» по НС
+    // (файл «Страховые случаи» загружен ИЛИ отмечено «Не было страховых случаев»).
+    const canGen = hasZayavka && App._claimsConfirmed();
+    document.getElementById('btnAR').disabled = !canGen;
+    document.getElementById('btnZakl').disabled = !canGen;
     const btnProto = document.getElementById('btnProtocol');
     const btnSzPr = document.getElementById('btnSzPravlenie');
     const btnSzSd = document.getElementById('btnSzSd');
@@ -3154,9 +3293,9 @@ const App = {
       pkg = effFin.docPackage;
     }
 
-    if (btnProto) btnProto.disabled = !hasZayavka || !pkg.includes('protocol');
-    if (btnSzPr) btnSzPr.disabled = !hasZayavka || !pkg.includes('sz_pravlenie');
-    if (btnSzSd) btnSzSd.disabled = !hasZayavka || !pkg.includes('sz_sd');
+    if (btnProto) btnProto.disabled = !canGen || !pkg.includes('protocol');
+    if (btnSzPr) btnSzPr.disabled = !canGen || !pkg.includes('sz_pravlenie');
+    if (btnSzSd) btnSzSd.disabled = !canGen || !pkg.includes('sz_sd');
 
     // Show/hide buttons depending on package
     const setHidden = (el, hide) => { if (el) el.style.display = hide ? 'none' : ''; };

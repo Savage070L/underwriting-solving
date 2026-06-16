@@ -110,6 +110,7 @@
             <div class="ref-override-grid ref-override-grid--2col">
               <label title="Если возраст компании < этого значения — скидка не применяется">Возраст компании &lt; ___ лет → без скидки<span class="input-with-unit" data-unit="лет"><input type="text" inputmode="decimal" id="lim-minAge" placeholder="напр. 3" oninput="App.onLimitOverride('minCompanyAgeYears',this.value)" onblur="App._fillLimitsInputs()"></span></label>
               <label title="Если средняя ЗП < этого значения — показывается alert андеррайтеру">Ср. ЗП &lt; ___ ₸/мес → alert<span class="input-with-unit" data-unit="₸/мес"><input type="text" inputmode="decimal" id="lim-minSalary" placeholder="напр. 85000" oninput="App.onLimitOverride('minAvgSalary',this.value)" onblur="App._fillLimitsInputs()"></span></label>
+              <label title="Авто-скидка при чистой истории: если НС не было и в заявке не задан понижающий коэффициент — применяется эта скидка (напр. 10% → ПК 0,9). Заполненный D16 в заявке имеет приоритет.">Авто-скидка (нет НС) ___ %<span class="input-with-unit" data-unit="%"><input type="text" inputmode="decimal" id="lim-discount" placeholder="напр. 10" oninput="App.onLimitOverride('defaultDiscount',this.value)" onblur="App._fillLimitsInputs()"></span></label>
               <label title="Класс риска 1–15: страх.сумма ≥ этого → АС; меньше — стандартное принятие">АС, кл. 1–15: сумма ≥ ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asLow1_15" placeholder="напр. 2000000000" oninput="App.onLimitOverride('limitAsLowCls1_15',this.value)" onblur="App._fillLimitsInputs()"></span></label>
               <label title="Класс риска 16–22: страх.сумма ≥ этого → АС; меньше — стандартное принятие">АС, кл. 16–22: сумма ≥ ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asLow16_22" placeholder="напр. 1500000000" oninput="App.onLimitOverride('limitAsLowCls16_22',this.value)" onblur="App._fillLimitsInputs()"></span></label>
               <label title="Если страх.сумма > этого значения — кейс уходит в Правление">Правление: сумма &gt; ___ (₸)<span class="input-with-unit" data-unit="₸"><input type="text" inputmode="decimal" id="lim-asHigh" placeholder="напр. 10000000000" oninput="App.onLimitOverride('limitAsHigh',this.value)" onblur="App._fillLimitsInputs()"></span></label>
@@ -243,23 +244,28 @@
           <input type="file" id="batch-file-input" accept=".xlsx,.xls" style="display:none" onchange="BatchAR.loadFile(this.files[0])">
         </div>
 
+        <div class="batch-toolbar" id="batch-toolbar" style="display:none">
+          <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
+        </div>
         <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
           <table class="batch-table">
             <thead>
               <tr>
                 <th class="batch-c-num">#</th>
+                <th class="batch-c-contract">Номер договора</th>
                 <th class="batch-c-bin">БИН</th>
                 <th class="batch-c-name">Страхователь</th>
                 <th class="batch-c-oked" title="Сверху — ОКЭД из выгрузки, снизу — из stat.gov.kz">ОКЭД</th>
                 <th class="batch-c-class" title="Сверху — класс из выгрузки, снизу — вычисленный по ОКЭД">Класс</th>
                 <th class="batch-c-num2">Кол-во<br>сотрудников</th>
                 <th class="batch-c-num2">ФОТ</th>
-                <th class="batch-c-num2">Страх. сумма</th>
-                <th class="batch-c-num2" title="Страховая премия до поправочного коэффициента">Страх. Премия</th>
+                <th class="batch-c-num2" title="Сверху — из выгрузки, снизу — расчётная (премия / тариф)">Страх. сумма</th>
+                <th class="batch-c-num2" title="Сверху — из выгрузки, снизу — расчётная (Ср.ЗП мес., мин. 85 000)">Страх. Премия</th>
                 <th class="batch-c-center" title="Поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой">ПК</th>
                 <th class="batch-c-num2">Премия с ПК</th>
                 <th class="batch-c-reg">Дата рег.</th>
                 <th class="batch-c-gov">Гос. участие</th>
+                <th class="batch-c-author" title="Менеджер из выгрузки (столбец «Менеджер»)">Менеджер</th>
               </tr>
             </thead>
             <tbody id="batch-tbody"></tbody>
@@ -345,6 +351,18 @@
             </label>
             <input type="text" id="manualAvgSalary" inputmode="decimal" placeholder="ИЛИ заполните вместо ФОТ"
                    oninput="App.onManualInput('avg')" onblur="App.onManualMoneyBlur('avg')">
+          </div>
+        </div>
+        <!-- Страховые случаи для ручного ввода (нет файла истории убытков).
+             ВКЛ (по умолчанию) → запрашиваем количество НС; ВЫКЛ → НС не было. -->
+        <div class="manual-claims-block">
+          <label class="manual-claims-toggle">
+            <input type="checkbox" id="manualHasClaims" checked onchange="App.onManualClaimsToggle()">
+            <span id="manualClaimsLabel">Были страховые случаи (НС)</span>
+          </label>
+          <div class="manual-claims-count" id="manual-claims-count-wrap">
+            <label for="manualClaimsCount">Количество НС за 3 года</label>
+            <input type="text" id="manualClaimsCount" inputmode="numeric" maxlength="4" placeholder="0" oninput="this.value=this.value.replace(/\D/g,'')">
           </div>
         </div>
         <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.<br>Или нажмите «Только проверить» — нужен лишь БИН для проверки в реестрах.</div>
@@ -549,6 +567,9 @@
           <input type="text" id="docNumber" class="doc-number-input" placeholder="Например: 13">
         </div>
       </div>
+      <!-- Alert-ворота: пока не загружены «Страховые случаи» или не отмечено
+           «Не было страховых случаев» — формирование пакета документов заблокировано. -->
+      <div class="avg-salary-alert" id="claims-not-loaded-alert"></div>
       <div class="organ-banner" id="organ-banner" style="display:none"></div>
       <div class="btn-row">
         <button class="btn-generate btn-ar" id="btnAR" onclick="App.generateAR()" disabled>

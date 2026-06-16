@@ -68,7 +68,7 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   /* Layout */
-  --content-max: 1560px;
+  --content-max: 1860px;
 }
 
 /* ==========================================================================
@@ -804,6 +804,39 @@ header.app-header {
 @media (max-width: 700px) {
   .manual-input-grid { grid-template-columns: 1fr 1fr; }
 }
+/* Блок «Страховые случаи» в ручном вводе: галочка + поле количества НС. */
+.manual-claims-block {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+.manual-claims-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+.manual-claims-toggle input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #4f46e5; }
+.manual-claims-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manual-claims-count label { font-size: 0.8rem; color: #64748b; margin: 0; }
+.manual-claims-count input {
+  width: 110px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
 .manual-input-hint {
   margin-top: 10px;
   font-size: 0.78rem;
@@ -879,6 +912,30 @@ header.app-header {
   font-size: 0.83rem;
   color: #78350f;
   line-height: 1.5;
+}
+/* Галочка-подтверждение «Не было страховых случаев» внутри алерта —
+   по клику скрывает напоминание. */
+.avg-salary-alert .asa-ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1.5px solid #f59e0b;
+  border-radius: 8px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: #92400e;
+  cursor: pointer;
+  user-select: none;
+}
+.avg-salary-alert .asa-ack:hover { background: rgba(255, 255, 255, 0.92); }
+.avg-salary-alert .asa-ack input {
+  width: 16px; height: 16px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #d97706;
 }
 
 /* Метка с inline-тегом ("посчитано") справа от текста — в одну строку,
@@ -2529,6 +2586,26 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   border: 1px solid var(--c-border-subtle, #e2e8f0);
   border-radius: 10px;
 }
+/* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
+.batch-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.batch-open-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.batch-open-tab:hover { background: #e0e7ff; }
 .batch-table {
   width: 100%;
   border-collapse: collapse;
@@ -2556,25 +2633,31 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 /* БИН, Страхователь, Дата рег. — слева; все остальные столбцы — по центру
    (и заголовок, и значения, чтобы они совпадали). */
 .batch-c-num  { width: 36px; color: #98a2b3; text-align: center; vertical-align: top; }
+.batch-c-contract { width: 124px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; color: #475467; font-weight: 600; }
 .batch-c-bin  { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
 /* Страхователь — вдвое уже прежнего (было 200–340px); длинные имена обрезаются. */
 .batch-c-name { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .batch-c-oked { width: 110px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
 .batch-c-class { width: 64px; text-align: center; white-space: nowrap; vertical-align: top; }
 .batch-c-num2 { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-center { text-align: center; vertical-align: top; }
 .batch-c-reg  { width: 116px; text-align: left; white-space: nowrap; vertical-align: top; }
 .batch-c-gov  { width: 104px; text-align: center; white-space: nowrap; vertical-align: top; }
+.batch-c-author { width: 100px; text-align: left; vertical-align: top; color: #475467; white-space: normal; line-height: 1.25; word-break: break-word; }
 .batch-c-gov .batch-stack,
 .batch-c-class .batch-stack,
-.batch-c-oked .batch-stack { align-items: center; }
+.batch-c-oked .batch-stack,
+.batch-c-sum .batch-stack,
+.batch-c-prem .batch-stack { align-items: center; }
 
 /* Подсветка расхождений — два уровня:
    • КРАСНЫЙ (--err): точная ошибка данных — ОКЭД из выгрузки отсутствует среди
      ОКЭД компании (→ ошибочный класс) либо расхождение гос. участия с e-Qazyna.
    • ЖЁЛТЫЙ (--warn): мягкое расхождение класса — ОКЭД у компании есть, но класс
      не совпал (у компании несколько ОКЭД, выбран не тот). */
-.batch-cell--warn { background: #fffbeb !important; box-shadow: inset 3px 0 0 #f59e0b; }
-.batch-cell--err  { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #ef4444; }
+/* Рамка по всем сторонам ячейки — чтобы сразу видеть, где именно расхождение. */
+.batch-cell--warn { background: #fffbeb !important; box-shadow: inset 0 0 0 2px #f59e0b; }
+.batch-cell--err  { background: #fef2f2 !important; box-shadow: inset 0 0 0 2px #ef4444; }
 .batch-table tbody tr:hover .batch-cell--warn { background: #fef9e7 !important; }
 .batch-table tbody tr:hover .batch-cell--err  { background: #fee2e2 !important; }
 

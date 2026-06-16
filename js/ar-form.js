@@ -28,6 +28,18 @@ const ARForm = {
       .replace(/"/g, '&quot;');
   },
 
+  // Имя для отображения/документа: по умолчанию из выгрузки (Контрагент = excelName).
+  // Если оно длиннее 100 символов (1С такие обрезает) — берём официальное имя из
+  // statgov, иначе из kyc, иначе оставляем как есть.
+  _effName(row) {
+    if (!row) return '';
+    const excel = String(row.excelName || row.insurerName || '').trim();
+    if (excel.length <= 100) return excel;
+    const sg = (row.statgov && !row.statgov.error && row.statgov.name) ? String(row.statgov.name).trim() : '';
+    const kyc = (row.kyc && !row.kyc.error && row.kyc.found !== false && row.kyc.name) ? String(row.kyc.name).trim() : '';
+    return sg || kyc || excel;
+  },
+
   // «12» июня 2026 г. (пусто → плейсхолдер бланка)
   _dateRu(d) {
     if (!(d instanceof Date) || isNaN(d)) return '«__» __________ 20__ г.';
@@ -126,8 +138,8 @@ const ARForm = {
 
     // Заголовки финансовой таблицы
     const FIN_HEADERS = [
-      'ГФОТ (тг.)', 'Общая страховая сумма (тг.)', 'Класс проф. Риска',
-      'Страховой тариф (%)', 'Общая страховая премия (тг.)',
+      'ГФОТ (тг.)', 'Страховая сумма (тг.)', 'Класс проф. Риска',
+      'Страховой тариф (%)', 'Страховая премия (тг.)',
       'Поправочный коэффициент (ПК)', 'Страховая премия с учетом ПК (тг.)',
       'Количество застрахованных',
     ];
@@ -144,22 +156,51 @@ const ARForm = {
       ],
     });
     const RIGHT = AlignmentType.RIGHT, CENTER = AlignmentType.CENTER;
-    const finStrahRow = () => finDataRow('Страхователь', [
-      { text: ARForm._money(row.gfot), align: RIGHT },
-      { text: ARForm._money(row.insuranceSum), align: RIGHT },
-      { text: row.riskClass, align: CENTER },
-      { text: ARForm._pct(row.tariff), align: CENTER },
-      { text: ARForm._money(row.premiumBase), align: RIGHT },
-      { text: ARForm._coeff(row.coeff), align: CENTER },
-      { text: ARForm._money(row.premiumWithCoeff), align: RIGHT },
-      { text: ARForm._int(row.workers), align: CENTER },
+    // Один договор: row — основная строка (Страхователь), opts.filials — филиалы
+    // (другие строки с тем же номером договора). Итого суммирует все строки.
+    const filials = Array.isArray(opts.filials) ? opts.filials : [];
+    const allRows = [row, ...filials];
+    const finRowFor = (label, r) => finDataRow(label, [
+      { text: ARForm._money(r.gfot), align: RIGHT },
+      { text: ARForm._money(r.insuranceSum), align: RIGHT },
+      { text: r.riskClass, align: CENTER },
+      { text: ARForm._pct(r.tariff), align: CENTER },
+      { text: ARForm._money(r.premiumBase), align: RIGHT },
+      { text: ARForm._coeff(r.coeff), align: CENTER },
+      { text: ARForm._money(r.premiumWithCoeff), align: RIGHT },
+      { text: ARForm._int(r.workers), align: CENTER },
     ]);
-    const finFilialRow = () => finDataRow('Филиал*', [{}, {}, {}, {}, {}, {}, {}, {}].map(() => ({ text: '' })));
+    const finEmptyFilialRow = () => finDataRow('Филиал*', [{}, {}, {}, {}, {}, {}, {}, {}].map(() => ({ text: '' })));
+    // Итого: суммируем кол-во сотрудников, страх. сумму, премию, премию с ПК.
+    const finTotalRow = () => {
+      const sum = (k) => allRows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+      return finDataRow('Итого:', [
+        { text: '', align: CENTER },
+        { text: ARForm._money(sum('insuranceSum')), align: RIGHT },
+        { text: '', align: CENTER },
+        { text: '', align: CENTER },
+        { text: ARForm._money(sum('premiumBase')), align: RIGHT },
+        { text: '', align: CENTER },
+        { text: ARForm._money(sum('premiumWithCoeff')), align: RIGHT },
+        { text: ARForm._int(sum('workers')), align: CENTER },
+      ]);
+    };
+    // Тело финансовой таблицы: Страхователь + филиалы (с названиями из выгрузки —
+    // excelName, т.к. insurerName перетирается официальным именем из statgov),
+    // либо пустой Филиал* для одиночного договора, затем Итого.
+    const finBodyRows = () => {
+      const out = [finRowFor('Страхователь', row)];
+      if (filials.length) filials.forEach(f => out.push(finRowFor(ARForm._effName(f) || 'Филиал', f)));
+      else out.push(finEmptyFilialRow());
+      out.push(finTotalRow());
+      return out;
+    };
 
     // Данные
     const sg = row.statgov && !row.statgov.error ? row.statgov : null;
     const kyc = row.kyc && !row.kyc.error && row.kyc.found !== false ? row.kyc : null;
-    const name = (sg && sg.name) || (kyc && kyc.name) || row.insurerName || '';
+    // Имя из выгрузки (Контрагент), для длинных (>100) — официальное из statgov.
+    const name = ARForm._effName(row);
     // Юр. адрес: stat.gov (вкл. «Местонахождение» для ИП) → fallback kyc.kz.
     let addr = (typeof Utils !== 'undefined' && Utils.statgovLegalAddress)
       ? Utils.statgovLegalAddress(sg)
@@ -170,6 +211,7 @@ const ARForm = {
     const docDate = ARForm._dateRu(row.dateContract);
     const period = `с ${ARForm._dateRu(row.periodFrom)} по ${ARForm._dateRu(row.periodTo)}`;
     const recText = `принять на страхование на указанных условиях — ${ARForm.decisionText(row)}`;
+    // Подписант/автор в документе — по умолчанию фиксированный (Джелкобаев Т.К.).
     const sigText = `${ARForm.UNDERWRITER}   _______________ Подпись`;
 
     const rows = [];
@@ -181,8 +223,7 @@ const ARForm = {
     rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
     rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
     rows.push(finHeaderRow());
-    rows.push(finStrahRow());
-    rows.push(finFilialRow());
+    finBodyRows().forEach(tr => rows.push(tr));
     rows.push(labelRow('Срок действия договора страхования', period));
     rows.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
     rows.push(labelRow('ДАиП рекомендовано:', recText));
@@ -203,8 +244,7 @@ const ARForm = {
     rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
     rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
     rows.push(finHeaderRow());
-    rows.push(finStrahRow());
-    rows.push(finFilialRow());
+    finBodyRows().forEach(tr => rows.push(tr));
     rows.push(labelRow('Срок действия договора страхования', period));
     rows.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
     rows.push(labelRow('РЕШЕНИЕ:', recText));

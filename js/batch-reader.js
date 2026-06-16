@@ -1,56 +1,55 @@
-// batch-reader.js — парсер ежедневного реестра договоров ОСНС (выгрузка из АИС).
+// batch-reader.js — парсер выгрузки «АндерРешение» (Рекомендация ДАиП) из АИС.
 //
-// На вход — .xlsx с одной строкой-заголовком (строка 1) и N строками договоров.
+// На вход — .xlsx с одной строкой-заголовком (строка 1) и N строками решений.
 // Колонки находятся ПО ТЕКСТУ заголовка (устойчиво к перестановке), с запасным
-// вариантом по фиксированной букве колонки (выгрузка стабильна). Возвращаем
-// массив объектов-строк, отфильтрованных до ОСНС с валидным 12-значным БИН.
+// вариантом по фиксированной букве колонки. Возвращаем массив объектов-строк,
+// отфильтрованных по валидному 12-значному БИН/ИИН.
 //
-// Маппинг (подтверждён на реальной выгрузке):
-//   БИН/ИИН (H) · Номер договора (D) · Страхователь (BR) · Дата договора (B)
-//   Дата начала/окончания (K/L) · Страховая сумма (V) · ФОТ→ГФОТ (BY)
-//   Количество объектов→работники (AL) · Класс проф риска (AK) · Код ОКЭД (AJ)
-//   Вид деятельнсти Андеррайтеры (CA) · Поправочный Коэфициент (CM): 1|0,9
-//   Страховая премия без коэф→премия (CU) · Страховая премия→с учётом ПК (W)
-//   Не резидент (CD) · Страхователь с гос участием (DF) · Аф.лицо (E/F)
-//   КлассСтрахования (S) — фильтр ОСНС · Основное подразделение (J)
+// Маппинг (по таблице «Копия АндерРешение»):
+//   Наименование ← Контрагент (E) · БИН ← БИНКонтрагента (F)
+//   ОКЭД ← КодОКЭД (H) · Класс ← КлассПрофРиска (J)
+//   Кол-во работников ← КоличествоРаботников (K)
+//   ФОТ ← ФОТ (L) · Страх. сумма ← СтраховаяСумма (N)
+//   Страх. премия ← СтраховаяПремия (R) · Премия с ПК = премия × ПК (по строке)
+//   ПК ← ПоправочныйКоэффициент (P) · Гос. участие ← ГосУчастие (T)
+//   Автор/менеджер ← Менеджер (U) · Номер договора ← НомерДоговора (B)
+//   Регион ← Регион (G) · Деятельность ← ВидДеятельности (I) · Оплата ← ПорядокОплаты (X)
+//   Срок действия ← НачПериодаДействия/КонПериодаДействия (V/W), «27.05.2026 0:00:00»
 //
-// Тариф = премия_без_коэф / страховая_сумма (CU/V) — самосогласован с классом.
-// Премия с учётом ПК (W) = CU × ПК. Решение: ПК=1 → standard, ПК=0,9 → discount.
+// Тариф = премия / страховая_сумма (Q/M) — самосогласован с классом.
+// Дата договора вычисляется из номера договора (цифры [2..8) = ДД.ММ.ГГ).
+// Решение: ПК=1 → standard, ПК<1 → discount.
 
 const BatchReader = {
   // Кандидаты заголовков (нормализованные: trim+lowercase+схлоп пробелов) и
   // запасная буква колонки. Первый точно совпавший заголовок выигрывает.
+  // Заголовки поддерживают обе версии выгрузки (новую и прежнюю).
   FIELDS: {
-    bin:            { headers: ['бин / иин', 'бин/иин', 'бин', 'иин'], col: 'H' },
-    contractNumber: { headers: ['номер договора'], col: 'D' },
-    insurerName:    { headers: ['страхователь'], col: 'BR' },
-    insurerNameAlt: { headers: ['контрагент полное наименование'], col: 'CB' },
-    dateContract:   { headers: ['дата договора'], col: 'B' },
-    periodFrom:     { headers: ['дата начала срока действия'], col: 'K' },
-    periodTo:       { headers: ['дата окончания срока действия'], col: 'L' },
-    insuranceSum:   { headers: ['страховая сумма'], col: 'V' },
-    premiumWith:    { headers: ['страховая премия'], col: 'W' },
-    premiumBase:    { headers: ['страховая премия без коэф'], col: 'CU' },
-    coeff:          { headers: ['поправочный коэфициент', 'поправочный коэффициент'], col: 'CM' },
-    workers:        { headers: ['количество объектов'], col: 'AL' },
-    gfot:           { headers: ['фот'], col: 'BY' },
-    activity:       { headers: ['вид деятельнсти андеррайтеры', 'вид деятельности андеррайтеры'], col: 'CA' },
-    activityAlt:    { headers: ['вид деятельности'], col: 'AI' },
-    oked:           { headers: ['код окэд'], col: 'AJ' },
-    riskClass:      { headers: ['класс проф риска'], col: 'AK' },
-    nonResident:    { headers: ['не резидент'], col: 'CD' },
-    govParticip:    { headers: ['страхователь с гос участием'], col: 'DF' },
-    affiliatedA:    { headers: ['аф. лицо', 'аф.лицо'], col: 'E' },
-    affiliatedB:    { headers: ['аффилированный контрагент'], col: 'F' },
-    insuranceClass: { headers: ['классстрахования', 'класс страхования'], col: 'S' },
-    branch:         { headers: ['основное подразделение'], col: 'J' },
+    contractNumber: { headers: ['номердоговора'], col: 'B' },
+    insurerName:    { headers: ['контрагент'], col: 'E' },
+    bin:            { headers: ['бинконтрагента'], col: 'F' },
+    region:         { headers: ['регион'], col: 'G' },
+    oked:           { headers: ['кодокэд', 'код окэд'], col: 'H' },
+    activity:       { headers: ['виддеятельности'], col: 'I' },
+    riskClass:      { headers: ['класспрофриска'], col: 'J' },
+    workers:        { headers: ['количествоработников'], col: 'K' },
+    gfot:           { headers: ['фот'], col: 'L' },
+    insuranceSum:   { headers: ['страховаясумма'], col: 'N' },
+    coeff:          { headers: ['поправочныйкоэффициент'], col: 'P' },
+    premiumBase:    { headers: ['страховаяпремия'], col: 'R' },
+    govParticip:    { headers: ['госучастие'], col: 'T' },
+    author:         { headers: ['менеджер', 'автор'], col: 'U' },
+    paymentOrder:   { headers: ['порядокоплаты'], col: 'X' },
+    // Срок действия — формат «27.05.2026 0:00:00» (парсится в _date).
+    periodFrom:     { headers: ['начпериодадействия', 'дата начала срока действия'], col: 'V' },
+    periodTo:       { headers: ['конпериодадействия', 'дата окончания срока действия'], col: 'W' },
   },
 
   _norm(s) {
     return String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
   },
 
-  // Буква колонки Excel → 0-based индекс ('A'→0, 'AL'→37, 'CM'→90).
+  // Буква колонки Excel → 0-based индекс ('A'→0, 'L'→11, 'T'→19).
   _colToIndex(letters) {
     let n = 0;
     for (const ch of String(letters).toUpperCase()) {
@@ -59,11 +58,11 @@ const BatchReader = {
     return n - 1;
   },
 
-  // Деньги: «12 703 259», «0,9», 85000 → number. NBSP/пробелы убираем, запятая→точка.
+  // Деньги: «21540000,00», «0,9», 85000 → number. NBSP/пробелы убираем, запятая→точка.
   _money(v) {
     if (v == null || v === '') return null;
     if (typeof v === 'number') return v;
-    const s = String(v).replace(/[\s ]/g, '').replace(',', '.');
+    const s = String(v).replace(/[\s ]/g, '').replace(',', '.');
     const n = parseFloat(s);
     return Number.isFinite(n) ? n : null;
   },
@@ -73,11 +72,32 @@ const BatchReader = {
     return n == null ? null : Math.round(n);
   },
 
-  // «20.02.2026» → Date (через Utils.parseExcelDate, понимает DD.MM.YYYY и serial).
+  // «20.02.2026», «27.05.2026 0:00:00», serial → Date (через Utils.parseExcelDate).
+  // У строки с датой-временем берём дату до пробела.
   _date(v) {
     if (v == null || v === '') return null;
-    const d = Utils.parseExcelDate(v);
+    let val = v;
+    if (typeof v === 'string') {
+      const m = v.trim().match(/^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}/);
+      if (m) val = m[0];
+    }
+    if (typeof Utils === 'undefined' || !Utils.parseExcelDate) return null;
+    const d = Utils.parseExcelDate(val);
     return (d && !isNaN(d)) ? d : null;
+  },
+
+  // Дата из номера договора: игнорируем все нецифровые символы, берём цифры.
+  // [0..2) — код продукта (04 = ОСНС), [2..8) — дата в формате ДД.ММ.ГГ.
+  // Пример: «T04290526080002» → цифры «04290526080002» → 29.05.2026.
+  _contractDate(contractNumber) {
+    const digits = String(contractNumber == null ? '' : contractNumber).replace(/\D/g, '');
+    if (digits.length < 8) return null;
+    const dd = parseInt(digits.slice(2, 4), 10);
+    const mm = parseInt(digits.slice(4, 6), 10);
+    const yy = parseInt(digits.slice(6, 8), 10);
+    if (!dd || !mm || dd > 31 || mm > 12) return null;
+    const d = new Date(2000 + yy, mm - 1, dd);
+    return isNaN(d) ? null : d;
   },
 
   _isYes(v) {
@@ -91,11 +111,11 @@ const BatchReader = {
     const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
     if (!grid.length) return { rows: [], total: 0, skipped: 0 };
 
-    // --- Заголовок: ищем строку с «бин» и «страховая сумма» среди первых 5 ---
+    // --- Заголовок: ищем строку с «бин» и «окэд» среди первых 5 ---
     let headerRow = 0;
     for (let r = 0; r < Math.min(5, grid.length); r++) {
       const norm = (grid[r] || []).map(BatchReader._norm);
-      if (norm.some(h => h.includes('бин')) && norm.some(h => h.includes('страховая сумма'))) {
+      if (norm.some(h => h.includes('бин')) && norm.some(h => h.includes('окэд'))) {
         headerRow = r;
         break;
       }
@@ -115,7 +135,7 @@ const BatchReader = {
 
     const cell = (row, field) => {
       const i = idx[field];
-      return (i != null && i < row.length) ? row[i] : null;
+      return (i != null && i >= 0 && i < row.length) ? row[i] : null;
     };
 
     const rows = [];
@@ -123,58 +143,66 @@ const BatchReader = {
     for (let r = headerRow + 1; r < grid.length; r++) {
       const row = grid[r] || [];
       const binRaw = cell(row, 'bin');
-      const bin = String(binRaw == null ? '' : binRaw).replace(/[\s ]/g, '').trim();
-      const sClass = BatchReader._norm(cell(row, 'insuranceClass'));
+      const bin = String(binRaw == null ? '' : binRaw).replace(/[\s ]/g, '').trim();
 
       // Пропускаем пустые строки
       const hasAny = row.some(v => v != null && String(v).trim() !== '');
       if (!hasAny) continue;
 
-      // Фильтр: только ОСНС (несчастные случаи) + валидный 12-значный БИН
-      const isOsns = sClass.includes('несчаст') || sClass.includes('н.с');
-      if (!/^\d{12}$/.test(bin) || (sClass && !isOsns)) {
+      // Фильтр: валидный 12-значный БИН/ИИН
+      if (!/^\d{12}$/.test(bin)) {
         skipped++;
         continue;
       }
 
       const insuranceSum = BatchReader._money(cell(row, 'insuranceSum'));
       const premiumBase = BatchReader._money(cell(row, 'premiumBase'));
-      const premiumWith = BatchReader._money(cell(row, 'premiumWith'));
       const coeff = BatchReader._money(cell(row, 'coeff'));
       const tariff = (premiumBase != null && insuranceSum)
         ? premiumBase / insuranceSum
         : null;
       const isDiscount = (coeff != null && coeff < 1);
+      // Премия с ПК = премия × ПК (по строке). В выгрузке «СтраховаяПремияСПК» —
+      // это ИТОГ по договору (одинаков во всех филиалах), суммировать его нельзя;
+      // считаем по каждой строке сами, тогда Итого = сумма по филиалам корректна.
+      const premiumWithCoeff = (premiumBase != null)
+        ? Math.round(premiumBase * (coeff != null ? coeff : 1) * 100) / 100
+        : null;
 
-      const name = String(cell(row, 'insurerName') || cell(row, 'insurerNameAlt') || '').trim();
-      const activity = String(cell(row, 'activity') || cell(row, 'activityAlt') || '').trim();
-      const affiliated = BatchReader._isYes(cell(row, 'affiliatedA'))
-        || BatchReader._isYes(cell(row, 'affiliatedB'));
+      const name = String(cell(row, 'insurerName') || '').trim();
+      const activity = String(cell(row, 'activity') || '').trim();
+      const contractNumber = String(cell(row, 'contractNumber') || '').trim();
 
       rows.push({
         rowNum: r + 1,                       // человекочитаемый № строки Excel
+        _raw: row,                           // исходные ячейки строки (для выгрузки превышений в оригинальном формате)
         bin,
-        contractNumber: String(cell(row, 'contractNumber') || '').trim(),
+        contractNumber,
         insurerName: name,
-        excelName: name,                     // сохраняем исходное имя из реестра
-        branch: String(cell(row, 'branch') || '').trim(),
-        dateContract: BatchReader._date(cell(row, 'dateContract')),
+        excelName: name,                     // сохраняем исходное имя из выгрузки
+        author: String(cell(row, 'author') || '').trim(),   // андеррайтер-автор решения
+        region: String(cell(row, 'region') || '').trim(),
+        paymentOrder: String(cell(row, 'paymentOrder') || '').trim(),
+        branch: '',
+        // Дата договора — из номера договора (цифры [2..8) = ДД.ММ.ГГ).
+        dateContract: BatchReader._contractDate(contractNumber),
+        // Срок действия — из новых столбцов выгрузки (если есть), иначе null.
         periodFrom: BatchReader._date(cell(row, 'periodFrom')),
         periodTo: BatchReader._date(cell(row, 'periodTo')),
         insuranceSum,
         gfot: BatchReader._money(cell(row, 'gfot')),
         workers: BatchReader._int(cell(row, 'workers')),
-        riskClass: String(cell(row, 'riskClass') || '').trim(),
+        riskClass: String(cell(row, 'riskClass') ?? '').trim(),
         oked: String(cell(row, 'oked') || '').trim(),
         activity,
         tariff,
         premiumBase,
         coeff: coeff != null ? coeff : 1,
-        premiumWithCoeff: premiumWith,
+        premiumWithCoeff,
         decision: isDiscount ? 'discount' : 'standard',
-        nonResident: BatchReader._isYes(cell(row, 'nonResident')),
+        nonResident: false,
         govParticipation: BatchReader._isYes(cell(row, 'govParticip')),
-        affiliated,
+        affiliated: false,
         // Заполняется фоновым statgov-лукапом:
         statgov: null,           // { name, legalAddress, registrationDate, ... } | { error }
         statgovStatus: 'pending',// 'pending' | 'loading' | 'done' | 'error' | 'skip'
@@ -183,7 +211,8 @@ const BatchReader = {
       });
     }
 
-    return { rows, total: rows.length, skipped };
+    // header — исходная строка заголовков (для выгрузки превышений в оригинальном формате).
+    return { rows, total: rows.length, skipped, header: grid[headerRow] || [] };
   },
 };
 
