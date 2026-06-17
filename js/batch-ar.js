@@ -137,9 +137,12 @@ const BatchAR = {
       const govCls = gDiff ? ' batch-cell--err' : '';
       // Молодая компания (< порога) со скидкой → ПК подсвечиваем красным.
       const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
-      // СС/премия: жёлтым, если расходятся с расчётом по методологии.
-      const sumCls = BatchAR._sumDiff(r) ? ' batch-cell--warn' : '';
-      const premCls = BatchAR._premiumDiff(r) ? ' batch-cell--warn' : '';
+      // СС < премии → красным (грубая ошибка); иначе жёлтым при расхождении с
+      // расчётом по методологии. Красный приоритетнее жёлтого.
+      const sumLtPrem = BatchAR._sumLtPremiumError(r);
+      const sumCls = sumLtPrem ? ' batch-cell--err' : (BatchAR._sumDiff(r) ? ' batch-cell--warn' : '');
+      const premCls = sumLtPrem ? ' batch-cell--err' : (BatchAR._premiumDiff(r) ? ' batch-cell--warn' : '');
+      const sumPremTitle = sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '';
       const level = BatchAR._rowLevel(r);
       const rowCls = level ? ` class="batch-row--${level}"` : '';
       const nm = ARForm._effName(r);
@@ -152,8 +155,8 @@ const BatchAR = {
         <td class="batch-c-class${classCls}">${BatchAR._classCell(r)}</td>
         <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
-        <td class="batch-c-num2 batch-c-sum${sumCls}">${BatchAR._sumCellHtml(r)}</td>
-        <td class="batch-c-num2 batch-c-prem${premCls}">${BatchAR._premiumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-sum${sumCls}"${sumPremTitle}>${BatchAR._sumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-prem${premCls}"${sumPremTitle}>${BatchAR._premiumCellHtml(r)}</td>
         <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
@@ -217,6 +220,13 @@ const BatchAR = {
   },
   _sumDiff(r) {
     return BatchAR._moneyDiff(BatchAR._expectedSum(r), r.insuranceSum);
+  },
+  // Грубая ошибка: страховая сумма МЕНЬШЕ страховой премии. Премия всегда должна
+  // быть малой долей суммы (премия = СС × тариф), поэтому СС < премии — точно
+  // ошибка данных → красным вся строка и обе ячейки (СС и премия).
+  _sumLtPremiumError(r) {
+    return r.insuranceSum != null && r.premiumBase != null
+      && Number(r.insuranceSum) < Number(r.premiumBase);
   },
 
   // СС: сверху — из выгрузки, снизу в скобках — расчётная (премия/тариф).
@@ -288,7 +298,7 @@ const BatchAR = {
   //                      не совпал (у компании несколько ОКЭД, выбран не тот);
   //   null             — расхождений нет.
   _rowLevel(r) {
-    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)) return 'err';
+    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r) || BatchAR._sumLtPremiumError(r)) return 'err';
     if (BatchAR._classDiff(r)) return 'warn';
     return null;
   },
@@ -514,9 +524,18 @@ const BatchAR = {
     tr.querySelector('.batch-c-gov')?.classList.toggle('batch-cell--err', gDiff);
     // ПК красным, если молодая компания (< порога) со скидкой.
     tr.querySelector('.batch-c-center')?.classList.toggle('batch-cell--err', BatchAR._pkYoungError(r));
-    // СС/премия жёлтым при расхождении с расчётом по методологии.
-    tr.querySelector('.batch-c-sum')?.classList.toggle('batch-cell--warn', BatchAR._sumDiff(r));
-    tr.querySelector('.batch-c-prem')?.classList.toggle('batch-cell--warn', BatchAR._premiumDiff(r));
+    // СС/премия: красным если СС < премии (грубая ошибка), иначе жёлтым при
+    // расхождении с методологией. Красный приоритетнее жёлтого.
+    const sumLtPrem = BatchAR._sumLtPremiumError(r);
+    const setSumPremLvl = (sel, warnOn) => {
+      const c = tr.querySelector(sel); if (!c) return;
+      c.classList.toggle('batch-cell--err', sumLtPrem);
+      c.classList.toggle('batch-cell--warn', !sumLtPrem && warnOn);
+      if (sumLtPrem) c.title = 'Ошибка: страховая сумма меньше страховой премии';
+      else c.removeAttribute('title');
+    };
+    setSumPremLvl('.batch-c-sum', BatchAR._sumDiff(r));
+    setSumPremLvl('.batch-c-prem', BatchAR._premiumDiff(r));
     const level = BatchAR._rowLevel(r);
     tr.classList.toggle('batch-row--err', level === 'err');
     tr.classList.toggle('batch-row--warn', level === 'warn');
