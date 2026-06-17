@@ -39,12 +39,13 @@ const BatchReader = {
     riskClass:      { headers: ['класспрофриска'], col: 'J' },
     workers:        { headers: ['количествоработников'], col: 'K' },
     gfot:           { headers: ['фот'], col: 'L' },
-    insuranceSum:   { headers: ['страховаясумма'], col: 'N' },
+    insuranceSum:   { headers: ['страховаясумма'], col: 'N' },        // per-row (для документа АР)
+    insuranceSumTotal: { headers: ['общаястраховаясумма'], col: 'M' }, // ИТОГ по договору (таблица/проверки)
     coeff:          { headers: ['поправочныйкоэффициент'], col: 'P' },
-    // R (СтраховаяПремия) = премия С ПК (per-row). Премия ДО ПК считаем как R/ПК
-    // (в колонке S «СтраховаяПремияСПК» лежит ИТОГ до ПК по договору — для филиалов
-    // он одинаков во всех строках, поэтому per-row берём из R, а не из S).
+    // R (СтраховаяПремия) = премия С ПК (per-row, для документа). Премия ДО ПК = R/ПК.
+    // Для таблицы/проверок берём ИТОГ по договору из «ОбщаяСтраховаяПремия» (premiumTotal).
     premiumWith:    { headers: ['страховаяпремия'], col: 'R' },
+    premiumTotal:   { headers: ['общаястраховаяпремия'], col: 'Q' },
     govParticip:    { headers: ['госучастие'], col: 'T' },
     author:         { headers: ['менеджер', 'автор'], col: 'U' },
     paymentOrder:   { headers: ['порядокоплаты'], col: 'X' },
@@ -189,6 +190,11 @@ const BatchReader = {
         ? premiumBase / insuranceSum
         : null;
       const isDiscount = (coeff != null && coeff < 1);
+      // ИТОГ по договору (для таблицы/проверок). Если колонки нет — берём per-row.
+      const insuranceSumTotalRaw = BatchReader._money(cell(row, 'insuranceSumTotal'));
+      const premiumTotalRaw = BatchReader._money(cell(row, 'premiumTotal'));
+      const insuranceSumTotal = insuranceSumTotalRaw != null ? insuranceSumTotalRaw : insuranceSum;
+      const premiumTotal = premiumTotalRaw != null ? premiumTotalRaw : premiumWithCoeff;
 
       const name = String(cell(row, 'insurerName') || '').trim();
       const activity = String(cell(row, 'activity') || '').trim();
@@ -215,6 +221,8 @@ const BatchReader = {
         periodFrom: BatchReader._date(cell(row, 'periodFrom')),
         periodTo: BatchReader._date(cell(row, 'periodTo')),
         insuranceSum,
+        insuranceSumTotal,                   // ОбщаяСтраховаяСумма (ИТОГ по договору) — таблица/проверки
+        premiumTotal,                        // ОбщаяСтраховаяПремия (ИТОГ с ПК) — таблица/проверки
         gfot: BatchReader._money(cell(row, 'gfot')),
         workers: BatchReader._int(cell(row, 'workers')),
         riskClass: String(cell(row, 'riskClass') ?? '').trim(),

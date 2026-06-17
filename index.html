@@ -245,6 +245,7 @@
         </div>
 
         <div class="batch-toolbar" id="batch-toolbar" style="display:none">
+          <button class="batch-sort-errors" id="batch-sort-errors" type="button" onclick="BatchAR.toggleSortByError()" title="Показать сначала красные строки, затем жёлтые">⚑ Сначала ошибки</button>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
         <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
@@ -255,14 +256,12 @@
                 <th class="batch-c-contract">Номер договора</th>
                 <th class="batch-c-name-st">Наименование<br>Страхователя</th>
                 <th class="batch-c-bin-st" title="По БИН Страхователя проверяется возраст компании (≥3 лет для ПК)">БИН<br>Страхователя</th>
-                <th class="batch-c-bin">БИН<br>Контрагента</th>
-                <th class="batch-c-name">Контрагент</th>
                 <th class="batch-c-oked" title="Сверху — ОКЭД из выгрузки, снизу — из stat.gov.kz">ОКЭД</th>
                 <th class="batch-c-class" title="Сверху — класс из выгрузки, снизу — вычисленный по ОКЭД">Класс</th>
                 <th class="batch-c-num2">Кол-во<br>сотрудников</th>
                 <th class="batch-c-num2">ФОТ</th>
-                <th class="batch-c-num2" title="Сверху — из выгрузки, снизу — расчётная (премия / тариф)">Страх. сумма</th>
-                <th class="batch-c-num2" title="Сверху — из выгрузки, снизу — расчётная (ФОТ × тариф, мин. 85 000)">Страх. Премия</th>
+                <th class="batch-c-num2" title="ОбщаяСтраховаяСумма; снизу — расчётная (по ФОТ договора и тарифу)">Страх. сумма</th>
+                <th class="batch-c-num2" title="ОбщаяСтраховаяПремия÷ПК (до ПК); снизу — расчётная (ФОТ × тариф, мин. 85 000)">Страх. Премия</th>
                 <th class="batch-c-center" title="Поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой">ПК</th>
                 <th class="batch-c-num2">Премия с ПК</th>
                 <th class="batch-c-reg">Дата рег.</th>
@@ -289,6 +288,10 @@
           <button class="btn-export-errors" id="batch-export-errors" style="display:none" onclick="BatchAR.exportErrors(this)"
                   title="Выгрузить красные строки в исходном формате с подсветкой ошибочных ячеек — для правки и повторной загрузки">
             Выгрузить некорректные (xlsx)
+          </button>
+          <button class="btn-export-warns" id="batch-export-warns" style="display:none" onclick="BatchAR.exportWarnings(this)"
+                  title="Выгрузить жёлтые строки (расхождения класса/расчёта) в исходном формате с подсветкой ячеек">
+            Выгрузить расхождения (жёлтые)
           </button>
         </div>
         <div class="batch-progress" id="batch-progress" style="display:none">
