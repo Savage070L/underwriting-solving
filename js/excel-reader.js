@@ -217,6 +217,14 @@ const ExcelReader = {
     const wsO = wb.Sheets[obshchayaName];
     const rangeO = XLSX.utils.sheet_to_json(wsO, { header: 1, raw: true });
 
+    // ---- Клиент из B2: "<Наименование>, ИИН/БИН-<12 цифр>, РНН-..." ----
+    // Извлекаем БИН/ИИН клиента (между «ИИН/БИН-» и «,») — по нему файл истории
+    // убытков сопоставляется с компанией. РНН (тоже 12 цифр) не цепляем: якорь — «ИИН/БИН».
+    const clientCell = (rangeO[1] && rangeO[1][1] != null) ? String(rangeO[1][1]) : '';
+    const binMatch = clientCell.match(/ИИН\s*\/\s*БИН\s*[-–—:№]?\s*(\d{12})/i);
+    const clientBin = binMatch ? binMatch[1] : '';
+    const clientName = clientCell ? clientCell.split(/,\s*ИИН\s*\/\s*БИН/i)[0].trim() : '';
+
     // ---- Find header row ----
     let headerIdx = -1;
     for (let i = 0; i < Math.min(rangeO.length, 10); i++) {
@@ -807,6 +815,9 @@ const ExcelReader = {
     }
 
     return {
+      // Клиент из B2 (для сопоставления файла с компанией по БИН).
+      clientBin,
+      clientName,
       // Backward-compat (used by current generators)
       totalClaims: recognized3y.length,
       companyCounts,

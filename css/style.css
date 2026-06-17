@@ -590,8 +590,29 @@ header.app-header {
 /* Per-case uploads — larger, more prominent */
 .upload-grid-main {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--sp-3);
+}
+.registry-picker {
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.registry-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.registry-picker-row label { font-weight: 600; font-size: 0.9rem; color: #475467; }
+.registry-picker-row #registry-filter {
+  flex: 1; min-width: 160px; padding: 6px 10px;
+  border: 1px solid #d0d5dd; border-radius: 8px; font-size: 0.9rem;
+}
+.registry-picker #registry-picker {
+  width: 100%; padding: 4px; border: 1px solid #d0d5dd; border-radius: 8px;
+  font-size: 0.9rem; font-variant-numeric: tabular-nums;
 }
 .upload-zone-main {
   background: var(--c-surface-elevated);
@@ -2557,6 +2578,19 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   flex: 1;
 }
 .batch-gen-all:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-export-errors {
+  padding: 0 18px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b42318;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-export-errors:hover { background: #fee2e2; }
+.btn-export-errors:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .batch-progress { margin-top: 12px; }
 .batch-progress-track {
@@ -2637,6 +2671,9 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-c-bin  { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
 /* Страхователь — вдвое уже прежнего (было 200–340px); длинные имена обрезаются. */
 .batch-c-name { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+/* Страхователь (НаименованиеСтрахователя / БИНСтрахователя — колонки C/D выгрузки). */
+.batch-c-name-st { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+.batch-c-bin-st { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
 .batch-c-oked { width: 110px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
 .batch-c-class { width: 64px; text-align: center; white-space: nowrap; vertical-align: top; }
 .batch-c-num2 { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
@@ -2656,10 +2693,12 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
    • ЖЁЛТЫЙ (--warn): мягкое расхождение класса — ОКЭД у компании есть, но класс
      не совпал (у компании несколько ОКЭД, выбран не тот). */
 /* Рамка по всем сторонам ячейки — чтобы сразу видеть, где именно расхождение. */
-.batch-cell--warn { background: #fffbeb !important; box-shadow: inset 0 0 0 2px #f59e0b; }
-.batch-cell--err  { background: #fef2f2 !important; box-shadow: inset 0 0 0 2px #ef4444; }
-.batch-table tbody tr:hover .batch-cell--warn { background: #fef9e7 !important; }
-.batch-table tbody tr:hover .batch-cell--err  { background: #fee2e2 !important; }
+/* Подсветка КОНКРЕТНОЙ ошибочной ячейки — заметно темнее фона строки, плюс рамка,
+   чтобы было видно, ИМЕННО какая ячейка ошибочна (фон строки светлый, ячейка — насыщенная). */
+.batch-cell--warn { background: #fde68a !important; box-shadow: inset 0 0 0 2px #d97706; font-weight: 600; }
+.batch-cell--err  { background: #fca5a5 !important; box-shadow: inset 0 0 0 2px #dc2626; font-weight: 600; }
+.batch-table tbody tr:hover .batch-cell--warn { background: #fcd34d !important; }
+.batch-table tbody tr:hover .batch-cell--err  { background: #f87171 !important; }
 
 /* Вся строка: жёлтая — мягкое расхождение класса, красная — точная ошибка. */
 .batch-row--warn > td { background: #fffbeb; }

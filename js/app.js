@@ -228,22 +228,40 @@ const App = {
   //     (или из заявки). Раньше форсировалась ставка 85 000 ₸/мес — отказались.
   //   - молодая компания / НС: скидка не применяется (через _effectiveCoeffInfo)
   // Используется в showPreview и в _collectData — единый источник правды.
+  // Методология ОСНС: премия = СС × тариф, но премия не может быть меньше 1 МЗП.
+  // Если СС × тариф < минимума (1 МЗП) — поднимаем СС до (минимум / тариф), тогда
+  // премия становится ровно 1 МЗП. В ручном вводе СС изначально = ФОТ, поэтому это и
+  // есть правило «ФОТ = СС, но если премия с ФОТ < 85 000 → СС = 85 000 / тариф».
+  // Возвращает { insuranceSum, premiumBase } с тиынами. Требует tariff > 0.
+  _applyMinPremium(sum, tariff) {
+    const minP = App._getLimit('minPremium') || 85000;
+    let s = sum;
+    let base = App._round2(sum * tariff);
+    if (base < minP) {
+      s = App._round2(minP / tariff);
+      base = App._round2(s * tariff);
+    }
+    return { insuranceSum: s, premiumBase: base };
+  },
+
   _effectiveFinancials(z) {
     if (!z) return null;
     const aff = App._isAffiliatedBin(z.bin);
     const isAffiliated = !!aff;
 
-    // Страховая сумма — как ввёл пользователь / как в заявке
-    const insuranceSum = z.insuranceSum;
-
     // Тариф из текущего ОКЭДа / справочника
     const resolved = App._resolveOked ? App._resolveOked() : { riskClass: z.riskClass, oked: z.oked };
     const tariff = App._resolveTariff(resolved.riskClass);
 
-    // Базовая премия = страх.сумма × тариф (если оба известны), иначе из z
+    // Страховая сумма — как ввёл пользователь / как в заявке (в ручном вводе = ФОТ).
+    // Базовая премия = СС × тариф. По методологии премия не может быть < 1 МЗП:
+    // если меньше — СС поднимается до (1 МЗП / тариф), а премия = 1 МЗП.
+    let insuranceSum = z.insuranceSum;
     let premiumBase = z.premiumBase;
-    if (Number.isFinite(insuranceSum) && Number.isFinite(tariff)) {
-      premiumBase = App._round2(insuranceSum * tariff);
+    if (Number.isFinite(insuranceSum) && Number.isFinite(tariff) && tariff > 0) {
+      const m = App._applyMinPremium(insuranceSum, tariff);
+      insuranceSum = m.insuranceSum;
+      premiumBase = m.premiumBase;
     }
 
     // Эффективный коэффициент (учёт young/НС)
@@ -328,6 +346,7 @@ const App = {
   LIMITS_DEFAULTS: {
     minCompanyAgeYears: 3,           // < 3 лет → скидка не применяется
     minAvgSalary: 85000,             // порог alert «низкая ЗП»
+    minPremium: 85000,               // минимальная страховая премия = 1 МЗП (методология ОСНС)
     defaultDiscount: 0.1,            // авто-скидка за чистую историю (нет НС) → ПК 0,9
     limitAsLowCls1_15: 2000000000,   // АС: нижний порог, классы 1–15
     limitAsLowCls16_22: 1500000000,  // АС: нижний порог, классы 16–22
@@ -2087,7 +2106,9 @@ const App = {
   // Пересчитывает тариф/премию для зайавки в ручном режиме.
   // Вызывается из onOkedChange (которая срабатывает после autoLookupStatGov,
   // загрузки classifier/popravka, и ручных изменений в #okedInput).
-  // Точная арифметика: премия = страх.сумма × тариф округляется только до тиынов.
+  // Методология: СС = ФОТ; премия = СС × тариф; если премия < 1 МЗП → СС = 1 МЗП /
+  // тариф (премия = 1 МЗП). СС всегда пересчитываем ОТ ФОТ (z.fot), а не от уже
+  // поднятой z.insuranceSum — иначе при смене тарифа сумма «съезжала» бы. Тиыны сохраняем.
   _recalcManualPremium() {
     const z = App.zayavka;
     if (!z || !z._manual) return;
@@ -2097,12 +2118,14 @@ const App = {
     if (resolved.oked && z.oked !== resolved.oked) { z.oked = resolved.oked; changed = true; }
     if (resolved.riskClass != null && z.riskClass !== resolved.riskClass) { z.riskClass = resolved.riskClass; changed = true; }
     if (resolved.activity && z.activity !== resolved.activity) { z.activity = resolved.activity; changed = true; }
-    if (Number.isFinite(tariff) && Number.isFinite(z.insuranceSum)) {
-      const base = App._round2(z.insuranceSum * tariff);
+    const baseSum = (z.fot != null && Number.isFinite(z.fot)) ? z.fot : z.insuranceSum;
+    if (Number.isFinite(tariff) && tariff > 0 && Number.isFinite(baseSum)) {
+      const m = App._applyMinPremium(baseSum, tariff);
       const coeffEff = (z.coeffDown != null && z.coeffDown !== 0) ? (1 - z.coeffDown) : 1;
-      const withCoeff = App._round2(base * (z.coeff || 1) * coeffEff);
+      const withCoeff = App._round2(m.premiumBase * (z.coeff || 1) * coeffEff);
       if (z.tariff !== tariff) { z.tariff = tariff; changed = true; }
-      if (z.premiumBase !== base) { z.premiumBase = base; changed = true; }
+      if (z.insuranceSum !== m.insuranceSum) { z.insuranceSum = m.insuranceSum; changed = true; }
+      if (z.premiumBase !== m.premiumBase) { z.premiumBase = m.premiumBase; changed = true; }
       if (z.premiumWithCoeff !== withCoeff) { z.premiumWithCoeff = withCoeff; changed = true; }
     }
     if (changed) {
@@ -2123,8 +2146,14 @@ const App = {
 
       const zone = document.getElementById('zone-claims');
       zone.classList.add('loaded');
+      const cbin = App.claims.clientBin;
+      const caseBin = App.zayavka && App.zayavka.bin;
+      const mismatch = cbin && caseBin && cbin !== String(caseBin).trim();
       document.getElementById('status-claims').textContent =
-        `${file.name} (${App.claims.totalClaims} НС за 3 года)`;
+        `${file.name} (${App.claims.totalClaims} НС за 3 года)${cbin ? ` — БИН ${cbin}` : ''}${mismatch ? ' ⚠ не совпадает с кейсом' : ''}`;
+      if (mismatch) {
+        App.showMsg(`Внимание: БИН в файле убытков (${cbin}) не совпадает с БИН кейса (${caseBin}). Возможно, загружен файл другой компании.`, 'error');
+      }
 
       document.getElementById('analytics-cta').classList.add('visible');
 
@@ -2137,6 +2166,143 @@ const App = {
       console.error('Error loading claims:', e);
       App.showMsg(`Ошибка загрузки истории убытков: ${e.message}`, 'error');
     }
+  },
+
+  // ===== РЕЕСТР/ВЫГРУЗКА КАК ИСТОЧНИК КЕЙСА (третий блок «Файлы по кейсу») =====
+  // Импорт выгрузки «АндерРешение»: парсим тем же BatchReader, даём выбрать компанию
+  // (если строк несколько) и заполняем форму её значениями.
+  async loadCaseRegistry(file) {
+    if (!file) return;
+    try {
+      const buf = await App._readFile(file);
+      const parsed = BatchReader.parse(buf);
+      if (!parsed.rows || !parsed.rows.length) {
+        App.showMsg('В выгрузке не найдено строк ОСНС с валидным БИН.', 'error');
+        return;
+      }
+      App.caseRegistry = parsed;
+      const zone = document.getElementById('zone-registry');
+      if (zone) zone.classList.add('loaded');
+      const st = document.getElementById('status-registry');
+      if (st) st.textContent = `${file.name} (${parsed.rows.length} ${Utils.plural(parsed.rows.length, 'строка', 'строки', 'строк')})`;
+      const filt = document.getElementById('registry-filter');
+      if (filt) filt.value = '';
+      App._renderRegistryPicker();
+      const wrap = document.getElementById('registry-picker-wrap');
+      if (wrap) wrap.style.display = parsed.rows.length > 1 ? '' : 'none';
+      if (parsed.rows.length === 1) {
+        App.applyRegistryRow(0);
+      } else {
+        App.showMsg(`Загружена выгрузка: ${parsed.rows.length} компаний. Выберите компанию в списке.`, 'success');
+      }
+    } catch (e) {
+      console.error('registry load', e);
+      App.showMsg('Не удалось прочитать выгрузку: ' + e.message, 'error');
+    }
+  },
+
+  // Список компаний из выгрузки (с фильтром по БИН/названию). DOM-узлы — без escape-проблем.
+  _renderRegistryPicker() {
+    const sel = document.getElementById('registry-picker');
+    const parsed = App.caseRegistry;
+    if (!sel || !parsed) return;
+    const q = (document.getElementById('registry-filter')?.value || '').trim().toLowerCase();
+    const cur = sel.value;
+    sel.innerHTML = '';
+    let shown = 0;
+    parsed.rows.forEach((r, i) => {
+      const bin = (r.binInsurer && /^\d{12}$/.test(r.binInsurer)) ? r.binInsurer : r.bin;
+      const name = r.insurerNameSt || r.insurerName || '';
+      const label = `${bin} — ${name}`;
+      if (q && !label.toLowerCase().includes(q)) return;
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = label;
+      sel.appendChild(opt);
+      shown++;
+    });
+    if (!shown) {
+      const opt = document.createElement('option');
+      opt.disabled = true;
+      opt.textContent = 'Ничего не найдено';
+      sel.appendChild(opt);
+    }
+    if (cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+  },
+
+  // Заполнить форму кейса данными выбранной строки выгрузки.
+  // БИН кейса — Страхователя (предмет андеррайтинга); премия/СС пересчитаются по
+  // методологии из ФОТ (как в ручном вводе). Период и порядок оплаты — из выгрузки.
+  applyRegistryRow(index) {
+    const parsed = App.caseRegistry;
+    const row = parsed && parsed.rows[Number(index)];
+    if (!row) return;
+    const bin = (row.binInsurer && /^\d{12}$/.test(row.binInsurer)) ? row.binInsurer : row.bin;
+    const insurerName = row.insurerNameSt || row.insurerName || '';
+    const from = row.periodFrom || null;
+    const to = row.periodTo || null;
+    const docDate = from || row.dateContract || new Date();
+    App.zayavka = {
+      _manual: true, _manualPrimary: 'fot', _fromRegistry: true,
+      insurerName, bin,
+      region: row.region || '',
+      docDate,
+      insuranceType: Utils.INSURANCE_TYPE,
+      activity: row.activity || '',
+      riskClass: parseInt(row.riskClass, 10) || null,
+      tariff: (row.tariff != null && Number.isFinite(row.tariff)) ? row.tariff : null,
+      insuranceSum: row.insuranceSum,
+      workers: row.workers,
+      coeff: (row.coeff != null) ? row.coeff : 1,
+      coeffDown: 0,
+      premiumBase: row.premiumBase,
+      premiumWithCoeff: row.premiumWithCoeff,
+      paymentOrder: row.paymentOrder || 'Единовременно',
+      govParticipation: row.govParticipation ? 'Да' : '',
+      periodFrom: from, periodTo: to,
+      oked: row.oked || '',
+      fot: row.gfot,
+      avgSalary: (row.gfot && row.workers) ? App._round2(row.gfot / row.workers / 12) : null,
+      _manualHasClaims: null, _manualClaimsCount: null,
+      // Контрагент — справочно (документ/возраст идут по Страхователю).
+      binContragent: row.bin,
+      insurerNameContragent: row.insurerName,
+    };
+    // Сброс состояния формы (после присвоения zayavka — как в applyManualZayavka).
+    App._resetFormState();
+    // Период — из выгрузки (V/W), а не пересчитанный из docDate.
+    if (from) App.zayavka.periodFrom = from;
+    if (to) App.zayavka.periodTo = to;
+    const okedEl = document.getElementById('okedInput');
+    if (okedEl) okedEl.value = row.oked || '';
+    App._fillDateInputs();
+    const poSelect = document.getElementById('paymentOrder');
+    if (poSelect) poSelect.value = /рассроч/i.test(row.paymentOrder || '') ? 'В рассрочку' : 'Единовременно';
+    if (App._rawNormativBuffer) {
+      App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, App.zayavka.periodFrom || docDate);
+      App._applyRefOverrides('normativ');
+    }
+    if (bin) { App.autoLookupBIN(bin); App.autoLookupStatGov(bin); App.autoLookupStatsnet(bin); }
+    App.onOkedChange();
+    App.onPaymentChange();
+    App._persistCase();
+    App._refreshDerivedData();
+    App.showMsg(`Загружено из выгрузки: ${insurerName || bin}. Загрузите файл убытков — он сопоставится по БИН.`, 'success');
+  },
+
+  clearCaseRegistry(event) {
+    if (event) event.stopPropagation();
+    App.caseRegistry = null;
+    const zone = document.getElementById('zone-registry');
+    if (zone) zone.classList.remove('loaded');
+    const st = document.getElementById('status-registry');
+    if (st) st.textContent = 'Загрузите .xlsx выгрузку';
+    const wrap = document.getElementById('registry-picker-wrap');
+    if (wrap) wrap.style.display = 'none';
+    const sel = document.getElementById('registry-picker');
+    if (sel) sel.innerHTML = '';
+    const filt = document.getElementById('registry-filter');
+    if (filt) filt.value = '';
   },
 
   // ===== PREVIEW =====

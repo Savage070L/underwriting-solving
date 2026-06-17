@@ -18,8 +18,10 @@ const BatchAR = {
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
 
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
+  // ExcelJS — для выгрузки ошибок с заливкой ячеек (XLSX CE заливки не пишет).
   CDN: {
     jszip: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+    exceljs: 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
   },
 
   // statgov-лукап — это fetch (GET sessid + POST), а не открытие вкладок,
@@ -43,6 +45,10 @@ const BatchAR = {
     if (typeof window.JSZip === 'undefined') await BatchAR._loadScript(BatchAR.CDN.jszip);
   },
 
+  async _ensureExcelJS() {
+    if (typeof window.ExcelJS === 'undefined') await BatchAR._loadScript(BatchAR.CDN.exceljs);
+  },
+
   _youngThreshold() {
     return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minCompanyAgeYears') || 3) : 3;
   },
@@ -54,9 +60,11 @@ const BatchAR = {
     try {
       if (statusEl) statusEl.textContent = 'Чтение файла…';
       const buf = await file.arrayBuffer();
-      const { rows, total, skipped, header } = BatchReader.parse(buf);
+      const { rows, total, skipped, header, idx } = BatchReader.parse(buf);
       BatchAR.rows = rows;
+      BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._rawHeader = header || [];   // исходный заголовок (для выгрузки превышений)
+      BatchAR._fieldIdx = idx || {};       // поле→индекс колонки (для подсветки ошибок)
       const zone = document.getElementById('zone-batch');
       if (zone) zone.classList.add('loaded');
       if (statusEl) {
@@ -140,23 +148,39 @@ const BatchAR = {
       // СС < премии → красным (грубая ошибка); иначе жёлтым при расхождении с
       // расчётом по методологии. Красный приоритетнее жёлтого.
       const sumLtPrem = BatchAR._sumLtPremiumError(r);
-      const sumCls = sumLtPrem ? ' batch-cell--err' : (BatchAR._sumDiff(r) ? ' batch-cell--warn' : '');
-      const premCls = sumLtPrem ? ' batch-cell--err' : (BatchAR._premiumDiff(r) ? ' batch-cell--warn' : '');
-      const sumPremTitle = sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '';
+      const sumLtFot = BatchAR._sumLtFotError(r);
+      const premBelowMin = BatchAR._premiumBelowMinError(r);
+      const sumCls = (sumLtPrem || sumLtFot || premBelowMin) ? ' batch-cell--err' : (BatchAR._sumDiff(r) ? ' batch-cell--warn' : '');
+      const premCls = (sumLtPrem || premBelowMin) ? ' batch-cell--err' : (BatchAR._premiumDiff(r) ? ' batch-cell--warn' : '');
+      const sumTitle = sumLtFot ? ' title="Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)"'
+        : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф"'
+        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : ''));
+      const premTitle = premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000"'
+        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '');
+      // Невалидный ИИН/БИН (структура / контрольная цифра) → красная ячейка БИН.
+      const binReason = BatchAR._binInvalidReason(r);
+      const binCls = binReason ? ' batch-cell--err' : '';
+      const binTitle = binReason ? ` title="Некорректный ИИН/БИН: ${ARForm._esc(binReason)}"` : '';
+      const binStReason = BatchAR._insurerBinInvalidReason(r);
+      const binStCls = binStReason ? ' batch-cell--err' : '';
+      const binStTitle = binStReason ? ` title="Некорректный ИИН/БИН Страхователя: ${ARForm._esc(binStReason)}"` : '';
       const level = BatchAR._rowLevel(r);
       const rowCls = level ? ` class="batch-row--${level}"` : '';
       const nm = ARForm._effName(r);
+      const nmSt = r.insurerNameSt || '';
       return `<tr data-idx="${i}"${rowCls}>
         <td class="batch-c-num">${i + 1}</td>
         <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
-        <td class="batch-c-bin">${r.bin}</td>
+        <td class="batch-c-name-st" title="${ARForm._esc(nmSt)}">${nmSt ? ARForm._esc(nmSt) : '—'}</td>
+        <td class="batch-c-bin-st${binStCls}"${binStTitle}>${r.binInsurer ? ARForm._esc(r.binInsurer) : '—'}</td>
+        <td class="batch-c-bin${binCls}"${binTitle}>${r.bin}</td>
         <td class="batch-c-name" title="${ARForm._esc(nm)}">${ARForm._esc(nm)}</td>
         <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
         <td class="batch-c-class${classCls}">${BatchAR._classCell(r)}</td>
         <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
-        <td class="batch-c-num2 batch-c-sum${sumCls}"${sumPremTitle}>${BatchAR._sumCellHtml(r)}</td>
-        <td class="batch-c-num2 batch-c-prem${premCls}"${sumPremTitle}>${BatchAR._premiumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-sum${sumCls}"${sumTitle}>${BatchAR._sumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
         <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumWithCoeff)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
@@ -184,18 +208,21 @@ const BatchAR = {
   },
 
   // ===== Проверка страховой суммы и премии (методология) =====
-  // Месячный ФОТ = ФОТ/12; Ср.ЗП = месячный ФОТ / кол-во работников;
-  // Премия = Ср.ЗП, но не меньше 85 000; СС = премия / тариф (тариф — по классу).
+  // Премия = ФОТ × тариф, но не меньше 1 МЗП (85 000); СС = премия / тариф,
+  // т.е. СС = max(ФОТ, 1 МЗП / тариф) — всегда ≥ ФОТ (тариф — по классу из справочника).
   _minPremium() {
-    return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minAvgSalary') || 85000) : 85000;
+    return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minPremium') || 85000) : 85000;
   },
   _avgSalaryMonthly(r) {
     return (r.gfot > 0 && r.workers > 0) ? (r.gfot / 12 / r.workers) : null;
   },
-  // Ожидаемая премия = max(Ср.ЗП мес., 85 000).
+  // Ожидаемая премия = max(ФОТ × тариф, 1 МЗП). Для филиалов пол 1 МЗП не применяется
+  // per-row (он на весь договор) → ожидаемая премия = ФОТ × тариф.
   _expectedPremium(r) {
-    const a = BatchAR._avgSalaryMonthly(r);
-    return a != null ? Math.max(a, BatchAR._minPremium()) : null;
+    const t = BatchAR._checkTariff(r);
+    if (!(r.gfot > 0) || !(t > 0)) return null;
+    const base = r.gfot * t;
+    return BatchAR._isFilial(r) ? base : Math.max(base, BatchAR._minPremium());
   },
   // Тариф для проверки: по вычисленному классу из справочника «Поправочные
   // коэффициенты»; если справочника нет — тариф из выгрузки (премия/СС).
@@ -229,6 +256,70 @@ const BatchAR = {
       && Number(r.insuranceSum) < Number(r.premiumBase);
   },
 
+  // Грубая ошибка: страховая сумма МЕНЬШЕ ФОТ. По методологии СС = max(ФОТ, 1 МЗП/тариф),
+  // поэтому СС всегда должна быть ≥ ФОТ. Если в выгрузке СС < ФОТ — ошибка данных →
+  // красная ячейка СС и красная строка (исключается из печати).
+  _sumLtFotError(r) {
+    return r.insuranceSum != null && r.gfot != null
+      && Number(r.gfot) > 0 && Number(r.insuranceSum) < Number(r.gfot);
+  },
+  // Любая грубая ошибка по страховой сумме (СС < премии ИЛИ СС < ФОТ).
+  _sumError(r) {
+    return BatchAR._sumLtPremiumError(r) || BatchAR._sumLtFotError(r);
+  },
+
+  // Договор с ФИЛИАЛАМИ — несколько РАЗНЫХ БИНов под одним номером договора.
+  // Для филиалов пол 1 МЗП применяется к договору в целом (сумме по филиалам),
+  // а не к каждой строке — поэтому per-row премия может быть < 85 000, и это НЕ ошибка.
+  _filialContractSet() {
+    if (BatchAR._filialContracts) return BatchAR._filialContracts;
+    // Филиалы = несколько СТРОК под одним номером договора (в полном формате это
+    // разные БИНКонтрагента; в сокращённом БИНКонтрагента нет, поэтому считаем строки).
+    const countByContract = new Map();
+    for (const x of BatchAR.rows) {
+      const cn = x.contractNumber || '';
+      if (!cn) continue;
+      countByContract.set(cn, (countByContract.get(cn) || 0) + 1);
+    }
+    const set = new Set();
+    for (const [cn, n] of countByContract) if (n > 1) set.add(cn);
+    BatchAR._filialContracts = set;
+    return set;
+  },
+  _isFilial(r) {
+    return !!(r.contractNumber && BatchAR._filialContractSet().has(r.contractNumber));
+  },
+
+  // Грубая ошибка: страховая ПРЕМИЯ из выгрузки МЕНЬШЕ 1 МЗП (85 000). По методологии
+  // премия не может быть ниже 1 МЗП: её поднимают до 85 000, а СС — до 85 000/тариф.
+  // Значит и премия, и СС в выгрузке занижены → красным (исключается из печати).
+  // Для филиалов (несколько БИНов в договоре) НЕ ошибка — пол считается на весь договор.
+  _premiumBelowMinError(r) {
+    if (BatchAR._isFilial(r)) return false;
+    return r.premiumBase != null && Number(r.premiumBase) > 0
+      && Number(r.premiumBase) < BatchAR._minPremium();
+  },
+
+  // Невалидный ИИН/БИН (формат / тип по 5-й цифре / контрольная цифра mod-11).
+  // Возвращает причину (строку) либо null, если БИН корректен или проверить нечем.
+  _binInvalidReason(r) {
+    if (typeof Utils === 'undefined' || !Utils.validateIinBin) return null;
+    const v = Utils.validateIinBin(r.bin);
+    return v.valid ? null : (v.reason || 'некорректный ИИН/БИН');
+  },
+  _binInvalid(r) {
+    return BatchAR._binInvalidReason(r) != null;
+  },
+  // Невалидный БИН Страхователя (если он присутствует в строке). По нему идёт
+  // проверка возраста, поэтому его корректность важна.
+  _insurerBinInvalidReason(r) {
+    if (typeof Utils === 'undefined' || !Utils.validateIinBin) return null;
+    const v = r.binInsurer && String(r.binInsurer).trim();
+    if (!v) return null; // нет БИН Страхователя в строке — не ошибка
+    const res = Utils.validateIinBin(v);
+    return res.valid ? null : (res.reason || 'некорректный ИИН/БИН');
+  },
+
   // СС: сверху — из выгрузки, снизу в скобках — расчётная (премия/тариф).
   _sumCellHtml(r) {
     const top = BatchAR._fmtMoney(r.insuranceSum);
@@ -248,7 +339,7 @@ const BatchAR = {
     let bottom = '';
     if (exp != null) {
       const diff = BatchAR._premiumDiff(r);
-      const title = diff ? 'Расчётная премия (Ср.ЗП мес., мин. 85 000) не совпадает с выгрузкой' : 'Расчётная премия (Ср.ЗП мес., мин. 85 000)';
+      const title = diff ? 'Расчётная премия (ФОТ × тариф, мин. 85 000) не совпадает с выгрузкой' : 'Расчётная премия (ФОТ × тариф, мин. 85 000)';
       bottom = `<span class="batch-sub ${diff ? 'batch-sub--warn' : ''}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -298,7 +389,9 @@ const BatchAR = {
   //                      не совпал (у компании несколько ОКЭД, выбран не тот);
   //   null             — расхождений нет.
   _rowLevel(r) {
-    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r) || BatchAR._sumLtPremiumError(r)) return 'err';
+    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)
+        || BatchAR._sumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._binInvalid(r)
+        || BatchAR._insurerBinInvalidReason(r)) return 'err';
     if (BatchAR._classDiff(r)) return 'warn';
     return null;
   },
@@ -406,17 +499,61 @@ const BatchAR = {
     return kyc ? String(kyc).trim() : '';
   },
 
-  // Пересчитать возраст/флаг «моложе порога» по эффективной дате регистрации.
+  // БИН Страхователя (по нему — проверка возраста ≥3 лет): приоритет у отдельного
+  // поля binInsurer (БИН Страхователя), иначе текущий БИН строки (БИН Контрагента).
+  // Контрагент может быть моложе 3 лет, а Страхователь — нет, поэтому возраст
+  // считаем именно по Страхователю.
+  _insurerBin(r) {
+    const ib = r.binInsurer && String(r.binInsurer).replace(/\s+/g, '');
+    return (ib && /^\d{12}$/.test(ib)) ? ib : r.bin;
+  },
+
+  // Пересчитать возраст/флаг «моложе порога».
+  // Дата основания = САМАЯ РАННЯЯ (старшая) из доступных:
+  //   • дата регистрации из stat.gov.kz / kyc.kz;
+  //   • дата из первых 4 цифр БИН Страхователя (ГГ ММ) — учитывает перерегистрацию:
+  //     если в stat.gov.kz дата моложе 3 лет (перерегистрация), но БИН начинается с
+  //     «22…», компания основана в 2022 г. и моложе 3 лет НЕ считается.
+  // Берём самую раннюю дату → компания не моложе этого. youngAlert — по порогу.
   _applyYoung(r) {
-    const eff = BatchAR._effRegDate(r);
+    const now = new Date();
+    const candidates = [];
+    let regSource = null;
+    const insurerBin = BatchAR._insurerBin(r);
+    // Проверки stat.gov/kyc идут по БИН КОНТРАГЕНТА (r.bin). Возраст же нужен по
+    // СТРАХОВАТЕЛЮ: если БИН Страхователя ОТЛИЧАЕТСЯ (филиал) — дата регистрации из
+    // реестра относится к контрагенту, не к страхователю, поэтому её НЕ берём, а
+    // опираемся на дату из первых 4 цифр БИН Страхователя.
+    const statgovForInsurer = (insurerBin === r.bin);
+    const eff = statgovForInsurer ? BatchAR._effRegDate(r) : null;
     if (eff && eff.raw) {
-      const age = Utils.companyAgeYears(eff.raw, new Date());
+      const d = Utils.parseCompanyRegDate ? Utils.parseCompanyRegDate(eff.raw) : null;
+      if (d && !isNaN(d)) { candidates.push(d); regSource = d; }
+    }
+    const binDate = Utils.binRegistrationDate ? Utils.binRegistrationDate(insurerBin) : null;
+    if (binDate && !isNaN(binDate) && binDate <= now) candidates.push(binDate);
+    if (candidates.length) {
+      const founding = candidates.reduce((a, b) => (a <= b ? a : b)); // самая ранняя
+      const age = Utils.companyAgeYears(founding, now);
       r.ageYears = age;
       r.youngAlert = (age != null && age < BatchAR._youngThreshold());
+      r._foundingDate = founding;
+      // Возраст «вытянут» из БИН (БИН старше даты регистрации из реестра) — для пояснения в UI.
+      r._agedByBin = !!(binDate && founding.getTime() === binDate.getTime()
+        && (!regSource || binDate < regSource));
     } else {
       r.ageYears = null;
       r.youngAlert = false;
+      r._foundingDate = null;
+      r._agedByBin = false;
     }
+  },
+
+  // «окт. 2016» из даты — компактная пометка года/месяца основания по БИН.
+  _monthYear(d) {
+    if (!d || isNaN(d)) return '';
+    const MON = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
+    return `${MON[d.getMonth()]} ${d.getFullYear()}`;
   },
 
   // Возраст компании «2 года 4 месяца» по дате регистрации (или null).
@@ -445,19 +582,41 @@ const BatchAR = {
     if (r.statgovStatus === 'error') return '<span class="batch-sg batch-sg--err" title="' + ARForm._esc((r.statgov && r.statgov.error) || '') + '">н/д</span>';
     // statgovStatus === 'done'
     const eff = BatchAR._effRegDate(r);
+    const binDate = Utils.binRegistrationDate ? Utils.binRegistrationDate(BatchAR._insurerBin(r)) : null;
+    const binUsable = binDate && !isNaN(binDate) && binDate <= new Date();
     if (!eff) {
+      // Нет даты из реестров, но БИН Страхователя даёт дату основания — показываем её.
+      if (binUsable) {
+        const ds = ARForm._esc(Utils.fmtDateShort(binDate));
+        let aRow = '';
+        if (r.youngAlert) { const a = BatchAR._ageText(binDate); if (a) aRow = `<span class="batch-sub batch-young">(${ARForm._esc(a)})</span>`; }
+        return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="дата основания из БИН Страхователя">${ds}<span class="batch-regsrc" title="из БИН Страхователя">БИН</span></span>${aRow ? `<span class="batch-stack-bot">${aRow}</span>` : ''}</div>`;
+      }
       if (r.kycStatus === 'loading') return '<span class="batch-sg batch-sg--load">⏳ kyc.kz…</span>';
       return '<span class="batch-sg batch-sg--ok">✓ найдено (без даты)</span>';
     }
     const dateStr = ARForm._esc(Utils.fmtDateShort(eff.raw));
     const srcTitle = eff.source === 'kyc' ? 'дата из kyc.kz' : 'дата из stat.gov.kz';
     const srcMark = eff.source === 'kyc' ? '<span class="batch-regsrc" title="kyc.kz">kyc</span>' : '';
+    // Дата сверху — из stat.gov.kz. Если в БИН Страхователя зашит ДРУГОЙ год/месяц
+    // (перерегистрация) — показываем его снизу компактно как «(окт. 2016)», и только тогда.
+    let binNote = '';
+    if (binUsable) {
+      const topD = Utils.parseCompanyRegDate ? Utils.parseCompanyRegDate(eff.raw) : null;
+      const sameMonthYear = topD && !isNaN(topD)
+        && topD.getFullYear() === binDate.getFullYear()
+        && topD.getMonth() === binDate.getMonth();
+      if (!sameMonthYear) {
+        binNote = `<span class="batch-sub" title="В БИН Страхователя зашит другой год/месяц регистрации (перерегистрация)">(${ARForm._esc(BatchAR._monthYear(binDate))})</span>`;
+      }
+    }
     let ageRow = '';
     if (r.youngAlert) {
-      const age = BatchAR._ageText(eff.raw);
+      const age = BatchAR._ageText(r._foundingDate || eff.raw);
       if (age) ageRow = `<span class="batch-sub batch-young">(${ARForm._esc(age)})</span>`;
     }
-    return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="${srcTitle}">${dateStr}${srcMark}</span>${ageRow ? `<span class="batch-stack-bot">${ageRow}</span>` : ''}</div>`;
+    const bottom = [binNote, ageRow].filter(Boolean).join(' ');
+    return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="${srcTitle}">${dateStr}${srcMark}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
 
   // Гос. участие: сверху — из выгрузки, снизу в скобках — вывод по e-Qazyna.
@@ -524,18 +683,45 @@ const BatchAR = {
     tr.querySelector('.batch-c-gov')?.classList.toggle('batch-cell--err', gDiff);
     // ПК красным, если молодая компания (< порога) со скидкой.
     tr.querySelector('.batch-c-center')?.classList.toggle('batch-cell--err', BatchAR._pkYoungError(r));
-    // СС/премия: красным если СС < премии (грубая ошибка), иначе жёлтым при
-    // расхождении с методологией. Красный приоритетнее жёлтого.
+    // СС: красным если СС < премии ИЛИ СС < ФОТ; премия: красным если СС < премии;
+    // иначе жёлтым при расхождении с методологией. Красный приоритетнее жёлтого.
     const sumLtPrem = BatchAR._sumLtPremiumError(r);
-    const setSumPremLvl = (sel, warnOn) => {
-      const c = tr.querySelector(sel); if (!c) return;
-      c.classList.toggle('batch-cell--err', sumLtPrem);
-      c.classList.toggle('batch-cell--warn', !sumLtPrem && warnOn);
-      if (sumLtPrem) c.title = 'Ошибка: страховая сумма меньше страховой премии';
-      else c.removeAttribute('title');
-    };
-    setSumPremLvl('.batch-c-sum', BatchAR._sumDiff(r));
-    setSumPremLvl('.batch-c-prem', BatchAR._premiumDiff(r));
+    const sumLtFot = BatchAR._sumLtFotError(r);
+    const premBelowMin = BatchAR._premiumBelowMinError(r);
+    const sumErr = sumLtPrem || sumLtFot || premBelowMin;
+    const sumCell = tr.querySelector('.batch-c-sum');
+    if (sumCell) {
+      sumCell.classList.toggle('batch-cell--err', sumErr);
+      sumCell.classList.toggle('batch-cell--warn', !sumErr && BatchAR._sumDiff(r));
+      if (sumLtFot) sumCell.title = 'Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)';
+      else if (premBelowMin) sumCell.title = 'Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф';
+      else if (sumLtPrem) sumCell.title = 'Ошибка: страховая сумма меньше страховой премии';
+      else sumCell.removeAttribute('title');
+    }
+    const premCell = tr.querySelector('.batch-c-prem');
+    if (premCell) {
+      const premErr = sumLtPrem || premBelowMin;
+      premCell.classList.toggle('batch-cell--err', premErr);
+      premCell.classList.toggle('batch-cell--warn', !premErr && BatchAR._premiumDiff(r));
+      if (premBelowMin) premCell.title = 'Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000';
+      else if (sumLtPrem) premCell.title = 'Ошибка: страховая сумма меньше страховой премии';
+      else premCell.removeAttribute('title');
+    }
+    // Невалидный ИИН/БИН → красная ячейка БИН (Контрагент и Страхователь).
+    const binCell = tr.querySelector('.batch-c-bin');
+    if (binCell) {
+      const binReason = BatchAR._binInvalidReason(r);
+      binCell.classList.toggle('batch-cell--err', !!binReason);
+      if (binReason) binCell.title = 'Некорректный ИИН/БИН: ' + binReason;
+      else binCell.removeAttribute('title');
+    }
+    const binStCell = tr.querySelector('.batch-c-bin-st');
+    if (binStCell) {
+      const binStReason = BatchAR._insurerBinInvalidReason(r);
+      binStCell.classList.toggle('batch-cell--err', !!binStReason);
+      if (binStReason) binStCell.title = 'Некорректный ИИН/БИН Страхователя: ' + binStReason;
+      else binStCell.removeAttribute('title');
+    }
     const level = BatchAR._rowLevel(r);
     tr.classList.toggle('batch-row--err', level === 'err');
     tr.classList.toggle('batch-row--warn', level === 'warn');
@@ -579,6 +765,9 @@ const BatchAR = {
     // statgov — гейтит генерацию. Лукап — обычные fetch (GET+POST), не вкладки,
     // поэтому гоним с заметной параллельностью.
     const sgQueue = targets.slice();
+    // Лукап — по БИН КОНТРАГЕНТА (r.bin): ОКЭД/класс/гос.участие проверяем по самому
+    // контрагенту/филиалу. Кэш по БИН — дедуп повторяющихся БИНов контрагента.
+    const sgCache = (BatchAR._sgCache = new Map());
     const sgWorker = async () => {
       while (sgQueue.length) {
         const i = sgQueue.shift();
@@ -587,7 +776,10 @@ const BatchAR = {
         BatchAR._refreshRow(i);
         BatchAR._scheduleAggregate();
         try {
-          const data = await StatGovClient.lookup(r.bin);
+          const lbin = r.bin;
+          let p = sgCache.get(lbin);
+          if (!p) { p = StatGovClient.lookup(lbin); sgCache.set(lbin, p); }
+          const data = await p;
           r.statgov = data || {};
           r.statgovStatus = 'done';
           if (r.statgov.name && !r.statgov.error) r.insurerName = r.statgov.name;
@@ -631,6 +823,7 @@ const BatchAR = {
     if (!targets.length) return;
     BatchAR._kycRunning = true;
     const queue = targets.slice();
+    const kycCache = new Map(); // БИН Контрагента → Promise (дедуп повторов)
     const worker = async () => {
       while (queue.length) {
         const i = queue.shift();
@@ -638,7 +831,10 @@ const BatchAR = {
         r.kycStatus = 'loading';
         BatchAR._refreshRow(i);
         try {
-          const data = await StatGovClient.lookupKyc(r.bin);
+          const lbin = r.bin;
+          let p = kycCache.get(lbin);
+          if (!p) { p = StatGovClient.lookupKyc(lbin); kycCache.set(lbin, p); }
+          const data = await p;
           r.kyc = data || {};
           r.kycStatus = 'done';
           // kyc-имя — только если из stat.gov имени не было.
@@ -673,12 +869,16 @@ const BatchAR = {
   // Пул e-Qazyna: тянет гос. участие по всем БИНам параллельно (не гейтит генерацию).
   async _poolEgov(targets) {
     const queue = targets.slice();
+    const egovCache = new Map(); // БИН Контрагента → Promise (дедуп повторов)
     const worker = async () => {
       while (queue.length) {
         const i = queue.shift();
         const r = BatchAR.rows[i];
         try {
-          r.egov = await BatchAR._lookupEgov(r.bin);
+          const lbin = r.bin;
+          let p = egovCache.get(lbin);
+          if (!p) { p = BatchAR._lookupEgov(lbin); egovCache.set(lbin, p); }
+          r.egov = await p;
         } catch (e) {
           r.egov = { status: 'error', found: null, share: null };
         }
@@ -784,16 +984,26 @@ const BatchAR = {
     return BatchAR._groupByContract().size;
   },
 
+  // Договор «красный» — хотя бы одна строка с грубой ошибкой (_rowLevel==='err').
+  // Такие договоры не печатаем (для красных полей печать не делаем).
+  _groupHasError(group) {
+    return group.some(r => BatchAR._rowLevel(r) === 'err');
+  },
+  _errorContractCount() {
+    let n = 0;
+    for (const [, g] of BatchAR._groupByContract()) if (BatchAR._groupHasError(g)) n++;
+    return n;
+  },
+
   // Договор превышает лимиты АС: класс 1–15 и СС свыше 2 млрд, либо
   // класс 16–22 и СС свыше 1,5 млрд (СС = сумма по всем филиалам договора).
   // Класс берём ВЫЧИСЛЕННЫЙ по ОКЭД из stat.gov.kz (а не из выгрузки); макс. по
   // филиалам. Если вычислить нельзя (нет классификатора/ОКЭД) — fallback на выгрузку.
   _exceedsAsLimit(group) {
     const totalSum = group.reduce((a, r) => a + (Number(r.insuranceSum) || 0), 0);
-    const cls = Math.max(0, ...group.map(r => {
-      const c = BatchAR._computedClass(r);
-      return c != null ? c : (parseInt(r.riskClass, 10) || 0);
-    }));
+    // Класс — из ИСХОДНОЙ выгрузки (КлассПрофРиска), а НЕ вычисленный по stat.gov.kz:
+    // превышение лимитов АС определяем по данным самой таблицы-источника.
+    const cls = Math.max(0, ...group.map(r => parseInt(r.riskClass, 10) || 0));
     const low1_15 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls1_15') : 2000000000;
     const low16_22 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls16_22') : 1500000000;
     if (cls >= 1 && cls <= 15 && totalSum > low1_15) return true;
@@ -804,18 +1014,112 @@ const BatchAR = {
   // xlsx-список договоров, превысивших лимиты АС, в ИСХОДНОМ формате выгрузки:
   // тот же заголовок и те же строки (все филиалы), что в загруженном файле.
   // Возвращает ArrayBuffer.
-  _buildOverLimitXlsx(overLimit) {
+  _buildOverLimitXlsx(groups, sheetName) {
     const header = (BatchAR._rawHeader && BatchAR._rawHeader.length) ? BatchAR._rawHeader : [];
     const aoa = [header];
-    for (const [, group] of overLimit) {
+    for (const [, group] of groups) {
       for (const r of group) {
         if (r._raw) aoa.push(r._raw);
       }
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Превышение лимитов АС');
+    // Имя листа в Excel — максимум 31 символ.
+    XLSX.utils.book_append_sheet(wb, ws, String(sheetName || 'Превышение лимитов АС').slice(0, 31));
     return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  },
+
+  // Поля строки, подлежащие подсветке в выгрузке ошибок, с цветом заливки:
+  // красный (FFC7CE) — грубая ошибка; жёлтый (FFEB9C) — мягкое расхождение класса.
+  _erroredCells(r) {
+    const RED = 'FFC7CE', YEL = 'FFEB9C';
+    const out = [];
+    if (BatchAR._sumLtFotError(r) || BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r)) out.push(['insuranceSum', RED]);
+    if (BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r)) out.push(['premiumBase', RED]);
+    if (BatchAR._pkYoungError(r)) out.push(['coeff', RED]);
+    if (BatchAR._insurerBinInvalidReason(r)) out.push(['binInsurer', RED]);
+    if (BatchAR._binInvalidReason(r)) out.push(['bin', RED]);
+    if (BatchAR._okedError(r)) out.push(['oked', RED]);
+    if (BatchAR._okedError(r) && BatchAR._classDiff(r)) out.push(['riskClass', RED]);
+    else if (BatchAR._classDiff(r)) out.push(['riskClass', YEL]);
+    if (BatchAR._govDiff(r)) out.push(['govParticip', RED]);
+    return out;
+  },
+
+  // xlsx красных строк в ИСХОДНОМ формате выгрузки с ЗАЛИВКОЙ ошибочных ячеек.
+  // XLSX CE заливки не пишет — используем ExcelJS. Возвращает ArrayBuffer.
+  async _buildErroredXlsxStyled(errored) {
+    await BatchAR._ensureExcelJS();
+    const ExcelLib = window.ExcelJS;
+    const wb = new ExcelLib.Workbook();
+    const ws = wb.addWorksheet('С ошибками');
+    const header = (BatchAR._rawHeader && BatchAR._rawHeader.length) ? BatchAR._rawHeader : [];
+    ws.addRow(header.map(h => (h == null ? '' : h)));
+    // Карта поле→колонка: из загрузки, иначе восстанавливаем из заголовка (страховка,
+    // чтобы подсветка ячеек работала даже если _fieldIdx не сохранился).
+    let idx = BatchAR._fieldIdx;
+    if ((!idx || !Object.keys(idx).length) && typeof BatchReader !== 'undefined' && BatchReader.resolveIdx) {
+      idx = BatchReader.resolveIdx(header);
+    }
+    idx = idx || {};
+    let rowNum = 1; // строка 1 — заголовок
+    // Сортировка по Менеджеру (А→Я); договоры (филиалы) остаются вместе (по первой строке).
+    const sorted = [...errored].sort((a, b) => {
+      const an = String((a[1][0] && a[1][0].author) || '').toLowerCase();
+      const bn = String((b[1][0] && b[1][0].author) || '').toLowerCase();
+      return an.localeCompare(bn, 'ru');
+    });
+    for (const [, group] of sorted) {
+      for (const r of group) {
+        rowNum++;
+        const raw = Array.isArray(r._raw) ? r._raw.map(v => (v === undefined ? null : v)) : [];
+        ws.addRow(raw);
+        for (const [field, color] of BatchAR._erroredCells(r)) {
+          const ci = idx[field];
+          if (ci == null || ci < 0) continue;
+          ws.getCell(rowNum, ci + 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + color } };
+        }
+      }
+    }
+    // Автофильтр на всю таблицу (фильтр/сортировка по Менеджеру и др. колонкам).
+    const lastCol = Math.max(header.length, 1);
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(rowNum, 1), column: lastCol } };
+    // Автоширина по содержимому: Менеджер (U) и L,M,N,Q,R,S.
+    const colNum = (L) => L.charCodeAt(0) - 64; // 'A'→1
+    for (const cn of ['L', 'M', 'N', 'Q', 'R', 'S', 'U'].map(colNum)) {
+      if (cn > lastCol) continue;
+      let maxLen = 6;
+      ws.getColumn(cn).eachCell({ includeEmpty: false }, (cell) => {
+        const v = cell.value == null ? '' : String(cell.value);
+        if (v.length > maxLen) maxLen = v.length;
+      });
+      ws.getColumn(cn).width = Math.min(maxLen + 2, 60);
+    }
+    return wb.xlsx.writeBuffer();
+  },
+
+  // Кнопка «Выгрузить некорректные»: отдельный xlsx со всеми красными строками
+  // (договоры с грубой ошибкой) и подсвеченными ячейками — для правки и повторной загрузки.
+  async exportErrors(btn) {
+    if (!BatchAR.rows.length) { App.showMsg && App.showMsg('Сначала загрузите реестр договоров.', 'error'); return; }
+    const errored = [...BatchAR._groupByContract().entries()].filter(([, g]) => BatchAR._groupHasError(g));
+    if (!errored.length) { App.showMsg && App.showMsg('Строк с ошибками нет — выгружать нечего.', 'success'); return; }
+    const nRows = errored.reduce((a, [, g]) => a + g.length, 0);
+    const prev = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Подготовка…'; }
+    try {
+      const buf = await BatchAR._buildErroredXlsxStyled(errored);
+      const t = new Date();
+      const stamp = `${String(t.getDate()).padStart(2, '0')}.${String(t.getMonth() + 1).padStart(2, '0')}.${t.getFullYear()}`;
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Некорректные строки ${stamp} (${nRows}).xlsx`);
+      App.showMsg && App.showMsg(`Выгружено строк с ошибками: ${nRows}. Исправьте подсвеченные ячейки и загрузите файл заново как реестр.`, 'success');
+    } catch (e) {
+      console.error('export errors', e);
+      App.showMsg && App.showMsg('Ошибка выгрузки некорректных строк: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prev; }
+    }
   },
 
   // Открыть таблицу-превью в отдельной вкладке — полная ширина окна, все строки.
@@ -882,10 +1186,13 @@ const BatchAR = {
       const taken = new Set();
       // Группируем по номеру договора: один документ АР на договор (филиалы — внутри).
       const groups = [...BatchAR._groupByContract().entries()];
+      const errored = [];     // договоры с грубыми ошибками (красные) → НЕ печатаем
       const overLimit = [];   // договоры свыше лимитов АС → отдельная папка
       const toGenerate = [];  // остальные → стандартный АР
       for (const entry of groups) {
-        (BatchAR._exceedsAsLimit(entry[1]) ? overLimit : toGenerate).push(entry);
+        if (BatchAR._groupHasError(entry[1])) errored.push(entry);
+        else if (BatchAR._exceedsAsLimit(entry[1])) overLimit.push(entry);
+        else toGenerate.push(entry);
       }
       const N = toGenerate.length;
       for (let i = 0; i < N; i++) {
@@ -900,8 +1207,15 @@ const BatchAR = {
       }
       // Договоры свыше лимитов АС — отдельная папка с отфильтрованным xlsx.
       if (overLimit.length) {
-        const xlsxBuf = BatchAR._buildOverLimitXlsx(overLimit);
+        const xlsxBuf = BatchAR._buildOverLimitXlsx(overLimit, 'Превышение лимитов АС');
         zip.file(`Превышение лимитов АС/Превышение лимитов АС (${overLimit.length}).xlsx`, xlsxBuf, { compression: 'STORE' });
+      }
+      // Договоры с ошибками (красные) — НЕ печатаем, выгружаем отдельной папкой,
+      // чтобы было видно, что и почему исключено из печати.
+      if (errored.length) {
+        const xlsxBuf = await BatchAR._buildErroredXlsxStyled(errored);
+        const nErrRows = errored.reduce((a, [, g]) => a + g.length, 0);
+        zip.file(`С ошибками (не напечатано)/С ошибками (${nErrRows}).xlsx`, xlsxBuf, { compression: 'STORE' });
       }
       if (txt) txt.textContent = 'Упаковка ZIP…';
       if (bar) bar.style.width = '100%';
@@ -909,7 +1223,11 @@ const BatchAR = {
       const today = new Date();
       const stamp = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
       saveAs(out, `АР пакет ${stamp} (${N}).zip`);
-      if (txt) txt.textContent = `Готово: ${N} документов${overLimit.length ? ` + ${overLimit.length} на АС (отдельная папка)` : ''}`;
+      const extras = [
+        overLimit.length ? `${overLimit.length} на АС` : '',
+        errored.length ? `${errored.length} с ошибками (не напечатано)` : '',
+      ].filter(Boolean).join(', ');
+      if (txt) txt.textContent = `Готово: ${N} документов${extras ? ` + ${extras} (отдельные папки)` : ''}`;
     } catch (e) {
       console.error('Batch ZIP error:', e);
       if (txt) txt.textContent = 'Ошибка: ' + e.message;
@@ -926,13 +1244,27 @@ const BatchAR = {
     if (btnAll) {
       const ready = BatchAR._verifyComplete();
       btnAll.disabled = BatchAR._busy || !ready;
-      btnAll.textContent = BatchAR._busy
-        ? 'Генерация…'
-        : (!BatchAR.rows.length
-            ? 'Сгенерировать Рекомендации АР'
-            : (ready
-                ? `Сгенерировать Рекомендации АР (${BatchAR._contractCount()})`
-                : 'Ожидание проверки stat.gov.kz…'));
+      let label = 'Сгенерировать Рекомендации АР';
+      if (BatchAR._busy) {
+        label = 'Генерация…';
+      } else if (BatchAR.rows.length && ready) {
+        const errN = BatchAR._errorContractCount();
+        const printable = BatchAR._contractCount() - errN;
+        label = errN
+          ? `Сгенерировать Рекомендации АР (${printable}, исключено ${errN})`
+          : `Сгенерировать Рекомендации АР (${printable})`;
+      } else if (BatchAR.rows.length && !ready) {
+        label = 'Ожидание проверки stat.gov.kz…';
+      }
+      btnAll.textContent = label;
+    }
+    // Кнопка «Выгрузить некорректные» — видна, когда есть красные строки.
+    const btnErr = document.getElementById('batch-export-errors');
+    if (btnErr) {
+      const errN = BatchAR.rows.length ? BatchAR._errorContractCount() : 0;
+      btnErr.style.display = errN ? '' : 'none';
+      btnErr.disabled = BatchAR._busy;
+      btnErr.textContent = `Выгрузить некорректные (xlsx)${errN ? ` · ${errN}` : ''}`;
     }
     const btnClear = document.getElementById('batch-clear');
     if (btnClear) btnClear.style.display = BatchAR.rows.length ? '' : 'none';

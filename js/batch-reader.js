@@ -5,7 +5,8 @@
 // вариантом по фиксированной букве колонки. Возвращаем массив объектов-строк,
 // отфильтрованных по валидному 12-значному БИН/ИИН.
 //
-// Маппинг (по таблице «Копия АндерРешение»):
+// Маппинг (по выгрузке «АндерРешение»):
+//   Страхователь ← НаименованиеСтрахователя (C) · БИН Страхователя ← БИНСтрахователя (D)
 //   Наименование ← Контрагент (E) · БИН ← БИНКонтрагента (F)
 //   ОКЭД ← КодОКЭД (H) · Класс ← КлассПрофРиска (J)
 //   Кол-во работников ← КоличествоРаботников (K)
@@ -26,8 +27,12 @@ const BatchReader = {
   // Заголовки поддерживают обе версии выгрузки (новую и прежнюю).
   FIELDS: {
     contractNumber: { headers: ['номердоговора'], col: 'B' },
+    insurerNameSt:  { headers: ['наименованиестрахователя'], col: 'C' },
+    binInsurer:     { headers: ['бинстрахователя'], col: 'D' },
     insurerName:    { headers: ['контрагент'], col: 'E' },
-    bin:            { headers: ['бинконтрагента'], col: 'F' },
+    // БИН для проверок — Контрагента; если в выгрузке нет колонки БИНКонтрагента
+    // (сокращённый формат), берём БИН Страхователя.
+    bin:            { headers: ['бинконтрагента', 'бинстрахователя'], col: 'F' },
     region:         { headers: ['регион'], col: 'G' },
     oked:           { headers: ['кодокэд', 'код окэд'], col: 'H' },
     activity:       { headers: ['виддеятельности'], col: 'I' },
@@ -36,7 +41,10 @@ const BatchReader = {
     gfot:           { headers: ['фот'], col: 'L' },
     insuranceSum:   { headers: ['страховаясумма'], col: 'N' },
     coeff:          { headers: ['поправочныйкоэффициент'], col: 'P' },
-    premiumBase:    { headers: ['страховаяпремия'], col: 'R' },
+    // R (СтраховаяПремия) = премия С ПК (per-row). Премия ДО ПК считаем как R/ПК
+    // (в колонке S «СтраховаяПремияСПК» лежит ИТОГ до ПК по договору — для филиалов
+    // он одинаков во всех строках, поэтому per-row берём из R, а не из S).
+    premiumWith:    { headers: ['страховаяпремия'], col: 'R' },
     govParticip:    { headers: ['госучастие'], col: 'T' },
     author:         { headers: ['менеджер', 'автор'], col: 'U' },
     paymentOrder:   { headers: ['порядокоплаты'], col: 'X' },
@@ -104,6 +112,27 @@ const BatchReader = {
     return BatchReader._norm(v) === 'да';
   },
 
+  // Карта поле→индекс колонки по строке заголовков (сырой массив ячеек):
+  // точное совпадение нормализованного заголовка, иначе запасная буква колонки.
+  // Используется и в parse(), и при выгрузке ошибок (подсветка нужных колонок).
+  resolveIdx(headerRowRaw) {
+    const header = (headerRowRaw || []).map(BatchReader._norm);
+    const idx = {};
+    for (const [field, def] of Object.entries(BatchReader.FIELDS)) {
+      let found = -1;
+      for (const cand of def.headers) {
+        const i = header.indexOf(cand);
+        if (i !== -1) { found = i; break; }
+      }
+      // Сопоставляем СТРОГО по тексту заголовка. Запасную «букву колонки» НЕ
+      // используем: у выгрузок разный набор колонок (в одних есть БИНКонтрагента/
+      // КодОКЭД/ФОТ, в других — нет), и фиксированная буква хватала бы СОСЕДНЮЮ
+      // не ту колонку. Нет заголовка → поле отсутствует (-1), проверка по нему не идёт.
+      idx[field] = found;
+    }
+    return idx;
+  },
+
   // Главный метод. arrayBuffer → { rows: [...], total, skipped }.
   parse(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
@@ -120,18 +149,8 @@ const BatchReader = {
         break;
       }
     }
-    const header = (grid[headerRow] || []).map(BatchReader._norm);
-
     // --- Резолвим индекс каждого поля: точный заголовок, иначе буква колонки ---
-    const idx = {};
-    for (const [field, def] of Object.entries(BatchReader.FIELDS)) {
-      let found = -1;
-      for (const cand of def.headers) {
-        const i = header.indexOf(cand);
-        if (i !== -1) { found = i; break; }
-      }
-      idx[field] = (found !== -1) ? found : BatchReader._colToIndex(def.col);
-    }
+    const idx = BatchReader.resolveIdx(grid[headerRow] || []);
 
     const cell = (row, field) => {
       const i = idx[field];
@@ -156,18 +175,20 @@ const BatchReader = {
       }
 
       const insuranceSum = BatchReader._money(cell(row, 'insuranceSum'));
-      const premiumBase = BatchReader._money(cell(row, 'premiumBase'));
       const coeff = BatchReader._money(cell(row, 'coeff'));
+      const coeffNum = (coeff != null && coeff > 0) ? coeff : 1;
+      // R (СтраховаяПремия) = премия С ПК (per-row). Премия ДО ПК = R / ПК —
+      // для одиночных договоров совпадает с S «СтраховаяПремияСПК» (ФОТ×тариф),
+      // для филиалов даёт корректную per-row премию (S там — ИТОГ по договору).
+      const premiumWith = BatchReader._money(cell(row, 'premiumWith'));   // R, с ПК
+      const premiumBase = (premiumWith != null)
+        ? Math.round(premiumWith / coeffNum * 100) / 100                  // до ПК
+        : null;
+      const premiumWithCoeff = premiumWith;                              // с ПК (как в выгрузке)
       const tariff = (premiumBase != null && insuranceSum)
         ? premiumBase / insuranceSum
         : null;
       const isDiscount = (coeff != null && coeff < 1);
-      // Премия с ПК = премия × ПК (по строке). В выгрузке «СтраховаяПремияСПК» —
-      // это ИТОГ по договору (одинаков во всех филиалах), суммировать его нельзя;
-      // считаем по каждой строке сами, тогда Итого = сумма по филиалам корректна.
-      const premiumWithCoeff = (premiumBase != null)
-        ? Math.round(premiumBase * (coeff != null ? coeff : 1) * 100) / 100
-        : null;
 
       const name = String(cell(row, 'insurerName') || '').trim();
       const activity = String(cell(row, 'activity') || '').trim();
@@ -178,8 +199,12 @@ const BatchReader = {
         _raw: row,                           // исходные ячейки строки (для выгрузки превышений в оригинальном формате)
         bin,
         contractNumber,
+        // Страхователь (C/D) — отдельная сторона договора. По БИН Страхователя
+        // (а не Контрагента) проверяется возраст компании (≥3 лет для ПК).
+        insurerNameSt: String(cell(row, 'insurerNameSt') || '').trim(),
+        binInsurer: String(cell(row, 'binInsurer') == null ? '' : cell(row, 'binInsurer')).replace(/[\s ]/g, '').trim(),
         insurerName: name,
-        excelName: name,                     // сохраняем исходное имя из выгрузки
+        excelName: name,                     // сохраняем исходное имя из выгрузки (Контрагент)
         author: String(cell(row, 'author') || '').trim(),   // андеррайтер-автор решения
         region: String(cell(row, 'region') || '').trim(),
         paymentOrder: String(cell(row, 'paymentOrder') || '').trim(),
@@ -212,7 +237,8 @@ const BatchReader = {
     }
 
     // header — исходная строка заголовков (для выгрузки превышений в оригинальном формате).
-    return { rows, total: rows.length, skipped, header: grid[headerRow] || [] };
+    // idx — карта поле→индекс колонки (для подсветки ошибочных ячеек при выгрузке).
+    return { rows, total: rows.length, skipped, header: grid[headerRow] || [], idx };
   },
 };
 

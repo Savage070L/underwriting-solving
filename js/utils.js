@@ -508,6 +508,88 @@ const Utils = {
     return age < 3;
   },
 
+  // ===== Валидация ИИН/БИН РК =====
+  // Контрольная (12-я) цифра по методу циклического взвешивания mod-11.
+  //   1-я итерация: веса W1=[1..11]; R1 = (Σ aᵢ·W1ᵢ) % 11.
+  //     R1 ∈ 0..9 → это контрольная цифра.
+  //     R1 = 10   → 2-я итерация: веса W2=[3,4,5,6,7,8,9,10,11,1,2]; R2 = (Σ aᵢ·W2ᵢ) % 11.
+  //       R2 ∈ 0..9 → контрольная цифра; R2 = 10 → номер математически некорректен.
+  // Принимает массив из 11 цифр (или строку ≥11 цифр). Возвращает 0..9 либо null.
+  iinBinControlDigit(first11) {
+    let d;
+    if (Array.isArray(first11)) d = first11.map(Number);
+    else d = String(first11).replace(/\D/g, '').slice(0, 11).split('').map(Number);
+    if (d.length !== 11 || d.some(x => !Number.isFinite(x))) return null;
+    const W1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const W2 = [3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 2];
+    const sum = (W) => d.reduce((a, x, i) => a + x * W[i], 0);
+    let r = sum(W1) % 11;
+    if (r === 10) {
+      r = sum(W2) % 11;
+      if (r === 10) return null;
+    }
+    return r;
+  },
+
+  // Полная валидация ИИН/БИН: формат + структура (тип по 5-й цифре) + контрольная цифра.
+  // Возвращает { valid, type:'iin'|'bin'|null, reason }.
+  //   5-я цифра: 0..3 → ИИН (физлицо/ИП по ИИН); 4/5/6 → БИН (4 рез. ЮЛ, 5 нерез. ЮЛ, 6 ИП(С)).
+  //   ИИН: цифры 3-4 = месяц (01..12), 5-6 = день (01..31), 7-я = век/пол (1..6).
+  //   БИН: цифры 1-2 = год, 3-4 = месяц регистрации/перерегистрации (01..12).
+  validateIinBin(value) {
+    const s = String(value == null ? '' : value).replace(/\s+/g, '').trim();
+    if (!/^\d{12}$/.test(s)) return { valid: false, type: null, reason: 'Должно быть ровно 12 цифр' };
+    const d = s.split('').map(Number);
+    const mm = d[2] * 10 + d[3];
+    const dd = d[4] * 10 + d[5];
+    const d5 = d[4];
+    let type;
+    if (d5 <= 3) type = 'iin';
+    else if (d5 <= 6) type = 'bin';
+    else return { valid: false, type: null, reason: `Недопустимая 5-я цифра (${d5}): для ИИН 0–3, для БИН 4–6` };
+    if (type === 'iin') {
+      if (mm < 1 || mm > 12) return { valid: false, type, reason: 'Месяц рождения вне 01–12' };
+      if (dd < 1 || dd > 31) return { valid: false, type, reason: 'День рождения вне 01–31' };
+      // ПРИМЕЧАНИЕ: 7-я цифра (век/пол) по справочнику ИИН должна быть 1–6, но в реальных
+      // выгрузках встречаются ИИН (часто у ИП) с 7-й цифрой 0, которые проходят контрольную
+      // сумму mod-11 — т.е. это действительные номера. Поэтому 7-ю цифру НЕ считаем грубой
+      // ошибкой (иначе ложно красили бы валидные строки и блокировали печать). Решающий
+      // критерий существования — контрольная цифра ниже.
+    } else {
+      if (mm < 1 || mm > 12) return { valid: false, type, reason: 'Месяц регистрации вне 01–12' };
+    }
+    const ctrl = Utils.iinBinControlDigit(d.slice(0, 11));
+    if (ctrl == null) return { valid: false, type, reason: 'Контрольная цифра не определена (mod-11)' };
+    if (ctrl !== d[11]) return { valid: false, type, reason: 'Неверная контрольная цифра' };
+    return { valid: true, type, reason: null };
+  },
+
+  // Удобная обёртка: true только для математически и структурно корректного ИИН/БИН.
+  isValidIinBin(value) {
+    return Utils.validateIinBin(value).valid;
+  },
+
+  // Дата регистрации/основания компании из первых 4 цифр БИН (ГГ ММ) → Date (1-е число).
+  // Только для БИН (5-я цифра 4–6). Для ИИН первые 4 цифры — дата рождения, не дата
+  // компании, поэтому возвращаем null. Год трактуем как 20YY (БИН существует с 2007 г.).
+  // Используется как «нижняя граница» возраста при перерегистрации (когда дата из
+  // stat.gov.kz моложе, чем год основания, зашитый в БИН).
+  binRegistrationDate(value) {
+    const s = String(value == null ? '' : value).replace(/\s+/g, '').trim();
+    if (!/^\d{12}$/.test(s)) return null;
+    const d5 = Number(s[4]);
+    if (d5 < 4 || d5 > 6) return null; // не БИН
+    const yy = parseInt(s.slice(0, 2), 10);
+    const mm = parseInt(s.slice(2, 4), 10);
+    if (!(mm >= 1 && mm <= 12)) return null;
+    // Век по «пивоту» от текущего года: ГГ ≤ текущих 2 цифр → 20ГГ, иначе 19ГГ.
+    // Старые компании имеют БИН с годом первичной регистрации (напр. «91…» → 1991).
+    const nowYY = new Date().getFullYear() % 100;
+    const year = (yy <= nowYY) ? 2000 + yy : 1900 + yy;
+    const dt = new Date(year, mm - 1, 1);
+    return isNaN(dt) ? null : dt;
+  },
+
   // Юридический адрес из statgov-объекта. Для ИП (и части ТОО) поля
   // «Юридический адрес» в stat.gov.kz нет, но есть «Местонахождение …» —
   // это тот же адрес. Если legalAddress пуст, берём его из сырых пар (_raw).
