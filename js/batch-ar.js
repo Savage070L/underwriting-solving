@@ -136,6 +136,20 @@ const BatchAR = {
     BatchAR._updateControls();
   },
 
+  // Согласовано андеррайтером (галочка после «Менеджера»). Снимает ошибки со строки:
+  // _rowLevel становится null → строка печатается с ИСХОДНЫМИ данными (под ответственность
+  // андеррайтера), уходит из «ошибочных» в обычные, подсветка ячеек гасится (CSS). Снятие
+  // галочки возвращает строку в исходное состояние. При активной сортировке «Сначала ошибки»
+  // строка должна сместиться вниз — поэтому перерисовываем всю таблицу; иначе — только строку.
+  toggleApproved(i, el) {
+    const r = BatchAR.rows[i];
+    if (!r) return;
+    r._approved = !!(el && el.checked);
+    if (BatchAR._sortByError) BatchAR.renderTable();
+    else BatchAR._refreshRow(i);
+    BatchAR._updateControls();
+  },
+
   // ===== Превью-таблица =====
   renderTable() {
     const wrap = document.getElementById('batch-table-wrap');
@@ -204,8 +218,10 @@ const BatchAR = {
       const binStReason = BatchAR._insurerBinInvalidReason(r);
       const binStCls = binStReason ? ' batch-cell--err' : '';
       const binStTitle = binStReason ? ` title="Некорректный ИИН/БИН Страхователя: ${ARForm._esc(binStReason)}"` : '';
-      const level = BatchAR._rowLevel(r);
-      const rowCls = level ? ` class="batch-row--${level}"` : '';
+      // Класс строки = жизненный цикл проверки (серый/синий/зелёный) + ошибка (красный/жёлтый)
+      // + метка «согласовано андеррайтером».
+      const cls = BatchAR._rowClassList(r);
+      const rowCls = cls.length ? ` class="${cls.join(' ')}"` : '';
       return `<tr data-idx="${i}"${rowCls}>
         <td class="batch-c-num">${i + 1}</td>
         <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
@@ -224,6 +240,7 @@ const BatchAR = {
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
         <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
+        <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
       </tr>`;
     }).join('');
     BatchAR._tableVersion++;
@@ -693,7 +710,8 @@ const BatchAR = {
   //   'warn' (жёлтый)  — мягкое расхождение: класс (выбран не тот ОКЭД) ИЛИ расчётная
   //                      СС/премия не совпала с выгрузкой;
   //   null             — расхождений нет.
-  _rowLevel(r) {
+  // «Сырой» уровень — РЕАЛЬНЫЙ результат валидации, без учёта согласования андеррайтером.
+  _rawRowLevel(r) {
     if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)
         || BatchAR._sumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._binInvalid(r)
         || BatchAR._insurerBinInvalidReason(r) || BatchAR._classWrongForOked(r)
@@ -703,6 +721,45 @@ const BatchAR = {
     // Жёлтым остаются только мягкие расхождения класса (СС/СП-расхождения теперь красные).
     if (BatchAR._classDiff(r) || BatchAR._contrClassDiffByBin(r)) return 'warn';
     return null;
+  },
+  // Эффективный уровень строки для ВСЕЙ логики (печать/счётчики/сортировка/цвет).
+  // Согласовано андеррайтером → ошибки сняты (печать с исходными данными под его
+  // ответственность) → null. Снятие галочки возвращает реальный уровень.
+  _rowLevel(r) {
+    return r._approved ? null : BatchAR._rawRowLevel(r);
+  },
+
+  // Состояние строки для подсветки = жизненный цикл проверки stat.gov.kz + результат
+  // валидации. Возвращает суффикс класса .batch-row--* (или null — нейтральная строка):
+  //   'pending'  — серый: ещё в очереди на проверку (не дошли);
+  //   'checking' — синий: проверяется сейчас;
+  //   'err'/'warn' — красный/жёлтый: ошибка/расхождение (после проверки);
+  //   'ok'       — зелёный: проверено, ошибок нет (либо согласовано андеррайтером).
+  _rowState(r) {
+    const st = r.statgovStatus;
+    if (st === 'pending') return 'pending';
+    if (st === 'loading') return 'checking';
+    const level = BatchAR._rowLevel(r);     // null, если согласовано андеррайтером
+    if (level) return level;
+    return st === 'done' ? 'ok' : null;     // зелёный только после успешной проверки
+  },
+  // Набор классов <tr>: состояние + метка «согласовано» (для гашения подсветки ячеек в CSS).
+  _rowClassList(r) {
+    const out = [];
+    const s = BatchAR._rowState(r);
+    if (s) out.push('batch-row--' + s);
+    if (r._approved) out.push('batch-row--approved');
+    return out;
+  },
+  // Ячейка «Согласовано андеррайтером»: галочка. Подсказка зависит от реального уровня строки.
+  _approveCell(r, i) {
+    const lvl = BatchAR._rawRowLevel(r);
+    const hint = lvl === 'err'
+      ? 'Строка с ошибкой. Поставить галочку — согласовать и печатать с исходными данными под ответственность андеррайтера (подсветка снимется). Снять — вернуть в исходное состояние.'
+      : (lvl === 'warn'
+        ? 'Строка с расхождением. Поставить галочку — согласовать и печатать как есть. Снять — вернуть в исходное состояние.'
+        : 'Отметить строку согласованной андеррайтером.');
+    return `<label class="batch-approve" title="${ARForm._esc(hint)}"><input type="checkbox"${r._approved ? ' checked' : ''} onchange="BatchAR.toggleApproved(${i}, this)"></label>`;
   },
 
   // Все ОКЭД компании из stat.gov.kz (primary + secondary), без дублей.
@@ -1049,9 +1106,11 @@ const BatchAR = {
       if (binStReason) binStCell.title = 'Некорректный ИИН/БИН Страхователя: ' + binStReason;
       else binStCell.removeAttribute('title');
     }
-    const level = BatchAR._rowLevel(r);
-    tr.classList.toggle('batch-row--err', level === 'err');
-    tr.classList.toggle('batch-row--warn', level === 'warn');
+    // Класс строки: жизненный цикл (серый/синий/зелёный) + ошибка (красный/жёлтый) + согласование.
+    tr.classList.remove('batch-row--err', 'batch-row--warn', 'batch-row--ok', 'batch-row--pending', 'batch-row--checking');
+    const state = BatchAR._rowState(r);
+    if (state) tr.classList.add('batch-row--' + state);
+    tr.classList.toggle('batch-row--approved', !!r._approved);
     BatchAR._tableVersion++;
   },
 
@@ -1686,6 +1745,38 @@ const BatchAR = {
     }
     const btnClear = document.getElementById('batch-clear');
     if (btnClear) btnClear.style.display = BatchAR.rows.length ? '' : 'none';
+    BatchAR._updateStatusBar();
+  },
+
+  // Статус-бар: сводка по строкам реестра (по состоянию строки). Согласованные
+  // считаем отдельно (они зелёные, но это решение андеррайтера, а не «чисто»).
+  _updateStatusBar() {
+    const bar = document.getElementById('batch-statusbar');
+    if (!bar) return;
+    if (!BatchAR.rows.length) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    let ok = 0, warn = 0, err = 0, checking = 0, pending = 0, approved = 0, unchecked = 0;
+    for (const r of BatchAR.rows) {
+      if (r._approved) { approved++; continue; }
+      const s = BatchAR._rowState(r);
+      if (s === 'err') err++;
+      else if (s === 'warn') warn++;
+      else if (s === 'checking') checking++;
+      else if (s === 'pending') pending++;
+      else if (s === 'ok') ok++;       // проверено через stat.gov.kz, ошибок нет
+      else unchecked++;                 // skip (нет моста) / ошибка проверки / ещё не запускалась — НЕ «корректно»
+    }
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    set('bs-total', BatchAR.rows.length);
+    set('bs-ok', ok); set('bs-warn', warn); set('bs-err', err);
+    set('bs-checking', checking); set('bs-pending', pending);
+    set('bs-approved', approved); set('bs-unchecked', unchecked);
+    // Скрываем нулевые «проверяется/в очереди/не проверено/согласовано» — чтобы бар не шумел.
+    const toggle = (cls, n) => { const el = bar.querySelector('.' + cls); if (el) el.style.display = n ? '' : 'none'; };
+    toggle('batch-stat--checking', checking);
+    toggle('batch-stat--pending', pending);
+    toggle('batch-stat--unchecked', unchecked);
+    toggle('batch-stat--approved', approved);
   },
 
   async clear() {

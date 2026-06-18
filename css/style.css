@@ -2625,42 +2625,188 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-verify-retry:hover { opacity: 0.75; }
 .batch-verify-retry:disabled { opacity: 0.5; cursor: wait; }
 
+/* ── Панель действий: единый каркас всех трёх кнопок (одна высота/радиус/
+   типографика → строгая симметрия). Главная кнопка зелёная и доминирует. */
 .batch-controls {
   display: flex;
-  gap: 10px;
+  align-items: stretch;
+  gap: 12px;
   margin-top: 16px;
 }
-.batch-gen-all {
-  background: linear-gradient(135deg, #4361ee 0%, #5b4ad9 100%);
+.batch-controls .btn-generate,
+.batch-controls .btn-export-errors,
+.batch-controls .btn-export-warns {
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+/* Главная ЗЕЛЁНАЯ кнопка */
+.batch-controls .btn-generate {
   flex: 1;
+  border: none;
+  padding: 0 26px;
+  font-size: 0.95rem;
+  font-weight: 700;
 }
-.batch-gen-all:disabled { opacity: 0.55; cursor: not-allowed; }
-.btn-export-errors {
-  padding: 0 18px;
-  border: 1px solid #fecaca;
-  border-radius: 10px;
-  background: #fef2f2;
-  color: #b42318;
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  white-space: nowrap;
+.batch-gen-all {
+  flex: 1;
+  color: #fff;
+  background: linear-gradient(135deg, #16a34a 0%, #0f9d58 55%, #0c8a4d 100%);
+  box-shadow: 0 1px 2px rgba(12, 138, 77, 0.25), 0 8px 18px -8px rgba(16, 163, 74, 0.55);
 }
-.btn-export-errors:hover { background: #fee2e2; }
-.btn-export-errors:disabled { opacity: 0.55; cursor: not-allowed; }
+.batch-gen-all::before { content: "\2713"; font-size: 1rem; font-weight: 800; line-height: 1; }
+.batch-gen-all:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(12, 138, 77, 0.28), 0 14px 26px -10px rgba(16, 163, 74, 0.6);
+}
+.batch-gen-all:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 2px rgba(12, 138, 77, 0.3); }
+.batch-gen-all:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(16, 163, 74, 0.35), 0 8px 18px -8px rgba(16, 163, 74, 0.55);
+}
+.batch-gen-all:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: #94a3b8;
+  background: #eef1f5;
+  box-shadow: inset 0 0 0 1px #e2e8f0;
+}
+.batch-gen-all:disabled::before { content: none; }
+
+/* Вторичные кнопки экспорта — строго симметричные, прижаты справа.
+   flex:0 0 auto — одиночная зелёная кнопка не растягивается. */
+.btn-export-errors,
 .btn-export-warns {
+  flex: 0 0 auto;
   padding: 0 18px;
-  border: 1px solid #fde68a;
-  border-radius: 10px;
-  background: #fffbeb;
-  color: #92400e;
-  font-weight: 600;
   font-size: 0.9rem;
-  cursor: pointer;
-  white-space: nowrap;
+  background: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
-.btn-export-warns:hover { background: #fef3c7; }
-.btn-export-warns:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Цветная точка-индикатор: заливка + рамка как у ячеек таблицы. */
+.btn-export-errors::before,
+.btn-export-warns::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.btn-export-errors { border-color: #fecaca; color: #b42318; }
+.btn-export-errors::before { background: #fca5a5; box-shadow: inset 0 0 0 1px #dc2626; }
+.btn-export-errors:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f4a5a5;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -8px rgba(180, 35, 24, 0.45);
+}
+.btn-export-errors:active:not(:disabled) { transform: translateY(0); }
+.btn-export-errors:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.22); }
+.btn-export-errors:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.btn-export-warns { border-color: #fde68a; color: #92400e; }
+.btn-export-warns::before { background: #fde68a; box-shadow: inset 0 0 0 1px #d97706; }
+.btn-export-warns:hover:not(:disabled) {
+  background: #fffbeb;
+  border-color: #f5cf5b;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -8px rgba(146, 64, 14, 0.4);
+}
+.btn-export-warns:active:not(:disabled) { transform: translateY(0); }
+.btn-export-warns:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.22); }
+.btn-export-warns:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+
+@media (max-width: 720px) {
+  .batch-controls { flex-wrap: wrap; }
+  .batch-controls .btn-generate { flex: 1 0 100%; }
+  .btn-export-errors,
+  .btn-export-warns { flex: 1 1 0; }
+}
+@media (max-width: 600px) {
+  .btn-export-errors,
+  .btn-export-warns { flex: 1 0 100%; }
+}
+
+/* ── Легенды-подсказки под панелью: цвета строк и цвета ячеек ───────── */
+.batch-legend {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fafbfc;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+.batch-legend + .batch-legend { margin-top: 10px; }
+.batch-legend-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.batch-legend-title::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #4361ee 0%, #5b4ad9 100%);
+}
+.batch-legend--cells .batch-legend-title::before { background: linear-gradient(135deg, #dc2626 0%, #d97706 100%); }
+.batch-legend-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.batch-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px 6px 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #344054;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03);
+}
+.batch-legend-chip b { font-weight: 700; color: #1f2937; }
+.batch-legend-sub { color: #64748b; font-weight: 400; }
+.batch-legend-swatch {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  border: 1px solid rgba(16, 24, 40, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.batch-legend--cells .batch-legend-chips { flex-direction: column; gap: 9px; }
+.batch-legend-cellrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #475467;
+  overflow-wrap: break-word;
+}
+.batch-legend-cellrow > span:last-child { min-width: 0; }
+.batch-legend-cellrow b { color: #1f2937; font-weight: 700; }
+.batch-legend-swatch--cell { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; margin-top: 1px; }
+.batch-legend-swatch--err  { background: #fca5a5; box-shadow: inset 0 0 0 2px #dc2626; }
+.batch-legend-swatch--warn { background: #fde68a; box-shadow: inset 0 0 0 2px #d97706; }
 .batch-sort-errors {
   padding: 6px 14px;
   border: 1px solid #fecaca;
@@ -2698,7 +2844,7 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 
 .batch-table-wrap {
   margin-top: 16px;
-  max-height: 520px;
+  max-height: 1040px;
   overflow: auto;
   border: 1px solid var(--c-border-subtle, #e2e8f0);
   border-radius: 10px;
@@ -2723,10 +2869,45 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   cursor: pointer;
 }
 .batch-open-tab:hover { background: #e0e7ff; }
+
+/* ── Статус-бар: сводка по строкам реестра ───────────────────────── */
+.batch-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 14px;
+  margin-top: 12px;
+  padding: 9px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fafbfc;
+  font-size: 0.8rem;
+  color: #475467;
+}
+.batch-stat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.batch-stat b { color: #1f2937; font-variant-numeric: tabular-nums; font-weight: 700; }
+.batch-stat--total { font-weight: 600; color: #344054; }
+.batch-stat--total b { font-size: 0.98rem; }
+.batch-stat-sep { width: 1px; align-self: stretch; min-height: 16px; background: #e2e8f0; }
+.batch-stat-dot { width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(16, 24, 40, 0.12); flex-shrink: 0; }
+.batch-stat--ok .batch-stat-dot { background: #c4f5d3; }
+.batch-stat--warn .batch-stat-dot { background: #fdef9a; }
+.batch-stat--err .batch-stat-dot { background: #fdcdcd; }
+.batch-stat--checking .batch-stat-dot { background: #bcd9fb; }
+.batch-stat--pending .batch-stat-dot { background: #e3e1de; }
+.batch-stat--unchecked .batch-stat-dot { background: #fff; border: 1px dashed #94a3b8; }
+.batch-stat--approved .batch-stat-dot { background: #c4f5d3; box-shadow: inset 0 0 0 2px #15803d; }
+
+/* Легенда строк — компактнее, чтобы поместиться в одну строку. */
+.batch-legend--rows .batch-legend-chips { gap: 7px; flex-wrap: wrap; }
+.batch-legend--rows .batch-legend-chip { padding: 5px 9px 5px 7px; font-size: 0.76rem; }
 .batch-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
+  /* Фиксированная раскладка: ширины из <colgroup> (в %) → таблица ровно = ширине
+     контейнера, без горизонтального скролла; длинный текст переносится по строкам. */
+  table-layout: fixed;
 }
 .batch-table thead th {
   position: sticky;
@@ -2734,41 +2915,45 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   background: #f8fafc;
   color: #344054;
   font-weight: 700;
-  padding: 9px 10px;
+  padding: 8px 6px;
   border-bottom: 1px solid #e2e8f0;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.2;
   z-index: 1;
 }
 .batch-table tbody td {
-  padding: 8px 10px;
+  padding: 7px 6px;
   border-bottom: 1px solid #f1f5f9;
-  vertical-align: middle;
+  vertical-align: top;
+  overflow-wrap: break-word;
 }
 .batch-table tbody tr:hover { background: #f8fafc; }
 /* Выравнивание задаётся классом колонки и применяется к ЗАГОЛОВКУ и значению
    одинаково — чтобы название столбца и его значения всегда совпадали. */
 /* БИН, Страхователь, Дата рег. — слева; все остальные столбцы — по центру
    (и заголовок, и значения, чтобы они совпадали). */
-.batch-c-num  { width: 36px; color: #98a2b3; text-align: center; vertical-align: top; }
-.batch-c-contract { width: 124px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; color: #475467; font-weight: 600; }
-.batch-c-bin  { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
-/* Страхователь — вдвое уже прежнего (было 200–340px); длинные имена обрезаются. */
-.batch-c-name { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
-/* Страхователь (НаименованиеСтрахователя / БИНСтрахователя — колонки C/D выгрузки). */
-.batch-c-name-st { min-width: 100px; max-width: 170px; text-align: left; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
-.batch-c-bin-st { width: 116px; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
-.batch-c-oked { width: 110px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
-.batch-c-class { width: 64px; text-align: center; white-space: nowrap; vertical-align: top; }
-.batch-c-num2 { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+/* Ширины колонок задаёт <colgroup> (в %, table-layout:fixed) — здесь только
+   выравнивание/перенос/цвет. Пиксельные width НЕ ставим: их перекрыл бы colgroup. */
+.batch-c-num  { color: #98a2b3; text-align: center; vertical-align: top; }
+.batch-c-contract { text-align: left; font-variant-numeric: tabular-nums; vertical-align: top; color: #475467; font-weight: 600; }
+.batch-c-bin  { text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-name { text-align: left; vertical-align: top; }
+.batch-c-name-st { text-align: left; vertical-align: top; }
+.batch-c-bin-st { text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-oked { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: top; }
+.batch-c-class { text-align: center; white-space: nowrap; vertical-align: top; }
+.batch-c-num2 { text-align: center; font-variant-numeric: tabular-nums; vertical-align: top; }
 .batch-c-center { text-align: center; vertical-align: top; }
-.batch-c-reg  { width: 116px; text-align: left; white-space: nowrap; vertical-align: top; }
-.batch-c-gov  { width: 104px; text-align: center; white-space: nowrap; vertical-align: top; }
-.batch-c-author { width: 100px; text-align: left; vertical-align: top; color: #475467; white-space: normal; line-height: 1.25; word-break: break-word; }
+.batch-c-reg  { text-align: left; vertical-align: top; }
+.batch-c-gov  { text-align: center; white-space: nowrap; vertical-align: top; line-height: 1.2; }
+.batch-c-author { text-align: left; vertical-align: top; color: #475467; white-space: normal; line-height: 1.25; word-break: break-word; }
 /* Страхователь и Контрагент: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче). */
-.batch-c-contr, .batch-c-insurer { min-width: 120px; max-width: 190px; text-align: left; vertical-align: top; overflow: hidden; }
+.batch-c-contr, .batch-c-insurer { text-align: left; vertical-align: top; }
 .batch-party-bin { font-weight: 700; color: #1f2937; font-variant-numeric: tabular-nums; }
-.batch-party-name { color: #64748b; font-size: 0.72rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 185px; }
-.batch-c-contr-class { width: 84px; text-align: center; white-space: nowrap; vertical-align: top; }
+/* Наименование показываем ПОЛНОСТЬЮ — переносим на следующую строку (без обрезки «…»). */
+.batch-party-name { color: #64748b; font-size: 0.72rem; display: block; white-space: normal; overflow-wrap: break-word; line-height: 1.2; margin-top: 1px; }
+.batch-c-contr-class { text-align: center; white-space: nowrap; vertical-align: top; }
 .batch-c-gov .batch-stack,
 .batch-c-class .batch-stack,
 .batch-c-oked .batch-stack,
@@ -2791,14 +2976,53 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-table tbody tr:hover .batch-cell--warn { background: #fcd34d !important; }
 .batch-table tbody tr:hover .batch-cell--err  { background: #f87171 !important; }
 
-/* Вся строка: жёлтая — мягкое расхождение класса, красная — точная ошибка. */
-.batch-row--warn > td { background: #fffbeb; }
-.batch-table tbody tr.batch-row--warn:hover > td { background: #fef9e7; }
-.batch-row--err > td { background: #fef2f2; }
-.batch-table tbody tr.batch-row--err:hover > td { background: #fee2e2; }
+/* Вся строка: жёлтая — мягкое расхождение класса, красная — точная ошибка.
+   Насыщенные тона (хорошо отличимы жёлтый ↔ красный); ошибочная ЯЧЕЙКА внутри ещё темнее. */
+.batch-row--warn > td { background: #fdef9a; }
+.batch-table tbody tr.batch-row--warn:hover > td { background: #fce86d; }
+.batch-row--err > td { background: #fdcdcd; }
+.batch-table tbody tr.batch-row--err:hover > td { background: #fbb0b0; }
+
+/* Жизненный цикл проверки stat.gov.kz:
+   • СЕРЫЙ (--pending):  строка ещё в очереди, проверка не дошла;
+   • СИНИЙ (--checking): строка проверяется прямо сейчас;
+   • ЗЕЛЁНЫЙ (--ok):     проверено — ошибок и расхождений нет (либо согласовано андеррайтером). */
+.batch-row--pending > td { background: #e3e1de; color: #6b7280; }
+.batch-table tbody tr.batch-row--pending:hover > td { background: #d6d3cf; }
+.batch-row--checking > td { background: #bcd9fb; }
+.batch-table tbody tr.batch-row--checking:hover > td { background: #9cc6f8; }
+.batch-row--ok > td { background: #c4f5d3; }
+.batch-table tbody tr.batch-row--ok:hover > td { background: #9be8b3; }
+
+/* Согласовано андеррайтером — строка печатается с исходными данными под ответственность
+   андеррайтера. Выглядит «без ошибок» (зелёная, с зелёной меткой слева); подсветка
+   ошибочных ячеек и красный/жёлтый текст внутри строки гасятся (в т.ч. при наведении). */
+.batch-row--approved > td { background: #c4f5d3; }
+.batch-table tbody tr.batch-row--approved:hover > td { background: #9be8b3; }
+.batch-row--approved > td:first-child { box-shadow: inset 4px 0 0 #15803d; }
+/* Гасим подсветку ошибочных ячеек, когда вердикт по строке показывать НЕ нужно:
+   • согласовано андеррайтером (принято как есть);
+   • строка ещё в очереди (серая) или проверяется (синяя) — пока проверка не завершена,
+     ошибки по ячейкам не показываем, строка читается как «ещё не оценена». */
+tr.batch-row--approved .batch-cell--err, tr.batch-row--approved .batch-cell--warn,
+tr.batch-row--pending  .batch-cell--err, tr.batch-row--pending  .batch-cell--warn,
+tr.batch-row--checking .batch-cell--err, tr.batch-row--checking .batch-cell--warn,
+.batch-table tbody tr.batch-row--approved:hover .batch-cell--err, .batch-table tbody tr.batch-row--approved:hover .batch-cell--warn,
+.batch-table tbody tr.batch-row--pending:hover  .batch-cell--err, .batch-table tbody tr.batch-row--pending:hover  .batch-cell--warn,
+.batch-table tbody tr.batch-row--checking:hover .batch-cell--err, .batch-table tbody tr.batch-row--checking:hover .batch-cell--warn {
+  background: transparent !important; box-shadow: none !important; font-weight: 400;
+}
+tr.batch-row--approved .batch-sub--err, tr.batch-row--approved .batch-sub--warn,
+tr.batch-row--pending  .batch-sub--err, tr.batch-row--pending  .batch-sub--warn,
+tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn { color: #94a3b8 !important; font-weight: 400 !important; }
+
+/* Колонка «Согласовано андеррайтером» — компактная галочка по центру. */
+.batch-c-approve { text-align: center; white-space: nowrap; line-height: 1.2; vertical-align: top; }
+.batch-approve { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.batch-approve input { width: 16px; height: 16px; cursor: pointer; accent-color: #16a34a; margin: 0; }
 
 /* Предупреждение «моложе N лет» — под датой регистрации. */
-.batch-young { color: #b45309; font-weight: 700; white-space: nowrap; }
+.batch-young { color: #b45309; font-weight: 700; white-space: normal; overflow-wrap: break-word; }
 /* Метка источника даты (statsnet) */
 .batch-regsrc {
   display: inline-block; margin-left: 4px; padding: 0 4px;

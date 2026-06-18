@@ -248,27 +248,50 @@
           <button class="batch-sort-errors" id="batch-sort-errors" type="button" onclick="BatchAR.toggleSortByError()" title="Показать сначала красные строки, затем жёлтые">⚑ Сначала ошибки</button>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
+
+        <!-- Статус-бар: сводка по строкам реестра (обновляется по мере проверки). -->
+        <div class="batch-statusbar" id="batch-statusbar" style="display:none">
+          <span class="batch-stat batch-stat--total"><b id="bs-total">0</b>&nbsp;строк</span>
+          <span class="batch-stat-sep"></span>
+          <span class="batch-stat batch-stat--ok" title="Проверено, ошибок нет"><span class="batch-stat-dot"></span><b id="bs-ok">0</b>&nbsp;корректных</span>
+          <span class="batch-stat batch-stat--warn" title="Расхождения — нужна доп. проверка"><span class="batch-stat-dot"></span><b id="bs-warn">0</b>&nbsp;расхождений</span>
+          <span class="batch-stat batch-stat--err" title="Некорректные данные — исправить в базе"><span class="batch-stat-dot"></span><b id="bs-err">0</b>&nbsp;ошибок</span>
+          <span class="batch-stat batch-stat--checking" title="Проверяется прямо сейчас"><span class="batch-stat-dot"></span><b id="bs-checking">0</b>&nbsp;проверяется</span>
+          <span class="batch-stat batch-stat--pending" title="В очереди — ещё не дошло до проверки"><span class="batch-stat-dot"></span><b id="bs-pending">0</b>&nbsp;в очереди</span>
+          <span class="batch-stat batch-stat--unchecked" title="Не проверено — нет подключения к stat.gov.kz или ошибка проверки"><span class="batch-stat-dot"></span><b id="bs-unchecked">0</b>&nbsp;не проверено</span>
+          <span class="batch-stat batch-stat--approved" title="Согласовано андеррайтером"><span class="batch-stat-dot"></span><b id="bs-approved">0</b>&nbsp;согласовано</span>
+        </div>
         <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
           <table class="batch-table">
+            <!-- Фиксированная раскладка: ширины колонок в % → таблица всегда = ширине
+                 контейнера (без горизонтального скролла); содержимое переносится. -->
+            <colgroup>
+              <col style="width:2.2%"><col style="width:6.5%"><col style="width:8%"><col style="width:8%">
+              <col style="width:4.3%"><col style="width:3.9%"><col style="width:3.9%"><col style="width:3%">
+              <col style="width:7%"><col style="width:7.4%"><col style="width:7.4%"><col style="width:2.6%">
+              <col style="width:6.9%"><col style="width:6.9%"><col style="width:7.5%"><col style="width:2.9%">
+              <col style="width:8%"><col style="width:3.6%">
+            </colgroup>
             <thead>
               <tr>
                 <th class="batch-c-num">#</th>
-                <th class="batch-c-contract">Номер договора</th>
-                <th class="batch-c-insurer" title="Страхователь: сверху БИН, снизу наименование">Страхователь</th>
-                <th class="batch-c-contr" title="Контрагент (объект договора): сверху БИН, снизу наименование">Контрагент</th>
-                <th class="batch-c-oked" title="Сверху — ОКЭД из выгрузки, снизу — из stat.gov.kz (по БИН Страхователя)">ОКЭД<br>(страхователь)</th>
-                <th class="batch-c-class" title="Сверху — класс из выгрузки, снизу — вычисленный по ОКЭД">Класс<br>(страхователь)</th>
-                <th class="batch-c-contr-class" title="Сверху — класс риска контрагента (K), снизу — тариф из выгрузки; красным, если тариф не соответствует классу по справочнику">Класс<br>(контр.)</th>
-                <th class="batch-c-num2" title="Количество работников контрагента (по строке выгрузки)">Q сотруд<br>(контр.)</th>
-                <th class="batch-c-num2" title="ФОТ контрагента (по строке выгрузки)">ФОТ<br>(контрагент)</th>
-                <th class="batch-c-num2" title="ОбщаяСтраховаяСумма (итог по договору/страхователю); снизу — Σ СС контрагентов или расчётная">СС<br>(страхователь)</th>
-                <th class="batch-c-num2" title="СтраховаяСумма контрагента (O); должна быть ≥ ФОТ контрагента">СС<br>(контрагент)</th>
-                <th class="batch-c-center" title="Поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой">ПК</th>
-                <th class="batch-c-num2 batch-c-prem" title="ОбщаяСтраховаяПремия с ПК (итог по договору); снизу — Σ СП контрагентов или расчётная">СП<br>(страхователь)</th>
-                <th class="batch-c-num2" title="СтраховаяПремия контрагента с ПК (S); снизу — расчётная СС×тариф(K)×ПК">СП<br>(контрагент)</th>
-                <th class="batch-c-reg">Дата рег.<br>(страхователь)</th>
-                <th class="batch-c-gov">Гос. участие</th>
-                <th class="batch-c-author" title="Менеджер из выгрузки (столбец «Менеджер»)">Менеджер</th>
+                <th class="batch-c-contract" title="Номер договора — из выгрузки.">Номер договора</th>
+                <th class="batch-c-insurer" title="Страхователь — компания, оформляющая страховку (клиент). Сверху: БИН, снизу: наименование.">Страхователь</th>
+                <th class="batch-c-contr" title="Контрагент — объект договора (партнёр / филиал). Сверху: БИН, снизу: наименование.">Контрагент</th>
+                <th class="batch-c-oked" title="ОКЭД (страхователь) → ОКЭД (С). Общий классификатор видов экономической деятельности — основной вид деятельности компании-клиента. Сверху: из выгрузки; снизу: ОКЭД по stat.gov.kz.">ОКЭД (С)</th>
+                <th class="batch-c-class" title="Класс (страхователь) → Класс (С). Класс профессионального риска — категория опасности деятельности страхователя. Сверху: из выгрузки; снизу: вычисленный по ОКЭД.">Класс (С)</th>
+                <th class="batch-c-contr-class" title="Класс (контрагент) → Класс (К). Класс профессионального риска контрагента (филиала). Сверху: из выгрузки (K); снизу: классы по ОКЭД; красным — если не соответствует справочнику.">Класс (К)</th>
+                <th class="batch-c-num2" title="Q сотрудников (контрагент) → Q сотр. (К). Количество (численность) сотрудников у контрагента (филиала).">Q сотр. (К)</th>
+                <th class="batch-c-num2" title="ФОТ (контрагент) → ФОТ (К). Годовой фонд оплаты труда контрагента (филиала) — суммарные расходы на зарплаты.">ФОТ (К)</th>
+                <th class="batch-c-num2" title="СС (страхователь) → СС (С). Страховая сумма — максимальный лимит выплаты, на который застрахован страхователь (клиент). Снизу: Σ СС контрагентов.">СС (С)</th>
+                <th class="batch-c-num2" title="СС (контрагент) → СС (К). Страховая сумма — максимальный лимит выплаты по контрагенту (филиалу); должна быть ≥ ФОТ. Снизу: расчётная.">СС (К)</th>
+                <th class="batch-c-center" title="ПК — поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой.">ПК</th>
+                <th class="batch-c-num2 batch-c-prem" title="СП (страхователь) → СП (С). Страховая премия — стоимость страховки (взнос), которую платит страхователь (клиент). Снизу: Σ СП контрагентов.">СП (С)</th>
+                <th class="batch-c-num2" title="СП (контрагент) → СП (К). Страховая премия (взнос) по контрагенту (филиалу). Снизу: расчётная СС×тариф×ПК.">СП (К)</th>
+                <th class="batch-c-reg" title="Дата регистрации (страхователь) → Дата рег. (С). Дата официальной регистрации компании-клиента (stat.gov.kz / kyc.kz).">Дата рег. (С)</th>
+                <th class="batch-c-gov" title="Государственное участие / доля → Гос. доля. Процент владения компании государством. Сверху: из выгрузки; снизу: по реестру e-Qazyna.">Гос.<br>доля</th>
+                <th class="batch-c-author" title="Менеджер → Ответственный менеджер. Сотрудник страховой компании, который ввёл данную сделку (из выгрузки).">Менеджер</th>
+                <th class="batch-c-approve" title="Согласовано андеррайтером → Согл. андерр. Отметка, что специалист по оценке рисков проверил и одобрил условия договора (галочка). Печать с исходными данными под его ответственность; снимает подсветку со строки.">Согл.<br>андерр.</th>
               </tr>
             </thead>
             <tbody id="batch-tbody"></tbody>
@@ -295,6 +318,27 @@
                   title="Выгрузить жёлтые строки (расхождения класса/расчёта) в исходном формате с подсветкой ячеек">
             Выгрузить расхождения (жёлтые)
           </button>
+        </div>
+
+        <!-- Легенда: что означает ЦВЕТ СТРОКИ (статус договора). -->
+        <div class="batch-legend batch-legend--rows" id="batch-legend-rows">
+          <div class="batch-legend-title">Цвет строки — статус договора</div>
+          <div class="batch-legend-chips">
+            <span class="batch-legend-chip"><span class="batch-legend-swatch" style="background:#fdcdcd"></span><span><b>Красный</b> <span class="batch-legend-sub">— некорректные данные, исправить в базе</span></span></span>
+            <span class="batch-legend-chip"><span class="batch-legend-swatch" style="background:#fdef9a"></span><span><b>Жёлтый</b> <span class="batch-legend-sub">— расхождения, нужна доп. проверка</span></span></span>
+            <span class="batch-legend-chip"><span class="batch-legend-swatch" style="background:#c4f5d3"></span><span><b>Зелёный</b> <span class="batch-legend-sub">— все данные корректны</span></span></span>
+            <span class="batch-legend-chip"><span class="batch-legend-swatch" style="background:#bcd9fb"></span><span><b>Синий</b> <span class="batch-legend-sub">— проверяется</span></span></span>
+            <span class="batch-legend-chip"><span class="batch-legend-swatch" style="background:#e3e1de"></span><span><b>Серый</b> <span class="batch-legend-sub">— в очереди</span></span></span>
+          </div>
+        </div>
+
+        <!-- Легенда: в каких случаях и почему подсвечивается ЯЧЕЙКА. -->
+        <div class="batch-legend batch-legend--cells" id="batch-legend-cells">
+          <div class="batch-legend-title">Цвет ячейки — почему значение подсвечено</div>
+          <div class="batch-legend-chips">
+            <div class="batch-legend-cellrow"><span class="batch-legend-swatch batch-legend-swatch--cell batch-legend-swatch--err"></span><span><b>Красная — значение неверно.</b> <span class="batch-legend-sub">СС &lt; ФОТ (страхователя или контрагента); СС страхователя &lt; страховой премии; премия &lt; 1&nbsp;МЗП (85&nbsp;000); при премии &lt; 1&nbsp;МЗП СС контрагента ≠ ФОТ; СП контрагента ≠ СС×тариф×ПК; Σ&nbsp;СС или Σ&nbsp;СП контрагентов ≠ итогу страхователя; ОКЭД&nbsp;(С) отсутствует у компании по stat.gov.kz; класс&nbsp;(С) не соответствует классификатору для своего ОКЭД; класс&nbsp;(К) отсутствует среди ОКЭД контрагента; тариф&nbsp;(К) не соответствует справочнику; невалидный БИН; скидка ПК (0,9) при компании моложе 3&nbsp;лет; гос.&nbsp;доля ≠ реестру e-Qazyna.</span></span></div>
+            <div class="batch-legend-cellrow"><span class="batch-legend-swatch batch-legend-swatch--cell batch-legend-swatch--warn"></span><span><b>Жёлтая — мягкое расхождение.</b> <span class="batch-legend-sub">Класс (С или К) есть среди ОКЭД компании, но не максимальный из её видов деятельности.</span></span></div>
+          </div>
         </div>
         <div class="batch-progress" id="batch-progress" style="display:none">
           <div class="batch-progress-track"><div class="batch-progress-bar" id="batch-progress-bar"></div></div>
