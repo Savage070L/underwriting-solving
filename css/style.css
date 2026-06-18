@@ -593,27 +593,84 @@ header.app-header {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--sp-3);
 }
+/* Длинное название карточки реестра — мельче, чтобы умещалось аккуратно. */
+.uz-label--long { font-size: 0.8rem; line-height: 1.25; }
+
+/* Блок выбора компании из реестра — отдельная карточка под зонами загрузки. */
 .registry-picker {
-  margin-top: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  background: var(--c-surface-elevated);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-3);
 }
-.registry-picker-row {
+.registry-picker-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   flex-wrap: wrap;
 }
-.registry-picker-row label { font-weight: 600; font-size: 0.9rem; color: #475467; }
-.registry-picker-row #registry-filter {
-  flex: 1; min-width: 160px; padding: 6px 10px;
-  border: 1px solid #d0d5dd; border-radius: 8px; font-size: 0.9rem;
+.registry-picker-title {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 1rem; color: var(--c-text-primary);
 }
-.registry-picker #registry-picker {
-  width: 100%; padding: 4px; border: 1px solid #d0d5dd; border-radius: 8px;
-  font-size: 0.9rem; font-variant-numeric: tabular-nums;
+.registry-picker-icon { font-size: 1.05rem; }
+.registry-picker-count { color: var(--c-text-secondary); font-weight: 600; font-size: 0.85rem; }
+.registry-picker-head #registry-filter {
+  flex: 1; min-width: 200px; max-width: 360px;
+  padding: 9px 12px;
+  border: 1px solid var(--c-border-default); border-radius: var(--radius-md);
+  font-size: 0.92rem; background: var(--c-surface-elevated);
+  transition: border-color .15s, box-shadow .15s;
 }
+.registry-picker-head #registry-filter:focus {
+  outline: none; border-color: var(--c-brand-500);
+  box-shadow: 0 0 0 3px var(--c-brand-50);
+}
+/* Большой прокручиваемый список компаний — видно, по кому принимаем решение. */
+.registry-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 380px; overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--c-border-subtle); border-radius: var(--radius-md);
+  background: var(--c-surface-sunken);
+}
+.registry-list-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: 'bin name' 'bin sub';
+  align-items: center;
+  column-gap: 14px; row-gap: 1px;
+  width: 100%; text-align: left;
+  padding: 10px 14px;
+  background: var(--c-surface-elevated);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  transition: background .12s, border-color .12s, box-shadow .12s, transform .05s;
+}
+.registry-list-item:hover { border-color: var(--c-brand-500); background: var(--c-brand-50); }
+.registry-list-item:active { transform: translateY(1px); }
+.registry-list-item.is-selected {
+  border-color: var(--c-brand-500);
+  background: var(--c-brand-50);
+  box-shadow: inset 0 0 0 1.5px var(--c-brand-500);
+}
+.rli-bin {
+  grid-area: bin;
+  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 0.98rem;
+  color: var(--c-brand-700); letter-spacing: 0.01em; white-space: nowrap;
+}
+.rli-name { grid-area: name; font-size: 0.9rem; font-weight: 600; color: var(--c-text-primary); line-height: 1.3; }
+.rli-sub  { grid-area: sub; font-size: 0.78rem; color: var(--c-text-secondary); margin-top: 1px; }
+.registry-list-empty { padding: 18px; text-align: center; color: var(--c-text-secondary); font-size: 0.9rem; }
+.registry-picker-hint { font-size: 0.8rem; color: var(--c-text-secondary); }
 .upload-zone-main {
   background: var(--c-surface-elevated);
   border: 1.5px dashed var(--c-brand-500);
@@ -2707,11 +2764,19 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-c-reg  { width: 116px; text-align: left; white-space: nowrap; vertical-align: top; }
 .batch-c-gov  { width: 104px; text-align: center; white-space: nowrap; vertical-align: top; }
 .batch-c-author { width: 100px; text-align: left; vertical-align: top; color: #475467; white-space: normal; line-height: 1.25; word-break: break-word; }
+/* Страхователь и Контрагент: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче). */
+.batch-c-contr, .batch-c-insurer { min-width: 120px; max-width: 190px; text-align: left; vertical-align: top; overflow: hidden; }
+.batch-party-bin { font-weight: 700; color: #1f2937; font-variant-numeric: tabular-nums; }
+.batch-party-name { color: #64748b; font-size: 0.72rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 185px; }
+.batch-c-contr-class { width: 84px; text-align: center; white-space: nowrap; vertical-align: top; }
 .batch-c-gov .batch-stack,
 .batch-c-class .batch-stack,
 .batch-c-oked .batch-stack,
 .batch-c-sum .batch-stack,
-.batch-c-prem .batch-stack { align-items: center; }
+.batch-c-prem .batch-stack,
+.batch-c-contr-class .batch-stack,
+.batch-c-contr-sum .batch-stack,
+.batch-c-contr-prem .batch-stack { align-items: center; }
 
 /* Подсветка расхождений — два уровня:
    • КРАСНЫЙ (--err): точная ошибка данных — ОКЭД из выгрузки отсутствует среди

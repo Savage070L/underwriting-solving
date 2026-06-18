@@ -36,12 +36,16 @@ const BatchReader = {
     region:         { headers: ['регион'], col: 'G' },
     oked:           { headers: ['кодокэд', 'код окэд'], col: 'H' },
     activity:       { headers: ['виддеятельности'], col: 'I' },
-    riskClass:      { headers: ['класспрофриска'], col: 'J' },
-    workers:        { headers: ['количествоработников'], col: 'K' },
-    gfot:           { headers: ['фот'], col: 'L' },
+    riskClass:      { headers: ['класспрофриска'], col: 'J' },          // класс СТРАХОВАТЕЛЯ
+    riskClassContragent: { headers: ['классрискаконтрагента'], col: 'K' }, // класс КОНТРАГЕНТА (новый формат)
+    workers:        { headers: ['количествоработников'], col: 'L' },
+    gfot:           { headers: ['фот'], col: 'M' },
     insuranceSum:   { headers: ['страховаясумма'], col: 'N' },        // per-row (для документа АР)
     insuranceSumTotal: { headers: ['общаястраховаясумма'], col: 'M' }, // ИТОГ по договору (таблица/проверки)
-    coeff:          { headers: ['поправочныйкоэффициент'], col: 'P' },
+    coeff:          { headers: ['поправочныйкоэффициент'], col: 'Q' },
+    // Тариф КОНТРАГЕНТА из выгрузки (СтраховойТариф) — в процентах («0,49» = 0,49%).
+    // В parse() переводим в долю (÷100). Соответствует классу контрагента (K).
+    tariffExport:   { headers: ['страховойтариф'], col: 'P' },
     // R (СтраховаяПремия) = премия С ПК (per-row, для документа). Премия ДО ПК = R/ПК.
     // Для таблицы/проверок берём ИТОГ по договору из «ОбщаяСтраховаяПремия» (premiumTotal).
     premiumWith:    { headers: ['страховаяпремия'], col: 'R' },
@@ -225,7 +229,10 @@ const BatchReader = {
         premiumTotal,                        // ОбщаяСтраховаяПремия (ИТОГ с ПК) — таблица/проверки
         gfot: BatchReader._money(cell(row, 'gfot')),
         workers: BatchReader._int(cell(row, 'workers')),
-        riskClass: String(cell(row, 'riskClass') ?? '').trim(),
+        riskClass: String(cell(row, 'riskClass') ?? '').trim(),                       // класс СТРАХОВАТЕЛЯ (J)
+        riskClassContragent: String(cell(row, 'riskClassContragent') ?? '').trim(),   // класс КОНТРАГЕНТА (K)
+        // Тариф контрагента из выгрузки (СтраховойТариф), доля: «0,49» → 0,0049.
+        tariffExport: (() => { const v = BatchReader._money(cell(row, 'tariffExport')); return (v != null && v > 0) ? v / 100 : null; })(),
         oked: String(cell(row, 'oked') || '').trim(),
         activity,
         tariff,

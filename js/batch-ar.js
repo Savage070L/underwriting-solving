@@ -64,6 +64,7 @@ const BatchAR = {
       BatchAR.rows = rows;
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
+      BatchAR._aggByContract = null;       // сбросить кэш агрегатов по договору (СС/СП/ФОТ контрагентов)
       BatchAR._rawHeader = header || [];   // исходный заголовок (для выгрузки превышений)
       BatchAR._fieldIdx = idx || {};       // поле→индекс колонки (для подсветки ошибок)
       const zone = document.getElementById('zone-batch');
@@ -147,61 +148,78 @@ const BatchAR = {
     }
     wrap.style.display = 'block';
     if (toolbar) toolbar.style.display = '';
-    // Порядок столбцов: # · БИН · Страхователь · ОКЭД · Класс · Кол-во сотр. ·
-    // ГФОТ · Страх. сумма · Страх. Премия (до ПК) · ПК · Премия с ПК ·
-    // Дата рег. · Гос. участие.
+    // Порядок столбцов: # · Договор · Наим.Страхователя · БИН Страхователя ·
+    // Контрагент(имя+БИН) · ОКЭД · Класс(страх) · Класс+тариф(контр) ·
+    // Кол-во(контр) · ФОТ(контр) · СС(контр) · СП(контр) · СС(страх) · ПК ·
+    // СПсПК(страх) · Дата рег. · Гос. участие · Менеджер.
     tbody.innerHTML = BatchAR._displayOrder().map((i) => {
       const r = BatchAR.rows[i];
       const okedErr = BatchAR._okedError(r);
       const cDiff = BatchAR._classDiff(r);
       const classWrong = BatchAR._classWrongForOked(r);
       const gDiff = BatchAR._govDiff(r);
-      // ОКЭД ошибочный → красный. Класс: КРАСНЫЙ, если класс не соответствует своему
-      // ОКЭД (грубая ошибка) или из-за ошибочного ОКЭД; иначе ЖЁЛТЫЙ при мягком
-      // расхождении (выбран не максимальный класс). Гос. участие при расхождении → красный.
       const okedCls = okedErr ? ' batch-cell--err' : '';
       const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiff ? ' batch-cell--warn' : '');
       const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"` : '';
       const govCls = gDiff ? ' batch-cell--err' : '';
-      // Молодая компания (< порога) со скидкой → ПК подсвечиваем красным.
       const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
-      // СС < премии → красным (грубая ошибка); иначе жёлтым при расхождении с
-      // расчётом по методологии. Красный приоритетнее жёлтого.
+      // ===== КОНТРАГЕНТ (строка) =====
+      const contrSumLtFot = BatchAR._contrSumLtFotError(r);
+      const contrTarErr = BatchAR._contrTariffClassError(r);
+      const contrClassWrongBin = BatchAR._contrClassWrongByBin(r);
+      const contrClassDiffBin = BatchAR._contrClassDiffByBin(r);
+      const contrPremDiff = BatchAR._contrPremiumDiff(r);
+      const contrBinCls = BatchAR._binInvalid(r) ? ' batch-cell--err' : '';
+      const contrClassCls = (contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrClassDiffBin ? ' batch-cell--warn' : '');
+      const contrClassTitle = contrClassWrongBin
+        ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
+        : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не максимальный (макс. ${BatchAR._contrComputedClass(r)})"`
+        : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
+      const contrSumCls = contrSumLtFot ? ' batch-cell--err' : '';
+      const contrSumTitle = contrSumLtFot ? ' title="СС контрагента меньше его ФОТ (должна быть ≥ ФОТ)"' : '';
+      const contrPremCls = (contrSumLtFot || contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrPremDiff ? ' batch-cell--warn' : '');
+      const contrPremTitle = contrClassWrongBin ? ' title="Класс контрагента неверен (по ОКЭД из stat.gov.kz) → премия посчитана по неверному классу"'
+        : (contrTarErr ? ' title="Премия контрагента посчитана по неверному тарифу (тариф ≠ класс контрагента)"'
+        : (contrPremDiff ? ' title="СП контрагента ≠ СС(контр) × тариф(класс K) × ПК"' : ''));
+      // ===== СТРАХОВАТЕЛЬ (договор) =====
       const sumLtPrem = BatchAR._sumLtPremiumError(r);
       const sumLtFot = BatchAR._sumLtFotError(r);
       const premBelowMin = BatchAR._premiumBelowMinError(r);
+      const insSumMis = BatchAR._insurerSumMismatch(r);
+      const insPremMis = BatchAR._insurerPremMismatch(r);
       const sumDiff = BatchAR._sumDiff(r);
       const premDiff = BatchAR._premiumDiff(r);
-      // Красный ОКЭД → класс/тариф неверны: если расчётная СС/СП расходится с выгрузкой —
-      // красим СС/СП красным (а не жёлтым), т.к. суммы посчитаны по неверному ОКЭД.
-      const sumCls = (sumLtPrem || sumLtFot || premBelowMin || (okedErr && sumDiff)) ? ' batch-cell--err' : (sumDiff ? ' batch-cell--warn' : '');
-      const premCls = (sumLtPrem || premBelowMin || (okedErr && premDiff)) ? ' batch-cell--err' : (premDiff ? ' batch-cell--warn' : '');
-      const sumTitle = sumLtFot ? ' title="Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)"'
+      const sumCls = (sumLtPrem || sumLtFot || premBelowMin || insSumMis || (okedErr && sumDiff)) ? ' batch-cell--err' : (sumDiff ? ' batch-cell--warn' : '');
+      const premCls = (sumLtPrem || premBelowMin || insPremMis || (okedErr && premDiff)) ? ' batch-cell--err' : (premDiff ? ' batch-cell--warn' : '');
+      const sumTitle = insSumMis ? ' title="СС страхователя ≠ сумме СС контрагентов"'
+        : (sumLtFot ? ' title="Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)"'
         : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф"'
         : ((okedErr && sumDiff) ? ' title="ОКЭД неверный → класс/тариф неверны, СС не совпадает с расчётом"'
-        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '')));
-      const premTitle = premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000"'
+        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : ''))));
+      const premTitle = insPremMis ? ' title="СП страхователя ≠ сумме СП контрагентов"'
+        : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000"'
         : ((okedErr && premDiff) ? ' title="ОКЭД неверный → класс/тариф неверны, премия не совпадает с расчётом"'
-        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : ''));
+        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '')));
       const binStReason = BatchAR._insurerBinInvalidReason(r);
       const binStCls = binStReason ? ' batch-cell--err' : '';
       const binStTitle = binStReason ? ` title="Некорректный ИИН/БИН Страхователя: ${ARForm._esc(binStReason)}"` : '';
       const level = BatchAR._rowLevel(r);
       const rowCls = level ? ` class="batch-row--${level}"` : '';
-      const nmSt = r.insurerNameSt || '';
       return `<tr data-idx="${i}"${rowCls}>
         <td class="batch-c-num">${i + 1}</td>
         <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
-        <td class="batch-c-name-st" title="${ARForm._esc(nmSt)}">${nmSt ? ARForm._esc(nmSt) : '—'}</td>
-        <td class="batch-c-bin-st${binStCls}"${binStTitle}>${r.binInsurer ? ARForm._esc(r.binInsurer) : '—'}</td>
+        <td class="batch-c-insurer${binStCls}"${binStTitle}>${BatchAR._insurerIdentCell(r)}</td>
+        <td class="batch-c-contr${contrBinCls}">${BatchAR._contrIdentCell(r)}</td>
         <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
         <td class="batch-c-class${classCls}"${classTitle}>${BatchAR._classCell(r)}</td>
+        <td class="batch-c-contr-class${contrClassCls}"${contrClassTitle}>${BatchAR._contrClassTariffCell(r)}</td>
         <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
         <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
         <td class="batch-c-num2 batch-c-sum${sumCls}"${sumTitle}>${BatchAR._sumCellHtml(r)}</td>
-        <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-contr-sum${contrSumCls}"${contrSumTitle}>${BatchAR._contrSumCell(r)}</td>
         <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
-        <td class="batch-c-num2">${BatchAR._fmtMoney(r.premiumTotal)}</td>
+        <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
+        <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
         <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
@@ -229,6 +247,11 @@ const BatchAR = {
   // ===== Проверка страховой суммы и премии (методология) =====
   // Премия = ФОТ × тариф, но не меньше 1 МЗП (85 000); СС = премия / тариф,
   // т.е. СС = max(ФОТ, 1 МЗП / тариф) — всегда ≥ ФОТ (тариф — по классу из справочника).
+  // Допуск на округление копеек: расхождение МЕНЬШЕ 1 тенге (только знаки после
+  // запятой) — это округление, а не ошибка. Жёсткие проверки «меньше» (СС<ФОТ,
+  // СС<премии, премия<МЗП) сравнивают с этим допуском, чтобы, например, СС
+  // 19 851 890 и ФОТ 19 851 890,04 не считались ошибкой.
+  _MONEY_EPS: 1,
   _minPremium() {
     return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minPremium') || 85000) : 85000;
   },
@@ -240,48 +263,150 @@ const BatchAR = {
     if (r.premiumTotal == null) return null;
     return Number(r.premiumTotal) / (r.coeff && r.coeff > 0 ? r.coeff : 1);
   },
-  // Суммарный ФОТ по договору (филиалы = сумма по строкам; одиночный = ФОТ строки).
-  _contractFotTotal(r) {
-    if (!BatchAR._fotByContract) {
+  // ===== Агрегаты по договору (страхователь = сумма контрагентов) =====
+  // Один проход по реестру: по каждому НомеруДоговора суммируем ФОТ, СС и СП
+  // контрагентов и Σ(ФОТ×тариф_контрагента) — для ожидаемой премии договора (до ПК)
+  // с учётом РАЗНЫХ классов контрагентов. Кэш до перезагрузки реестра.
+  _contractAgg(r) {
+    if (!BatchAR._aggByContract) {
       const m = new Map();
       for (const x of BatchAR.rows) {
         const cn = x.contractNumber || '';
         if (!cn) continue;
-        m.set(cn, (m.get(cn) || 0) + (Number(x.gfot) || 0));
+        let a = m.get(cn);
+        if (!a) { a = { sumFot: 0, sumSS: 0, sumSP: 0, sumFotTariff: 0, count: 0 }; m.set(cn, a); }
+        const fot = Number(x.gfot) || 0;
+        a.sumFot += fot;
+        a.sumSS  += Number(x.insuranceSum) || 0;
+        a.sumSP  += Number(x.premiumWithCoeff != null ? x.premiumWithCoeff : 0) || 0;
+        a.sumFotTariff += fot * (BatchAR._contrTariff(x) || 0);
+        a.count += 1;
       }
-      BatchAR._fotByContract = m;
+      BatchAR._aggByContract = m;
     }
-    const v = BatchAR._fotByContract.get(r.contractNumber);
-    return (v != null && v > 0) ? v : (Number(r.gfot) || 0);
+    return BatchAR._aggByContract.get(r.contractNumber) || { sumFot: 0, sumSS: 0, sumSP: 0, sumFotTariff: 0, count: 0 };
   },
-  // Тариф для проверки. Класс берём:
-  //   • ОКЭД красный (кода нет в stat.gov.kz) → вычисленный (правильный) класс из stat.gov;
-  //   • ОКЭД жёлтый (валиден, но класс не совпал) → класс ОКЭД ИЗ ВЫГРУЗКИ (как считали премию);
-  //   • иначе → вычисленный (= выгрузка).
-  // Тариф — из «Поправочных коэффициентов» по классу; если справочника нет — из выгрузки.
-  _checkTariff(r) {
-    let cls;
-    if (BatchAR._okedError(r)) cls = BatchAR._computedClass(r);
-    else if (BatchAR._classDiff(r)) cls = BatchAR._classOf(r.oked);
-    else cls = BatchAR._computedClass(r);
-    if (cls == null) cls = parseInt(r.riskClass, 10) || 0;
+  // Суммарный ФОТ по договору (сумма ФОТ контрагентов).
+  _contractFotTotal(r) {
+    const v = BatchAR._contractAgg(r).sumFot;
+    return v > 0 ? v : (Number(r.gfot) || 0);
+  },
+
+  // ===== Уровень КОНТРАГЕНТА (строка) =====
+  // Класс контрагента (K); если его нет — класс страхователя (J).
+  _contrClass(r) {
+    const k = parseInt(r.riskClassContragent, 10);
+    if (Number.isFinite(k) && k > 0) return k;
+    const j = parseInt(r.riskClass, 10);
+    return (Number.isFinite(j) && j > 0) ? j : null;
+  },
+  // Правильный тариф контрагента: по классу K из справочника «Поправочные коэффициенты»;
+  // если справочника нет — тариф из выгрузки (tariffExport), затем расчётный r.tariff.
+  _contrTariff(r) {
+    const cls = BatchAR._contrClass(r);
     const rr = (typeof App !== 'undefined' && App.refData && App.refData.popravka) ? App.refData.popravka.riskRates : null;
     if (rr && cls) { const t = rr.get(cls); if (Number.isFinite(t) && t > 0) return t; }
+    if (r.tariffExport != null && r.tariffExport > 0) return r.tariffExport;
     return (r.tariff && r.tariff > 0) ? r.tariff : null;
   },
-  // Ожидаемая премия ДО ПК (ИТОГ по договору) = max(ФОТ_дог × тариф, 1 МЗП).
-  _expectedPremium(r) {
-    const t = BatchAR._checkTariff(r);
-    const fot = BatchAR._contractFotTotal(r);
-    if (!(fot > 0) || !(t > 0)) return null;
-    return Math.round(Math.max(fot * t, BatchAR._minPremium()) * 100) / 100;
+  // 🔴 СС(контрагент) < ФОТ(контрагент) — СС контрагента должна покрывать его ФОТ.
+  _contrSumLtFotError(r) {
+    const o = Number(r.insuranceSum), m = Number(r.gfot);
+    return Number.isFinite(o) && Number.isFinite(m) && m > 0 && o < m - BatchAR._MONEY_EPS;
   },
-  // Ожидаемая СС (ИТОГ по договору) = max(ФОТ_дог, 1 МЗП / тариф).
+  // 🔴 Тариф из выгрузки не соответствует классу контрагента по справочнику.
+  // Проверяем, только если справочник загружен, в нём есть класс K и в выгрузке есть тариф.
+  _contrTariffClassError(r) {
+    const rr = (typeof App !== 'undefined' && App.refData && App.refData.popravka) ? App.refData.popravka.riskRates : null;
+    const cls = BatchAR._contrClass(r);
+    if (!rr || !cls) return false;
+    const correct = rr.get(cls);
+    if (!Number.isFinite(correct) || correct <= 0) return false;
+    const used = (r.tariffExport != null && r.tariffExport > 0) ? r.tariffExport : ((r.tariff && r.tariff > 0) ? r.tariff : null);
+    if (!(used > 0)) return false;
+    return Math.abs(used - correct) > correct * 0.01;   // расхождение тарифов > 1%
+  },
+  // Ожидаемая СП контрагента (с ПК) = СС(контр) × тариф(K) × ПК.
+  _contrExpectedPremium(r) {
+    const t = BatchAR._contrTariff(r);
+    const o = Number(r.insuranceSum);
+    if (!(t > 0) || !Number.isFinite(o)) return null;
+    const pk = (r.coeff && r.coeff > 0) ? r.coeff : 1;
+    return Math.round(o * t * pk * 100) / 100;
+  },
+  _contrActualPremium(r) {
+    return (r.premiumWithCoeff != null) ? Number(r.premiumWithCoeff) : null;
+  },
+  // 🟡 СП(контр) ≠ СС(контр) × тариф(K) × ПК.
+  _contrPremiumDiff(r) {
+    return BatchAR._moneyDiff(BatchAR._contrExpectedPremium(r), BatchAR._contrActualPremium(r));
+  },
+  // ОКЭД контрагента из stat.gov.kz (по его БИНКонтрагента) — primary + secondary, без дублей.
+  _contrStatgovOkeds(r) {
+    const sg = (r.statgovContr && !r.statgovContr.error) ? r.statgovContr : null;
+    if (!sg) return [];
+    const list = [];
+    if (sg.okedPrimaryCode) list.push(String(sg.okedPrimaryCode));
+    if (Array.isArray(sg.okedSecondaryCodes)) for (const c of sg.okedSecondaryCodes) if (c) list.push(String(c));
+    return [...new Set(list)];
+  },
+  // Классы по КАЖДОМУ ОКЭД контрагента (из stat.gov.kz) в порядке кодов — как для
+  // страхователя. null в списке = ОКЭД нет в классификаторе.
+  _contrClassList(r) {
+    return BatchAR._contrStatgovOkeds(r).map(o => BatchAR._classOf(o));
+  },
+  // Макс. класс по ОКЭД контрагента (для справки). null, если нет данных/совпадений.
+  _contrComputedClass(r) {
+    const classes = BatchAR._contrClassList(r).filter(c => c != null);
+    return classes.length ? Math.max(...classes) : null;
+  },
+  // 🔴 Класс из выгрузки (K) ОТСУТСТВУЕТ среди классов по ОКЭД контрагента —
+  // класс невозможен для его деятельности (грубая ошибка).
+  _contrClassWrongByBin(r) {
+    const classes = BatchAR._contrClassList(r).filter(c => c != null);
+    const k = BatchAR._contrClass(r);
+    return classes.length > 0 && k != null && !classes.includes(k);
+  },
+  // 🟡 Класс из выгрузки (K) ЕСТЬ среди возможных по ОКЭД, но не максимальный —
+  // мягкое расхождение (выбран не самый высокий класс из деятельностей контрагента).
+  _contrClassDiffByBin(r) {
+    const classes = BatchAR._contrClassList(r).filter(c => c != null);
+    const k = BatchAR._contrClass(r);
+    if (!classes.length || k == null || !classes.includes(k)) return false;
+    return k !== Math.max(...classes);
+  },
+
+  // ===== Уровень СТРАХОВАТЕЛЯ (договор) =====
+  // Ожидаемая база премии договора (до ПК) = max( Σ(ФОТ_контр × тариф(K)), 1 МЗП ).
+  // Учитывает РАЗНЫЕ классы контрагентов — поэтому корректна и для смешанных договоров.
+  _expectedPremium(r) {
+    const agg = BatchAR._contractAgg(r);
+    if (!(agg.sumFotTariff > 0)) return null;
+    return Math.round(Math.max(agg.sumFotTariff, BatchAR._minPremium()) * 100) / 100;
+  },
+  // Ожидаемая СС договора = max( Σ ФОТ_контр, 1 МЗП / эфф.тариф ),
+  // эфф.тариф = Σ(ФОТ×тариф) / Σ ФОТ (средневзвешенный по контрагентам).
   _expectedSum(r) {
-    const t = BatchAR._checkTariff(r);
-    const fot = BatchAR._contractFotTotal(r);
-    if (!(fot > 0) || !(t > 0)) return null;
-    return Math.max(fot, Math.round(BatchAR._minPremium() / t * 100) / 100);
+    const agg = BatchAR._contractAgg(r);
+    if (!(agg.sumFot > 0) || !(agg.sumFotTariff > 0)) return null;
+    const effTariff = agg.sumFotTariff / agg.sumFot;
+    const floorSum = effTariff > 0 ? Math.round(BatchAR._minPremium() / effTariff * 100) / 100 : 0;
+    return Math.max(agg.sumFot, floorSum);
+  },
+  // 🔴 СС страхователя (ОбщаяСС, N) ≠ Σ СС контрагентов (Σ O).
+  _insurerSumMismatch(r) {
+    const agg = BatchAR._contractAgg(r);
+    const n = (r.insuranceSumTotal != null) ? Number(r.insuranceSumTotal) : null;
+    // Допуск ±1 ₸ на каждого контрагента — накопленное округление копеек в сумме не ошибка.
+    const tol = Math.max(BatchAR._MONEY_EPS, agg.count || 1);
+    return n != null && agg.sumSS > 0 && Math.abs(n - agg.sumSS) > tol;
+  },
+  // 🔴 СП страхователя (ОбщаяСП, R) ≠ Σ СП контрагентов (Σ S).
+  _insurerPremMismatch(r) {
+    const agg = BatchAR._contractAgg(r);
+    const rr = (r.premiumTotal != null) ? Number(r.premiumTotal) : null;
+    const tol = Math.max(BatchAR._MONEY_EPS, agg.count || 1);
+    return rr != null && agg.sumSP > 0 && Math.abs(rr - agg.sumSP) > tol;
   },
   // Относительное расхождение > 1% (и не меньше 1 ₸) — считаем значимым.
   _moneyDiff(a, b) {
@@ -298,13 +423,13 @@ const BatchAR = {
   // ошибка данных → красным вся строка и обе ячейки (СС и премия).
   _sumLtPremiumError(r) {
     const pb = BatchAR._premBaseTotal(r);
-    return r.insuranceSumTotal != null && pb != null && Number(r.insuranceSumTotal) < pb;
+    return r.insuranceSumTotal != null && pb != null && Number(r.insuranceSumTotal) < pb - BatchAR._MONEY_EPS;
   },
 
   // Грубая ошибка: СС (ИТОГ) < ФОТ (ИТОГ по договору). СС всегда должна быть ≥ ФОТ.
   _sumLtFotError(r) {
     const fot = BatchAR._contractFotTotal(r);
-    return r.insuranceSumTotal != null && fot > 0 && Number(r.insuranceSumTotal) < fot;
+    return r.insuranceSumTotal != null && fot > 0 && Number(r.insuranceSumTotal) < fot - BatchAR._MONEY_EPS;
   },
   // Любая грубая ошибка по страховой сумме (СС < премии ИЛИ СС < ФОТ).
   _sumError(r) {
@@ -338,7 +463,7 @@ const BatchAR = {
   // договору в целом (филиалы учтены автоматически — отдельного исключения не нужно).
   _premiumBelowMinError(r) {
     const pb = BatchAR._premBaseTotal(r);
-    return pb != null && pb > 0 && pb < BatchAR._minPremium();
+    return pb != null && pb > 0 && pb < BatchAR._minPremium() - BatchAR._MONEY_EPS;
   },
 
   // Невалидный ИИН/БИН (формат / тип по 5-й цифре / контрольная цифра mod-11).
@@ -361,29 +486,123 @@ const BatchAR = {
     return res.valid ? null : (res.reason || 'некорректный ИИН/БИН');
   },
 
-  // СС: сверху — из выгрузки, снизу в скобках — расчётная (премия/тариф).
-  // СС: сверху — ОбщаяСтраховаяСумма (ИТОГ по договору), снизу — расчётная (max(ФОТ, 85к/тариф)).
-  _sumCellHtml(r) {
-    const top = BatchAR._fmtMoney(r.insuranceSumTotal);
-    const exp = BatchAR._expectedSum(r);
+  // Тариф в проценты: 0,0049 → «0,49%».
+  _fmtPct(t) {
+    if (t == null || isNaN(t)) return '';
+    const p = Math.round(Number(t) * 100 * 100) / 100;
+    return String(p).replace('.', ',') + '%';
+  },
+
+  // Страхователь: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче, с обрезкой).
+  _insurerIdentCell(r) {
+    const bin = r.binInsurer || '';
+    const nm = r.insurerNameSt || '';
+    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${bin ? ARForm._esc(bin) : '—'}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
+  },
+  // ===== Ячейки уровня КОНТРАГЕНТА =====
+  // Контрагент: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче, с обрезкой).
+  _contrIdentCell(r) {
+    const bin = r.bin || '';
+    const nm = r.insurerName || r.excelName || '';
+    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${bin ? ARForm._esc(bin) : '—'}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
+  },
+  // Класс контрагента (K, сверху) + тариф из выгрузки (снизу). Если тариф не
+  // соответствует классу по справочнику — снизу красным «было → должно».
+  // Класс контрагента: сверху — из выгрузки (K), снизу в скобках — классы по КАЖДОМУ
+  // ОКЭД контрагента из stat.gov.kz, как «(класс_окэд1, класс_окэд2, …)». Красным,
+  // если K нет среди них; жёлтым, если K есть, но не максимальный.
+  _contrClassTariffCell(r) {
+    const k = r.riskClassContragent || '—';
+    const used = (r.tariffExport != null && r.tariffExport > 0) ? r.tariffExport : (r.tariff || null);
     let bottom = '';
-    if (exp != null) {
-      const diff = BatchAR._sumDiff(r);
-      const title = diff ? 'Расчётная СС (по ФОТ договора и тарифу) не совпадает с выгрузкой' : 'Расчётная СС (по ФОТ договора и тарифу)';
-      bottom = `<span class="batch-sub ${diff ? 'batch-sub--warn' : ''}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
+    if (r.statgovStatus === 'loading') {
+      bottom = '<span class="batch-sub batch-sub--load">⏳</span>';
+    } else {
+      const list = BatchAR._contrClassList(r);
+      if (list.length) {
+        const classes = list.map(c => c == null ? '?' : c);
+        const wrong = BatchAR._contrClassWrongByBin(r);
+        const diff = BatchAR._contrClassDiffByBin(r);
+        const subCls = wrong ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
+        const title = wrong ? 'Класс из выгрузки отсутствует среди классов по ОКЭД контрагента (stat.gov.kz)'
+          : (diff ? 'Класс из выгрузки есть среди возможных, но не максимальный по ОКЭД контрагента'
+          : 'Классы по ОКЭД контрагента (stat.gov.kz)');
+        bottom = `<span class="batch-sub ${subCls}" title="${title}">(${classes.join(', ')})</span>`;
+      } else if (BatchAR._contrTariffClassError(r)) {
+        bottom = `<span class="batch-sub batch-sub--err" title="Тариф не соответствует классу по справочнику">${BatchAR._fmtPct(used)} → ${BatchAR._fmtPct(BatchAR._contrTariff(r))}</span>`;
+      } else if (used != null) {
+        bottom = `<span class="batch-sub">${BatchAR._fmtPct(used)}</span>`;
+      }
+    }
+    return `<div class="batch-stack"><span class="batch-stack-top">${ARForm._esc(String(k))}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+  },
+  // СС контрагента (O, сверху). Снизу — ВСЕГДА показываем расчётную базу: ожидаемую
+  // СС контрагента = ФОТ (СС контрагента не имеет пола МЗП — пол только у страхователя).
+  // Красным, если СС < ФОТ; серым, если совпадает.
+  _contrSumCell(r) {
+    const top = BatchAR._fmtMoney(r.insuranceSum);
+    const m = Number(r.gfot);
+    let bottom = '';
+    if (Number.isFinite(m) && m > 0) {
+      const err = BatchAR._contrSumLtFotError(r);
+      bottom = `<span class="batch-sub ${err ? 'batch-sub--err' : ''}" title="${err ? 'СС контрагента меньше ФОТ — должна быть ≥ ФОТ' : 'ФОТ контрагента (СС должна быть ≥ ФОТ)'}">(ФОТ ${BatchAR._fmtMoney(m)})</span>`;
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
-  // Премия (до ПК): сверху — ОбщаяСтраховаяПремия÷ПК (ИТОГ по договору, до ПК),
-  // снизу — расчётная (ФОТ договора × тариф, мин. 85к).
-  _premiumCellHtml(r) {
-    const top = BatchAR._fmtMoney(BatchAR._premBaseTotal(r));
-    const exp = BatchAR._expectedPremium(r);
+  // СП контрагента (S, сверху). Снизу — ВСЕГДА расчётная СС(контр)×тариф(K)×ПК (БЕЗ пола
+  // МЗП — у контрагента премия может быть < 85 000). Серым при совпадении (±1 ₸ —
+  // округление), жёлтым при расхождении, красным при неверном классе/тарифе.
+  _contrPremCell(r) {
+    const top = BatchAR._fmtMoney(r.premiumWithCoeff);
+    const exp = BatchAR._contrExpectedPremium(r);
     let bottom = '';
     if (exp != null) {
-      const diff = BatchAR._premiumDiff(r);
-      const title = diff ? 'Расчётная премия (ФОТ договора × тариф, мин. 85 000) не совпадает с выгрузкой' : 'Расчётная премия (ФОТ договора × тариф, мин. 85 000)';
-      bottom = `<span class="batch-sub ${diff ? 'batch-sub--warn' : ''}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
+      const err = BatchAR._contrTariffClassError(r) || BatchAR._contrClassWrongByBin(r);
+      const diff = BatchAR._contrPremiumDiff(r);
+      const cls = err ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
+      bottom = `<span class="batch-sub ${cls}" title="Расчётная СП контрагента = СС × тариф(класс K) × ПК (пол 85 000 на контрагента НЕ применяется)">(${BatchAR._fmtMoney(exp)})</span>`;
+    }
+    return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+  },
+
+  // ===== Ячейки уровня СТРАХОВАТЕЛЯ =====
+  // СС страхователя (N, сверху). Снизу — ВСЕГДА расчётная: при N ≠ Σ СС(контр) красным
+  // «Σ контр …»; иначе расчётная max(ΣФОТ, 85000/тариф) — серым при совпадении, жёлтым
+  // при расхождении, красным при грубой ошибке (СС < ФОТ / СС < премии).
+  _sumCellHtml(r) {
+    const top = BatchAR._fmtMoney(r.insuranceSumTotal);
+    let bottom = '';
+    if (BatchAR._insurerSumMismatch(r)) {
+      bottom = `<span class="batch-sub batch-sub--err" title="Сумма СС контрагентов не совпадает с ОбщаяСС">(Σ контр ${BatchAR._fmtMoney(BatchAR._contractAgg(r).sumSS)})</span>`;
+    } else {
+      const exp = BatchAR._expectedSum(r);
+      if (exp != null) {
+        const hard = BatchAR._sumLtFotError(r) || BatchAR._sumLtPremiumError(r);
+        const diff = BatchAR._sumDiff(r);
+        const cls = hard ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
+        bottom = `<span class="batch-sub ${cls}" title="Расчётная СС страхователя = max(ΣФОТ, 85000/тариф)">(${BatchAR._fmtMoney(exp)})</span>`;
+      }
+    }
+    return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+  },
+  // СПсПК страхователя (R, сверху). Снизу — ВСЕГДА расчётная: при R ≠ Σ СП(контр) красным
+  // «Σ контр …»; иначе расчётная max(Σ(ФОТ×тариф), 85000) × ПК (пол 85 000 — здесь, на
+  // уровне страхователя) — серым при совпадении, жёлтым при расхождении, красным если база < МЗП.
+  _premiumCellHtml(r) {
+    const top = BatchAR._fmtMoney(r.premiumTotal);
+    let bottom = '';
+    if (BatchAR._insurerPremMismatch(r)) {
+      bottom = `<span class="batch-sub batch-sub--err" title="Сумма СП контрагентов не совпадает с ОбщаяСП">(Σ контр ${BatchAR._fmtMoney(BatchAR._contractAgg(r).sumSP)})</span>`;
+    } else {
+      const expBase = BatchAR._expectedPremium(r);
+      if (expBase != null) {
+        const k = (r.coeff && r.coeff > 0) ? r.coeff : 1;
+        const expWith = Math.round(expBase * k * 100) / 100;
+        const hard = BatchAR._premiumBelowMinError(r);
+        const diff = BatchAR._premiumDiff(r);
+        const cls = hard ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
+        bottom = `<span class="batch-sub ${cls}" title="Расчётная СП страхователя = max(Σ(ФОТ×тариф), 85000) × ПК (пол 85 000 — на уровне страхователя)">(${BatchAR._fmtMoney(expWith)})</span>`;
+      }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
@@ -436,17 +655,23 @@ const BatchAR = {
     return eg.found !== !!r.govParticipation;
   },
 
-  // Уровень подсветки строки:
-  //   'err'  (красный) — точная ошибка данных: ошибочный ОКЭД (→ ошибочный класс)
-  //                      или расхождение гос. участия;
-  //   'warn' (жёлтый)  — мягкое расхождение класса: ОКЭД подтверждён, но класс
-  //                      не совпал (у компании несколько ОКЭД, выбран не тот);
+  // Уровень подсветки строки — должен совпадать с подсветкой ЯЧЕЕК (любая красная
+  // ячейка → 'err', любая жёлтая → 'warn'), чтобы вся строка красилась и поднималась
+  // наверх по «Сначала ошибки».
+  //   'err'  (красный) — точная ошибка данных: ошибочный ОКЭД (→ ошибочный класс),
+  //                      расхождение гос. участия, СС<ФОТ/премии, премия<МЗП и т.п.;
+  //   'warn' (жёлтый)  — мягкое расхождение: класс (выбран не тот ОКЭД) ИЛИ расчётная
+  //                      СС/премия не совпала с выгрузкой;
   //   null             — расхождений нет.
   _rowLevel(r) {
     if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)
         || BatchAR._sumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._binInvalid(r)
-        || BatchAR._insurerBinInvalidReason(r) || BatchAR._classWrongForOked(r)) return 'err';
-    if (BatchAR._classDiff(r)) return 'warn';
+        || BatchAR._insurerBinInvalidReason(r) || BatchAR._classWrongForOked(r)
+        || BatchAR._contrSumLtFotError(r) || BatchAR._contrTariffClassError(r)
+        || BatchAR._contrClassWrongByBin(r)
+        || BatchAR._insurerSumMismatch(r) || BatchAR._insurerPremMismatch(r)) return 'err';
+    if (BatchAR._classDiff(r) || BatchAR._sumDiff(r) || BatchAR._premiumDiff(r)
+        || BatchAR._contrPremiumDiff(r) || BatchAR._contrClassDiffByBin(r)) return 'warn';
     return null;
   },
 
@@ -713,6 +938,28 @@ const BatchAR = {
     // СС/премия зависят от вычисленного класса/тарифа → обновляем после statgov.
     set('.batch-c-sum', BatchAR._sumCellHtml(r));
     set('.batch-c-prem', BatchAR._premiumCellHtml(r));
+    // Класс/премия контрагента зависят от реального ОКЭД контрагента (statgovContr).
+    set('.batch-c-contr-class', BatchAR._contrClassTariffCell(r));
+    set('.batch-c-contr-prem', BatchAR._contrPremCell(r));
+    const contrClassWrongBin = BatchAR._contrClassWrongByBin(r);
+    const contrClassDiffBin = BatchAR._contrClassDiffByBin(r);
+    const contrTarErr = BatchAR._contrTariffClassError(r);
+    const contrClassCell = tr.querySelector('.batch-c-contr-class');
+    if (contrClassCell) {
+      const ccErr = contrTarErr || contrClassWrongBin;
+      contrClassCell.classList.toggle('batch-cell--err', ccErr);
+      contrClassCell.classList.toggle('batch-cell--warn', !ccErr && contrClassDiffBin);
+      if (contrClassWrongBin) contrClassCell.title = `Класс контрагента в выгрузке (${BatchAR._contrClass(r)}) отсутствует среди классов по его ОКЭД из stat.gov.kz`;
+      else if (contrClassDiffBin) contrClassCell.title = `Класс контрагента ${BatchAR._contrClass(r)} есть среди ОКЭД, но не максимальный (макс. ${BatchAR._contrComputedClass(r)})`;
+      else if (contrTarErr) contrClassCell.title = 'Тариф не соответствует классу контрагента по справочнику';
+      else contrClassCell.removeAttribute('title');
+    }
+    const contrPremCell = tr.querySelector('.batch-c-contr-prem');
+    if (contrPremCell) {
+      const cPremErr = BatchAR._contrSumLtFotError(r) || contrTarErr || contrClassWrongBin;
+      contrPremCell.classList.toggle('batch-cell--err', cPremErr);
+      contrPremCell.classList.toggle('batch-cell--warn', !cPremErr && BatchAR._contrPremiumDiff(r));
+    }
     // Подсветка расхождений: красный — точная ошибка (ошибочный ОКЭД/класс,
     // расхождение гос. участия); жёлтый — мягкое расхождение класса.
     const okedErr = BatchAR._okedError(r);
@@ -734,14 +981,17 @@ const BatchAR = {
     const sumLtPrem = BatchAR._sumLtPremiumError(r);
     const sumLtFot = BatchAR._sumLtFotError(r);
     const premBelowMin = BatchAR._premiumBelowMinError(r);
+    const insSumMis = BatchAR._insurerSumMismatch(r);
+    const insPremMis = BatchAR._insurerPremMismatch(r);
     const sumDiff = BatchAR._sumDiff(r);
     const premDiff = BatchAR._premiumDiff(r);
-    const sumErr = sumLtPrem || sumLtFot || premBelowMin || (okedErr && sumDiff);
+    const sumErr = sumLtPrem || sumLtFot || premBelowMin || insSumMis || (okedErr && sumDiff);
     const sumCell = tr.querySelector('.batch-c-sum');
     if (sumCell) {
       sumCell.classList.toggle('batch-cell--err', sumErr);
       sumCell.classList.toggle('batch-cell--warn', !sumErr && sumDiff);
-      if (sumLtFot) sumCell.title = 'Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)';
+      if (insSumMis) sumCell.title = 'СС страхователя ≠ сумме СС контрагентов';
+      else if (sumLtFot) sumCell.title = 'Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)';
       else if (premBelowMin) sumCell.title = 'Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф';
       else if (okedErr && sumDiff) sumCell.title = 'ОКЭД неверный → класс/тариф неверны, СС не совпадает с расчётом';
       else if (sumLtPrem) sumCell.title = 'Ошибка: страховая сумма меньше страховой премии';
@@ -749,16 +999,17 @@ const BatchAR = {
     }
     const premCell = tr.querySelector('.batch-c-prem');
     if (premCell) {
-      const premErr = sumLtPrem || premBelowMin || (okedErr && premDiff);
+      const premErr = sumLtPrem || premBelowMin || insPremMis || (okedErr && premDiff);
       premCell.classList.toggle('batch-cell--err', premErr);
       premCell.classList.toggle('batch-cell--warn', !premErr && premDiff);
-      if (premBelowMin) premCell.title = 'Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000';
+      if (insPremMis) premCell.title = 'СП страхователя ≠ сумме СП контрагентов';
+      else if (premBelowMin) premCell.title = 'Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000';
       else if (okedErr && premDiff) premCell.title = 'ОКЭД неверный → класс/тариф неверны, премия не совпадает с расчётом';
       else if (sumLtPrem) premCell.title = 'Ошибка: страховая сумма меньше страховой премии';
       else premCell.removeAttribute('title');
     }
-    // Невалидный ИИН/БИН Страхователя → красная ячейка БИН Страхователя.
-    const binStCell = tr.querySelector('.batch-c-bin-st');
+    // Невалидный ИИН/БИН Страхователя → красная ячейка Страхователя.
+    const binStCell = tr.querySelector('.batch-c-insurer');
     if (binStCell) {
       const binStReason = BatchAR._insurerBinInvalidReason(r);
       binStCell.classList.toggle('batch-cell--err', !!binStReason);
@@ -833,6 +1084,16 @@ const BatchAR = {
             r.statgov.legalAddress = Utils.statgovLegalAddress(r.statgov);
           }
           BatchAR._applyYoung(r);
+          // Контрагент: лукап по БИНКонтрагента → его реальный ОКЭД → класс (для проверки
+          // КлассРискаКонтрагента). Если БИН контрагента = БИН страхователя — переиспользуем.
+          const cbin = r.bin && String(r.bin).replace(/\s+/g, '');
+          if (cbin && /^\d{12}$/.test(cbin) && cbin !== lbin) {
+            let pc = sgCache.get(cbin);
+            if (!pc) { pc = StatGovClient.lookup(cbin); sgCache.set(cbin, pc); }
+            try { r.statgovContr = (await pc) || {}; } catch (e2) { r.statgovContr = { error: (e2 && e2.message) || 'ошибка' }; }
+          } else {
+            r.statgovContr = r.statgov;
+          }
         } catch (e) {
           r.statgov = { error: (e && e.message) || 'ошибка' };
           r.statgovStatus = 'error';
@@ -1099,12 +1360,23 @@ const BatchAR = {
     const RED = 'FFC7CE', YEL = 'FFEB9C';
     const out = [];
     const okedErr = BatchAR._okedError(r), sumDiff = BatchAR._sumDiff(r), premDiff = BatchAR._premiumDiff(r);
-    // СС (ОбщаяСтраховаяСумма)
-    if (BatchAR._sumLtFotError(r) || BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r) || (okedErr && sumDiff)) out.push(['insuranceSumTotal', RED]);
+    // СС страхователя (ОбщаяСтраховаяСумма)
+    if (BatchAR._sumLtFotError(r) || BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._insurerSumMismatch(r) || (okedErr && sumDiff)) out.push(['insuranceSumTotal', RED]);
     else if (sumDiff) out.push(['insuranceSumTotal', YEL]);
-    // Премия (ОбщаяСтраховаяПремия)
-    if (BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r) || (okedErr && premDiff)) out.push(['premiumTotal', RED]);
+    // СП страхователя (ОбщаяСтраховаяПремия)
+    if (BatchAR._sumLtPremiumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._insurerPremMismatch(r) || (okedErr && premDiff)) out.push(['premiumTotal', RED]);
     else if (premDiff) out.push(['premiumTotal', YEL]);
+    // СС контрагента (СтраховаяСумма) — красным, если меньше ФОТ контрагента.
+    if (BatchAR._contrSumLtFotError(r)) out.push(['insuranceSum', RED]);
+    // Тариф контрагента (СтраховойТариф) — красным при несоответствии класса по справочнику.
+    if (BatchAR._contrTariffClassError(r)) out.push(['tariffExport', RED]);
+    // Класс контрагента (КлассРискаКонтрагента) — красным, если не совпал с реальным по
+    // ОКЭД из stat.gov.kz (по БИНКонтрагента) ИЛИ с тарифом по справочнику.
+    if (BatchAR._contrClassWrongByBin(r) || BatchAR._contrTariffClassError(r)) out.push(['riskClassContragent', RED]);
+    else if (BatchAR._contrClassDiffByBin(r)) out.push(['riskClassContragent', YEL]);
+    // СП контрагента (СтраховаяПремия) — красным при неверном классе/тарифе, иначе жёлтым при расхождении.
+    if (BatchAR._contrTariffClassError(r) || BatchAR._contrClassWrongByBin(r) || BatchAR._contrSumLtFotError(r)) out.push(['premiumWith', RED]);
+    else if (BatchAR._contrPremiumDiff(r)) out.push(['premiumWith', YEL]);
     if (BatchAR._pkYoungError(r)) out.push(['coeff', RED]);
     if (BatchAR._insurerBinInvalidReason(r)) out.push(['binInsurer', RED]);
     if (BatchAR._binInvalidReason(r)) out.push(['bin', RED]);

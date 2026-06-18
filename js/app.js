@@ -1530,7 +1530,9 @@ const App = {
           periodTo: p.zayavka.periodTo ? new Date(p.zayavka.periodTo) : null,
         };
         const zoneZ = document.getElementById('zone-zayavka');
-        if (zoneZ) zoneZ.classList.add('loaded');
+        // Кейс из реестра не помечаем зелёным — файл заявки не прикреплялся
+        // (зелёным/«loaded» помечаем только реальный файл заявки или ручной ввод).
+        if (zoneZ && !App.zayavka._fromRegistry) zoneZ.classList.add('loaded');
         const statusZ = document.getElementById('status-zayavka');
         if (statusZ && p.fileNames?.zayavka) statusZ.textContent = p.fileNames.zayavka.replace(/\s*\(из кэша\)$/, '');
       }
@@ -2201,33 +2203,43 @@ const App = {
     }
   },
 
-  // Список компаний из выгрузки (с фильтром по БИН/названию). DOM-узлы — без escape-проблем.
+  // Список компаний из реестра (с фильтром по БИН/названию). Кликабельные строки:
+  // БИН + наименование + (регион · ФОТ). DOM-узлы (textContent) — без escape-проблем.
   _renderRegistryPicker() {
-    const sel = document.getElementById('registry-picker');
+    const list = document.getElementById('registry-picker');
     const parsed = App.caseRegistry;
-    if (!sel || !parsed) return;
+    if (!list || !parsed) return;
     const q = (document.getElementById('registry-filter')?.value || '').trim().toLowerCase();
-    const cur = sel.value;
-    sel.innerHTML = '';
+    list.innerHTML = '';
     let shown = 0;
     parsed.rows.forEach((r, i) => {
       const bin = (r.binInsurer && /^\d{12}$/.test(r.binInsurer)) ? r.binInsurer : r.bin;
       const name = r.insurerNameSt || r.insurerName || '';
-      const label = `${bin} — ${name}`;
-      if (q && !label.toLowerCase().includes(q)) return;
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = label;
-      sel.appendChild(opt);
+      if (q && !`${bin} ${name}`.toLowerCase().includes(q)) return;
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'registry-list-item' + (String(i) === String(App._registrySelected) ? ' is-selected' : '');
+      item.setAttribute('role', 'option');
+      item.dataset.idx = String(i);
+      item.onclick = () => App.applyRegistryRow(i);
+      const binEl = document.createElement('span'); binEl.className = 'rli-bin'; binEl.textContent = bin || '—';
+      const nameEl = document.createElement('span'); nameEl.className = 'rli-name'; nameEl.textContent = name || 'без названия';
+      item.append(binEl, nameEl);
+      const subParts = [];
+      if (r.region) subParts.push(String(r.region));
+      if (r.gfot != null && Number.isFinite(r.gfot)) subParts.push('ФОТ ' + App._formatMoney(r.gfot) + ' ₸');
+      if (subParts.length) { const s = document.createElement('span'); s.className = 'rli-sub'; s.textContent = subParts.join(' · '); item.append(s); }
+      list.appendChild(item);
       shown++;
     });
     if (!shown) {
-      const opt = document.createElement('option');
-      opt.disabled = true;
-      opt.textContent = 'Ничего не найдено';
-      sel.appendChild(opt);
+      const empty = document.createElement('div');
+      empty.className = 'registry-list-empty';
+      empty.textContent = 'Ничего не найдено';
+      list.appendChild(empty);
     }
-    if (cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+    const countEl = document.getElementById('registry-count');
+    if (countEl) countEl.textContent = q ? `(${shown} из ${parsed.rows.length})` : `(${parsed.rows.length})`;
   },
 
   // Заполнить форму кейса данными выбранной строки выгрузки.
@@ -2237,6 +2249,7 @@ const App = {
     const parsed = App.caseRegistry;
     const row = parsed && parsed.rows[Number(index)];
     if (!row) return;
+    App._registrySelected = Number(index);
     const bin = (row.binInsurer && /^\d{12}$/.test(row.binInsurer)) ? row.binInsurer : row.bin;
     const insurerName = row.insurerNameSt || row.insurerName || '';
     const from = row.periodFrom || null;
@@ -2285,14 +2298,48 @@ const App = {
     if (bin) { App.autoLookupBIN(bin); App.autoLookupStatGov(bin); App.autoLookupStatsnet(bin); }
     App.onOkedChange();
     App.onPaymentChange();
+    // Показать выбранную компанию в форме ручного ввода (данные из реестра) — чтобы
+    // было видно, по кому принимается решение, и значения можно было поправить.
+    App._fillManualFromZayavka();
+    // Источник кейса — реестр, а НЕ файл заявки: карточку «Заявка на андеррайтинг»
+    // зелёной («loaded») НЕ помечаем — файл заявки не прикреплялся.
+    App._setZayavkaRegistrySource();
+    // Подсветить выбранную строку в списке реестра.
+    const listEl = document.getElementById('registry-picker');
+    if (listEl) listEl.querySelectorAll('.registry-list-item').forEach(el => el.classList.toggle('is-selected', el.dataset.idx === String(index)));
     App._persistCase();
     App._refreshDerivedData();
-    App.showMsg(`Загружено из выгрузки: ${insurerName || bin}. Загрузите файл убытков — он сопоставится по БИН.`, 'success');
+    App.showMsg(`Загружено из реестра: ${insurerName || bin}. Загрузите файл убытков — он сопоставится по БИН.`, 'success');
+  },
+
+  // Заполнить поля формы ручного ввода из текущей App.zayavka (БИН/дата/работники/ФОТ/ЗП).
+  _fillManualFromZayavka() {
+    const z = App.zayavka; if (!z) return;
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+    set('manualBin', z.bin || '');
+    set('manualWorkers', z.workers != null ? z.workers : '');
+    const fotVal = (z.fot != null) ? z.fot : z.insuranceSum;
+    set('manualFot', fotVal != null ? App._formatMoney(fotVal) : '');
+    set('manualAvgSalary', z.avgSalary != null ? App._formatMoney(z.avgSalary) : '');
+    set('manualDocDate', z.docDate ? App._dateToInputValue(z.docDate) : '');
+    App._manualPrimary = z._manualPrimary || 'fot';
+    App._syncManualFields && App._syncManualFields();
+    App._updateManualHint && App._updateManualHint();
+  },
+
+  // Карточка «Заявка» при источнике-реестре: НЕ зелёная (файл не прикреплялся),
+  // нейтральный поясняющий статус.
+  _setZayavkaRegistrySource() {
+    const zone = document.getElementById('zone-zayavka');
+    if (zone) zone.classList.remove('loaded');
+    const st = document.getElementById('status-zayavka');
+    if (st) st.textContent = 'Не требуется — данные из реестра';
   },
 
   clearCaseRegistry(event) {
     if (event) event.stopPropagation();
     App.caseRegistry = null;
+    App._registrySelected = null;
     const zone = document.getElementById('zone-registry');
     if (zone) zone.classList.remove('loaded');
     const st = document.getElementById('status-registry');
