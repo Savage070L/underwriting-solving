@@ -14,6 +14,8 @@ const BatchAR = {
   rows: [],
   _busy: false,
   _statgovRunning: false,
+  _statgovPaused: false,      // пользователь поставил проверку stat.gov.kz на паузу
+  _sgQueue: null,             // очередь оставшихся индексов statgov (для возобновления после паузы)
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
 
@@ -191,11 +193,11 @@ const BatchAR = {
         ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
         : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не максимальный (макс. ${BatchAR._contrComputedClass(r)})"`
         : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
-      // СС контрагента красным: < ФОТ, или (при премии ниже 1 МЗП) ≠ ФОТ. Допуск ±1 ₸.
+      // СС контрагента красным: < ФОТ, или отличается от расчётной больше чем на ±100 ₸.
       const contrSumDiff = BatchAR._contrSumDiff(r);
       const contrSumCls = (contrSumLtFot || contrSumDiff) ? ' batch-cell--err' : '';
       const contrSumTitle = contrSumLtFot ? ' title="СС контрагента меньше его ФОТ (должна быть ≥ ФОТ)"'
-        : (contrSumDiff ? ' title="При премии ниже 1 МЗП СС контрагента должна = ФОТ"' : '');
+        : (contrSumDiff ? ' title="СС контрагента отличается от расчётной больше чем на 100 ₸"' : '');
       // СП контрагента красным, если премия ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸).
       const contrPremCls = contrPremDiff ? ' batch-cell--err' : '';
       const contrPremTitle = contrPremDiff ? ' title="СП контрагента ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸)"' : '';
@@ -270,6 +272,7 @@ const BatchAR = {
   // СС<премии, премия<МЗП) сравнивают с этим допуском, чтобы, например, СС
   // 19 851 890 и ФОТ 19 851 890,04 не считались ошибкой.
   _MONEY_EPS: 1,
+  _CONTR_SUM_EPS: 100,   // допуск СС контрагента: |исходная − расчётная| > 100 ₸ → ошибка (красным)
   _minPremium() {
     return (typeof App !== 'undefined' && App._getLimit) ? (App._getLimit('minPremium') || 85000) : 85000;
   },
@@ -346,22 +349,27 @@ const BatchAR = {
     if (base < BatchAR._minPremium() - BatchAR._MONEY_EPS) return Number.isFinite(m) ? m : null;
     return Math.round(base / t * 100) / 100;
   },
-  // 🔴 СС контрагента некорректна (допуск строго ±1 ₸). Проверяем ТОЧНО (без деления,
-  // чтобы округление премии не давало ложных срабатываний):
-  //   • премия (СП/ПК) < 1 МЗП → СС должна = ФОТ → ошибка, если |СС − ФОТ| > 1 ₸;
-  //   • премия ≥ пола → согласованность СС↔СП проверяется через премию (_contrPremiumDiff).
+  // 🔴 СС контрагента отличается от РАСЧЁТНОЙ (_contrExpectedSum: ФОТ при премии < 1 МЗП,
+  // иначе СП/(тариф×ПК)) больше чем на ±100 ₸ — в любую сторону. Допуск 100 ₸ поглощает
+  // округление СП, усиленное делением на малый тариф. Договор «на полу» 1 МЗП пропускаем:
+  // там пол распределяется по контрагентам и СС законно может быть > ФОТ.
   _contrSumDiff(r) {
-    const o = Number(r.insuranceSum), m = Number(r.gfot);
-    const Q = (r.coeff && r.coeff > 0) ? r.coeff : 1;
-    const S = (r.premiumWithCoeff != null) ? Number(r.premiumWithCoeff) : null;
-    if (S == null || !Number.isFinite(o) || !Number.isFinite(m)) return false;
-    // Если ВЕСЬ ДОГОВОР опущен до пола 1 МЗП (Σ ФОТ×тариф < МЗП), пол распределяется по
-    // контрагентам и СС контрагента законно может быть > ФОТ — per-контрагент проверку не делаем.
+    const o = Number(r.insuranceSum);
+    const exp = BatchAR._contrExpectedSum(r);
+    if (exp == null || !Number.isFinite(o)) return false;
     const agg = BatchAR._contractAgg(r);
-    if (agg.sumFotTariff > 0 && agg.sumFotTariff < BatchAR._minPremium() - BatchAR._MONEY_EPS) return false;
-    // Премия контрагента (база) < 1 МЗП и договор НЕ на полу → СС должна = ФОТ.
-    if (S / Q >= BatchAR._minPremium() - BatchAR._MONEY_EPS) return false;
-    return Math.abs(o - m) > 1.0001;
+    // Договор с НЕСКОЛЬКИМИ контрагентами, опущенный до пола 1 МЗП: пол распределяется
+    // по контрагентам, и СС отдельного контрагента может законно ≠ расчётной из его премии —
+    // такую проверку пропускаем. Для одиночного контрагента расчётная = фактической, проверяем.
+    if (agg.count > 1 && agg.sumFotTariff > 0 && agg.sumFotTariff < BatchAR._minPremium() - BatchAR._MONEY_EPS) return false;
+    // Допуск: 100 ₸ (по требованию), но НЕ туже «шумового пола» округления премии,
+    // усиленного делением на тариф: премия в выгрузке хранится в целых тенге, и при делении
+    // на малый тариф (0,12–0,5%) её округление ±0,5 ₸ раздувается в сотни тенге по СС.
+    // Поэтому на малых тарифах допуск авто-расширяется до 1/(тариф×ПК), убирая ложные ошибки.
+    const t = BatchAR._contrTariff(r);
+    const pk = (r.coeff && r.coeff > 0) ? r.coeff : 1;
+    const tol = (t > 0) ? Math.max(BatchAR._CONTR_SUM_EPS, 1 / (t * pk)) : BatchAR._CONTR_SUM_EPS;
+    return Math.abs(o - exp) > tol;
   },
   // 🔴 Тариф из выгрузки не соответствует классу контрагента по справочнику.
   // Проверяем, только если справочник загружен, в нём есть класс K и в выгрузке есть тариф.
@@ -599,8 +607,8 @@ const BatchAR = {
       const diff = BatchAR._contrSumDiff(r);
       const cls = (ltFot || diff) ? 'batch-sub--err' : '';
       const title = ltFot ? 'СС контрагента меньше ФОТ — должна быть ≥ ФОТ'
-        : (diff ? 'При премии ниже 1 МЗП СС контрагента должна = ФОТ'
-        : 'Расчётная СС контрагента: ФОТ если премия < 85 000, иначе СП/(тариф×ПК)');
+        : (diff ? 'СС контрагента отличается от расчётной больше чем на 100 ₸'
+        : 'Расчётная СС контрагента: ФОТ если премия < 85 000, иначе СП/(тариф×ПК). Допуск ±100 ₸');
       bottom = `<span class="batch-sub ${cls}" title="${title}">(${BatchAR._fmtMoney(exp)})</span>`;
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -730,18 +738,18 @@ const BatchAR = {
   },
 
   // Состояние строки для подсветки = жизненный цикл проверки stat.gov.kz + результат
-  // валидации. Возвращает суффикс класса .batch-row--* (или null — нейтральная строка):
-  //   'pending'  — серый: ещё в очереди на проверку (не дошли);
+  // валидации. Возвращает суффикс класса .batch-row--*:
+  //   'pending'  — серый: ещё НЕ проверено (только загружено / в очереди / нет моста / ошибка проверки);
   //   'checking' — синий: проверяется сейчас;
-  //   'err'/'warn' — красный/жёлтый: ошибка/расхождение (после проверки);
+  //   'err'/'warn' — красный/жёлтый: ошибка/расхождение (ТОЛЬКО после проверки 'done');
   //   'ok'       — зелёный: проверено, ошибок нет (либо согласовано андеррайтером).
+  // Вердикт (красный/жёлтый/зелёный) показываем только когда строка реально проверена
+  // ('done'); до этого — серый. Поэтому сразу после загрузки файла ВСЕ строки серые.
   _rowState(r) {
     const st = r.statgovStatus;
-    if (st === 'pending') return 'pending';
     if (st === 'loading') return 'checking';
-    const level = BatchAR._rowLevel(r);     // null, если согласовано андеррайтером
-    if (level) return level;
-    return st === 'done' ? 'ok' : null;     // зелёный только после успешной проверки
+    if (st === 'done') return BatchAR._rowLevel(r) || 'ok';  // level: null если согласовано
+    return 'pending';                                         // undefined/pending/skip/error → серый
   },
   // Набор классов <tr>: состояние + метка «согласовано» (для гашения подсветки ячеек в CSS).
   _rowClassList(r) {
@@ -755,9 +763,9 @@ const BatchAR = {
   _approveCell(r, i) {
     const lvl = BatchAR._rawRowLevel(r);
     const hint = lvl === 'err'
-      ? 'Строка с ошибкой. Поставить галочку — согласовать и печатать с исходными данными под ответственность андеррайтера (подсветка снимется). Снять — вернуть в исходное состояние.'
+      ? 'Строка с ошибкой. Поставить галочку — согласовать и печатать с исходными данными под ответственность андеррайтера; строка перестанет считаться ошибочной, но подсветка ошибочных ячеек останется (видно, на что согласились). Снять — вернуть в исходное состояние.'
       : (lvl === 'warn'
-        ? 'Строка с расхождением. Поставить галочку — согласовать и печатать как есть. Снять — вернуть в исходное состояние.'
+        ? 'Строка с расхождением. Поставить галочку — согласовать и печатать как есть; подсветка ячеек останется. Снять — вернуть в исходное состояние.'
         : 'Отметить строку согласованной андеррайтером.');
     return `<label class="batch-approve" title="${ARForm._esc(hint)}"><input type="checkbox"${r._approved ? ' checked' : ''} onchange="BatchAR.toggleApproved(${i}, this)"></label>`;
   },
@@ -1134,7 +1142,7 @@ const BatchAR = {
     if (!ping.ok) { markUnavailable(); return; }
 
     BatchAR._statgovConnected = true;
-    BatchAR._statgovRunning = true;
+    BatchAR._statgovPaused = false;
     targets.forEach(i => {
       BatchAR.rows[i].statgovStatus = 'pending';
       BatchAR.rows[i].egov = { status: 'loading' };
@@ -1148,16 +1156,28 @@ const BatchAR = {
     // не тормозить основную проверку statgov.
     BatchAR._poolEgov(targets.slice());
 
-    // statgov — гейтит генерацию. Лукап — обычные fetch (GET+POST), не вкладки,
-    // поэтому гоним с заметной параллельностью.
-    const sgQueue = targets.slice();
+    // Очередь и кэш statgov храним на объекте, чтобы «Продолжить» после паузы дочитал
+    // ОСТАВШИЕСЯ БИН, а не начинал заново. Кэш по БИН дедуплицирует филиалы.
+    BatchAR._sgQueue = targets.slice();
+    BatchAR._sgCache = new Map();
+    await BatchAR._runStatgovWorkers();
+  },
+
+  // Пул воркеров statgov по BatchAR._sgQueue. На паузе (_statgovPaused) воркер
+  // дорабатывает текущий БИН и выходит; оставшиеся остаются в очереди (серые).
+  // «Продолжить» вызывает этот метод снова — он дочитывает остаток очереди.
+  async _runStatgovWorkers() {
+    const sgQueue = BatchAR._sgQueue;
+    const sgCache = BatchAR._sgCache;
+    if (!sgQueue || !sgCache) return;
+    BatchAR._statgovRunning = true;
+    BatchAR._updateVerify();
+    BatchAR._updateControls();
     // Лукап — по БИН СТРАХОВАТЕЛЯ (_insurerBin): ОКЭД/класс/гос.участие проверяем у
-    // страхователя (головной организации). Для одиночных договоров БИН Страхователя =
-    // БИН Контрагента (без изменений). Для филиалов — все строки проверяются по
-    // головному БИН (ОКЭД выгрузки — это его деятельность). Кэш по БИН дедуплицирует филиалы.
-    const sgCache = (BatchAR._sgCache = new Map());
+    // страхователя (головной организации). Для филиалов все строки — по головному БИН.
     const sgWorker = async () => {
       while (sgQueue.length) {
+        if (BatchAR._statgovPaused) break;     // пауза — новые БИН не берём
         const i = sgQueue.shift();
         const r = BatchAR.rows[i];
         r.statgovStatus = 'loading';
@@ -1199,8 +1219,32 @@ const BatchAR = {
     BatchAR._statgovRunning = false;
     BatchAR._updateVerify();
     BatchAR._updateControls();
-    // Fallback дат регистрации/адреса через kyc.kz — для тех, у кого stat.gov не дал даты.
-    BatchAR._fillMissingViaKyc();
+    // Остановились по паузе → остаток дочитаем по «Продолжить»; kyc-фоллбэк пока не запускаем.
+    if (!BatchAR._statgovPaused && !sgQueue.length) {
+      // Fallback дат регистрации/адреса через kyc.kz — для тех, у кого stat.gov не дал даты.
+      BatchAR._fillMissingViaKyc();
+    }
+  },
+
+  // Пауза проверки stat.gov.kz: воркеры дорабатывают текущие БИН и останавливаются,
+  // оставшиеся остаются «в очереди» (серые). Возобновление — resumeStatgov().
+  pauseStatgov() {
+    if (!BatchAR._statgovRunning || BatchAR._statgovPaused) return;
+    BatchAR._statgovPaused = true;
+    BatchAR._updateVerify();
+    BatchAR._updateControls();
+  },
+  // Продолжить проверку с места остановки (дочитать BatchAR._sgQueue). Срабатывает,
+  // когда воркеры уже вышли (текущие in-flight БИН доехали) — иначе клик игнорируется.
+  resumeStatgov() {
+    if (BatchAR._statgovRunning || !BatchAR._statgovPaused) return;
+    BatchAR._statgovPaused = false;
+    if (BatchAR._sgQueue && BatchAR._sgQueue.length) BatchAR._runStatgovWorkers();
+    else { BatchAR._updateVerify(); BatchAR._updateControls(); }
+  },
+  togglePause() {
+    if (BatchAR._statgovPaused) BatchAR.resumeStatgov();
+    else BatchAR.pauseStatgov();
   },
 
   // ===== Fallback через kyc.kz =====
@@ -1329,6 +1373,13 @@ const BatchAR = {
       txt.innerHTML = '✕ Нет подключения к stat.gov.kz — генерация недоступна. Активируйте расширение-мост «Standard Life — мост к stat.gov.kz» и повторите проверку.';
       retry.style.display = '';
       retry.disabled = false;
+      return;
+    }
+    if (BatchAR._statgovPaused) {
+      box.className = 'batch-verify batch-verify--warn';
+      const drain = BatchAR._statgovRunning ? ' (останавливаю текущие…)' : '';
+      txt.innerHTML = `⏸ Проверка приостановлена: <b>${done}</b> из <b>${total}</b>${drain}. Нажмите «Продолжить», чтобы возобновить.`;
+      retry.style.display = 'none';
       return;
     }
     if (BatchAR._statgovRunning) {
@@ -1702,8 +1753,26 @@ const BatchAR = {
   },
 
   _updateControls() {
+    // Во время проверки stat.gov.kz (идёт/на паузе) вместо недоступной кнопки генерации
+    // показываем кнопку Пауза/Продолжить.
+    const inProgress = BatchAR._statgovRunning || BatchAR._statgovPaused;
+    const btnPause = document.getElementById('batch-pause');
+    if (btnPause) {
+      btnPause.style.display = inProgress ? '' : 'none';
+      const draining = BatchAR._statgovPaused && BatchAR._statgovRunning; // пауза нажата, in-flight доезжают
+      if (BatchAR._statgovPaused) {
+        btnPause.textContent = draining ? '⏸ Останавливаю…' : '▶ Продолжить';
+        btnPause.disabled = draining;
+        btnPause.classList.toggle('batch-pause--paused', !draining);
+      } else {
+        btnPause.textContent = '⏸ Пауза';
+        btnPause.disabled = false;
+        btnPause.classList.remove('batch-pause--paused');
+      }
+    }
     const btnAll = document.getElementById('batch-gen-all');
     if (btnAll) {
+      btnAll.style.display = inProgress ? 'none' : '';   // прячем во время проверки — вместо неё «Пауза»
       const ready = BatchAR._verifyComplete();
       btnAll.disabled = BatchAR._busy || !ready;
       let label = 'Сгенерировать Рекомендации АР';
@@ -1762,9 +1831,12 @@ const BatchAR = {
       if (s === 'err') err++;
       else if (s === 'warn') warn++;
       else if (s === 'checking') checking++;
-      else if (s === 'pending') pending++;
       else if (s === 'ok') ok++;       // проверено через stat.gov.kz, ошибок нет
-      else unchecked++;                 // skip (нет моста) / ошибка проверки / ещё не запускалась — НЕ «корректно»
+      else {                            // 'pending' (серый): различаем очередь и «не проверено»
+        const st = r.statgovStatus;
+        if (st === 'skip' || st === 'error') unchecked++;  // нет моста / ошибка проверки
+        else pending++;                                     // только загружено (undefined) / в очереди
+      }
     }
     const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
     set('bs-total', BatchAR.rows.length);
@@ -1786,6 +1858,8 @@ const BatchAR = {
     if (!ok) return;
     BatchAR.rows = [];
     BatchAR._statgovRunning = false;
+    BatchAR._statgovPaused = false;
+    BatchAR._sgQueue = null;
     BatchAR._statgovConnected = false;
     BatchAR._kycRunning = false;
     const zone = document.getElementById('zone-batch');
