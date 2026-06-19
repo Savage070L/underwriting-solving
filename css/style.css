@@ -99,6 +99,82 @@ body {
 html, body { overflow-x: hidden; }
 
 /* ==========================================================================
+   Раздельная навигация (вкладки) — 4 раздела на одной странице
+   Общее состояние App не теряется при переключении: панели просто
+   показываются/скрываются, страница не перезагружается.
+   ========================================================================== */
+/* Навигация по разделам живёт в шапке — инлайн, без «карточки». */
+.tab-nav {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 1 auto;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--c-text-secondary);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.tab-btn:hover { background: var(--c-surface-sunken); color: var(--c-text-primary); }
+.tab-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.tab-btn.is-active {
+  background: var(--c-brand-600);
+  color: var(--c-text-inverse);
+  box-shadow: var(--shadow-sm);
+}
+.tab-btn-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--c-brand-600);
+}
+.tab-btn:hover .tab-btn-ico { color: var(--c-brand-700); }
+.tab-btn.is-active .tab-btn-ico { color: var(--c-text-inverse); }
+.tab-btn-ico svg { width: 17px; height: 17px; display: block; }
+.tab-btn-label { white-space: nowrap; }
+.tab-panel { display: none; }
+.tab-panel.is-active { display: block; animation: tabFade .18s ease; }
+@keyframes tabFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (max-width: 1180px) {
+  .tab-btn { padding: 7px 11px; font-size: 13px; }
+  .tab-btn-label { font-size: 12.5px; }
+}
+
+/* Раздел «Проверка контрагента» — строка БИН + кнопка проверки */
+.contractor-check {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+.contractor-check .form-group {
+  flex: 1 1 240px;
+  margin: 0;
+}
+.contractor-check .btn-manual-check { flex: 0 0 auto; height: 42px; }
+@media (max-width: 560px) {
+  .contractor-check { align-items: stretch; }
+  .contractor-check .btn-manual-check { width: 100%; }
+}
+
+/* ==========================================================================
    Top app bar (header)
    ========================================================================== */
 header.app-header {
@@ -116,9 +192,13 @@ header.app-header {
   margin: 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-5);
 }
+.app-brand { flex: 0 0 auto; }
+.app-header-inner .tab-nav { flex: 1 1 auto; }
+.app-meta { margin-left: auto; }
 .app-brand {
   display: flex;
   align-items: center;
@@ -165,31 +245,69 @@ header.app-header {
   align-items: center;
   gap: var(--sp-3);
 }
-.app-status-pill {
+/* Индикатор подключения к stat.gov.kz — кликабельная пилюля со статусом. */
+.statgov-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 8px;
-  background: var(--c-success-50);
-  color: var(--c-success-700);
-  border: 1px solid #a7f3d0;
+  gap: 7px;
+  padding: 5px 12px 5px 9px;
+  border: 1px solid transparent;
   border-radius: var(--radius-full);
+  font-family: inherit;
   font-size: 0.74rem;
   font-weight: 600;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, filter .15s ease;
 }
-.app-status-dot {
+.statgov-pill:hover { filter: brightness(0.97); }
+.statgov-pill:focus-visible { outline: none; box-shadow: var(--ring); }
+.statgov-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--c-text-tertiary);
+}
+.statgov-pill.is-online {
+  background: var(--c-success-50);
+  color: var(--c-success-700);
+  border-color: #a7f3d0;
+}
+.statgov-pill.is-online .statgov-dot {
   background: var(--c-success-500);
   animation: pulse-dot 2s ease-in-out infinite;
+}
+.statgov-pill.is-offline {
+  background: var(--c-danger-50);
+  color: var(--c-danger-700);
+  border-color: #fecaca;
+}
+.statgov-pill.is-nologin,
+.statgov-pill.is-unreachable {
+  background: var(--c-warning-50);
+  color: var(--c-warning-700);
+  border-color: #fde68a;
+}
+.statgov-pill.is-nologin .statgov-dot,
+.statgov-pill.is-unreachable .statgov-dot {
+  background: var(--c-warning-500);
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+.statgov-pill.is-checking {
+  background: var(--c-surface-sunken);
+  color: var(--c-text-secondary);
+  border-color: var(--c-border-subtle);
+}
+.statgov-pill.is-checking .statgov-dot {
+  background: var(--c-text-tertiary);
+  animation: pulse-dot 1s ease-in-out infinite;
 }
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(0.85); }
 }
-@media (max-width: 700px) {
+@media (max-width: 760px) {
   .app-meta { display: none; }
 }
 
@@ -240,28 +358,25 @@ header.app-header {
    ========================================================================== */
 .upload-grid {
   display: grid;
-  /* 12-колоночная сетка (НОК для 4 и 3). Распределение:
-        Row 1: 4 карточки × 3 кол. = 12 (file-only refs)
-        Row 2: 3 карточки × 4 кол. = 12 (Норматив, КУ, Лимиты)
-        Row 3: Подписанты × 12 кол. = full-width
-     Так обе короткие строки заполняют контейнер без пустот по бокам. */
-  grid-template-columns: repeat(12, 1fr);
+  /* Симметричная 4-колоночная сетка — все вертикальные линии выровнены:
+        Row 1: popravka · classifier · affiliated · calculator  (4×1 кол.)
+        Row 2: Норматив · КУ · Лимиты(2 кол.)                    (1+1+2 = 4 кол.)
+        Row 3: Подписанты                                        (full-width)
+     «Лимиты» занимают 2 колонки и заполняют 2-й ряд без пустого слота. */
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-3);
+  align-items: stretch;
 }
-.upload-grid > :nth-child(-n+4) { grid-column: span 3; }
-.upload-grid > :nth-child(n+5)  { grid-column: span 4; }
-/* Подписанты — последняя карточка в HTML (8-я), full-width на 3-й строке.
-   Селектор по ID специфичнее nth-child → перебивает `span 4` без !important. */
+.upload-grid > #zone-limits { grid-column: span 2; }
 .upload-grid > #zone-signers { grid-column: 1 / -1; }
 @media (max-width: 1100px) {
-  .upload-grid { grid-template-columns: repeat(6, 1fr); }
-  .upload-grid > :nth-child(-n+4),
-  .upload-grid > :nth-child(n+5) { grid-column: span 2; }
+  .upload-grid { grid-template-columns: repeat(2, 1fr); }
+  .upload-grid > #zone-limits { grid-column: span 2; }
 }
-@media (max-width: 800px) {
-  .upload-grid { grid-template-columns: 1fr 1fr; }
-  .upload-grid > :nth-child(-n+4),
-  .upload-grid > :nth-child(n+5) { grid-column: auto; }
+@media (max-width: 640px) {
+  .upload-grid { grid-template-columns: 1fr; }
+  .upload-grid > #zone-limits,
+  .upload-grid > #zone-signers { grid-column: auto; }
 }
 
 /* Карточка «Подписанты»: 4 группы в горизонтальном grid, заполняют всю
@@ -1197,6 +1312,8 @@ header.app-header {
   resize: vertical;
   line-height: 1.5;
 }
+/* Описание/анализ рисков — поле в 2 раза выше обычного. */
+#riskText { min-height: 192px; }
 
 /* Checkbox */
 .checkbox-group {
@@ -1336,6 +1453,27 @@ header.app-header {
   margin-top: 14px;
 }
 .pi-subsection:first-of-type { margin-top: 0; }
+/* ОКЭДы-подсекция внутри карточки «Основная информация» — на всю ширину,
+   с лёгким разделителем от сетки полей. */
+.preview-section > .pi-subsection {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* Карточка «Проверка контрагента» — сгруппированные строки вместо общей
+   2-колоночной сетки: 1-я строка = БИН · Дата регистрации · Гос. участие. */
+.preview-section--contractor { display: block; }
+.preview-section--contractor .preview-section-title { margin-bottom: 14px; }
+.preview-section--contractor .ci-grid { display: grid; gap: 14px 24px; }
+.preview-section--contractor .ci-grid + .ci-grid { margin-top: 14px; }
+.ci-grid--3 { grid-template-columns: repeat(3, 1fr); }
+.ci-grid--2 { grid-template-columns: repeat(2, 1fr); }
+.ci-grid--1 { grid-template-columns: 1fr; }
+@media (max-width: 640px) {
+  .ci-grid--3, .ci-grid--2 { grid-template-columns: 1fr; }
+}
 .pi-subsection-title {
   font-size: 0.72rem;
   font-weight: 700;
@@ -2063,6 +2201,81 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
 }
 .payment-preview:empty {
   display: none;
+}
+
+/* ===== Редактор траншей рассрочки (ручной ввод / правка) ===== */
+.manual-tranches {
+  margin-top: 8px;
+  background: var(--c-surface-sunken);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.manual-tranches-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.manual-tranches-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--c-text-secondary);
+}
+.mt-count { color: var(--c-text-tertiary); font-weight: 600; }
+.manual-tranches-actions { display: flex; gap: 8px; }
+.mt-btn {
+  border: 1px solid var(--c-border-default);
+  background: var(--c-surface-elevated);
+  color: var(--c-text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.mt-btn:hover { background: var(--c-brand-50); color: var(--c-brand-700); border-color: var(--c-brand-100); }
+.mt-btn--add { color: var(--c-brand-700); border-color: var(--c-brand-100); }
+.manual-tranches-list { display: flex; flex-direction: column; gap: 6px; }
+.mt-row {
+  display: grid;
+  grid-template-columns: 26px 1fr 1fr 30px;
+  gap: 8px;
+  align-items: center;
+}
+.mt-num { text-align: center; font-size: 0.78rem; font-weight: 700; color: var(--c-text-tertiary); }
+.mt-row input {
+  padding: 7px 10px;
+  border: 1px solid var(--c-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  background: var(--c-surface-elevated);
+  color: var(--c-text-primary);
+  min-width: 0;
+}
+.mt-row input:focus { outline: none; border-color: var(--c-brand-600); box-shadow: var(--ring); }
+.mt-amount { font-variant-numeric: tabular-nums; }
+.mt-del {
+  border: none;
+  background: transparent;
+  color: var(--c-text-tertiary);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.mt-del:hover { color: var(--c-danger-500); background: var(--c-danger-50); }
+.manual-tranches-hint { margin-top: 8px; font-size: 0.72rem; color: var(--c-text-tertiary); }
+@media (max-width: 560px) {
+  .mt-row { grid-template-columns: 22px 1fr 26px; }
+  .mt-row .mt-amount { grid-column: 2 / 3; }
 }
 
 /* Dates row hidden by default */

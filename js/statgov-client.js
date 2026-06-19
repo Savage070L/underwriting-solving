@@ -54,6 +54,40 @@ const StatGovClient = {
     });
   },
 
+  // Реальная проверка подключения к stat.gov.kz (без БИН): расширение делает
+  // GET кабинета и проверяет наличие ЭЦП-сессии (sessid). Возвращает:
+  //   { bridge:false }                      — расширение не ответило (не установлено/выключено)
+  //   { bridge:true, reachable:false }      — мост есть, но stat.gov.kz не отвечает
+  //   { bridge:true, reachable:true, session:false } — сайт открылся, но нет ЭЦП-сессии
+  //   { bridge:true, reachable:true, session:true }  — всё работает
+  async health(timeoutMs = 6000) {
+    const requestId = 'health-' + Math.random().toString(36).slice(2);
+    return new Promise((resolve) => {
+      let done = false;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        const d = event.data;
+        if (!d || d.source !== StatGovClient.SOURCE_BRIDGE) return;
+        if (d.type !== 'STATGOV_HEALTH_RESULT' || d.requestId !== requestId) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        StatGovClient._ready = true; // мост ответил — он точно установлен
+        if (d.ok && d.data) {
+          resolve({ bridge: true, reachable: !!d.data.reachable, session: !!d.data.session });
+        } else {
+          resolve({ bridge: true, reachable: false, session: false, error: d.error });
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ source: StatGovClient.SOURCE_APP, type: 'STATGOV_HEALTH', requestId }, '*');
+      setTimeout(() => {
+        if (done) return;
+        window.removeEventListener('message', handler);
+        resolve({ bridge: false, reachable: false, session: false });
+      }, timeoutMs);
+    });
+  },
+
   // Лукап через statsnet.co — ищем «Отрасль» (10-40 сек, открывает background-вкладки).
   async lookupStatsnet(bin) {
     const cleanBin = String(bin || '').trim();

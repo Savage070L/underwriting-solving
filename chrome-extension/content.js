@@ -33,6 +33,23 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (data.type === 'STATGOV_HEALTH') {
+    chrome.runtime.sendMessage({ type: 'STATGOV_HEALTH' }, (response) => {
+      window.postMessage(
+        {
+          source: SOURCE_BRIDGE,
+          type: 'STATGOV_HEALTH_RESULT',
+          requestId: data.requestId,
+          ok: !!(response && response.ok),
+          data: response && response.data,
+          error: response && response.error,
+        },
+        '*',
+      );
+    });
+    return;
+  }
+
   if (data.type === 'STATGOV_LOOKUP') {
     chrome.runtime.sendMessage({ type: 'STATGOV_LOOKUP', bin: data.bin }, (response) => {
       window.postMessage(

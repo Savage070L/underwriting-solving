@@ -20,13 +20,41 @@
           <div class="app-subtitle">по ОСРНС</div>
         </div>
       </a>
+
+      <!-- Навигация по разделам — в шапке, рядом с названием. Все 4 раздела
+           живут на одной странице (общее состояние App), переключение — App.switchTab(). -->
+      <nav class="tab-nav" role="tablist" aria-label="Разделы">
+        <button class="tab-btn" id="tabbtn-contractor" role="tab" aria-selected="false" aria-controls="tab-contractor" onclick="App.switchTab('contractor')">
+          <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+          <span class="tab-btn-label">Проверка контрагента</span>
+        </button>
+        <button class="tab-btn" id="tabbtn-contracts" role="tab" aria-selected="false" aria-controls="tab-contracts" onclick="App.switchTab('contracts')">
+          <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg></span>
+          <span class="tab-btn-label">Проверка Договоров</span>
+        </button>
+        <button class="tab-btn" id="tabbtn-decision" role="tab" aria-selected="false" aria-controls="tab-decision" onclick="App.switchTab('decision')">
+          <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <span class="tab-btn-label">Андеррайтинговое решение</span>
+        </button>
+        <button class="tab-btn is-active" id="tabbtn-refs" role="tab" aria-selected="true" aria-controls="tab-refs" onclick="App.switchTab('refs')">
+          <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+          <span class="tab-btn-label">Справочники</span>
+        </button>
+      </nav>
+
       <div class="app-meta">
-        <span class="app-status-pill"><span class="app-status-dot"></span> Локальная обработка</span>
+        <!-- Индикатор подключения к stat.gov.kz (через расширение-мост). Клик — перепроверить. -->
+        <button class="statgov-pill is-checking" id="statgov-pill" type="button" onclick="App.STATGOV.check(true)">
+          <span class="statgov-dot" aria-hidden="true"></span>
+          <span class="statgov-text" id="statgov-text">stat.gov.kz · проверка…</span>
+        </button>
       </div>
     </div>
   </header>
   <div class="container">
 
+    <!-- ============ Раздел 1: Справочники ============ -->
+    <section class="tab-panel is-active" id="tab-refs" role="tabpanel" aria-labelledby="tabbtn-refs">
     <!-- Reference files (uploaded once, cached) — раскрывающийся раздел -->
     <div class="section section-collapsible" id="refs-section">
       <div class="section-title section-title--clickable" onclick="App.toggleRefsSection(event)">
@@ -131,7 +159,7 @@
           <div class="ref-override ref-override--signers" onclick="event.stopPropagation()">
             <div class="ref-override-title">ФИО и должности подписантов</div>
 
-            <div class="signers-group">
+            <div class="signers-group" style="order:4">
               <div class="signers-group-title">Адресаты СЗ</div>
               <div class="signer-row signer-row--solo" id="sgn-row-sdChair">
                 <input type="text" id="sgn-role-sdChair" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('sdChair','role',this.value)">
@@ -143,7 +171,7 @@
               </div>
             </div>
 
-            <div class="signers-group">
+            <div class="signers-group" style="order:3">
               <div class="signers-group-title">Подписанты СЗ</div>
               <div class="signer-row signer-row--solo" id="sgn-row-daipDirector">
                 <input type="text" id="sgn-role-daipDirector" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('daipDirector','role',this.value)">
@@ -158,7 +186,7 @@
             <!-- Члены АС: 6 человек + секретарь. У каждого члена можно править
                  должность и снять галочку «участвует» (отпуск → строка не
                  попадёт в АР/Протокол). Секретарь без галочки — он обязателен. -->
-            <div class="signers-group">
+            <div class="signers-group" style="order:1">
               <div class="signers-group-title">Андеррайтинговый Совет — АР и Протокол АС</div>
               <div class="signer-row signer-row--editable" id="sgn-row-asMember0">
                 <input type="checkbox" id="sgn-skip-asMember0" checked title="Включить в документ" onchange="App.onSignerOverride('asMember0','skip',!this.checked)">
@@ -197,7 +225,7 @@
             </div>
 
             <!-- Члены Правления — 3 человека + секретарь. -->
-            <div class="signers-group">
+            <div class="signers-group" style="order:2">
               <div class="signers-group-title">Правление / СД — Протокол Правления / СД</div>
               <div class="signer-row signer-row--editable" id="sgn-row-pravlenieMember0">
                 <input type="checkbox" id="sgn-skip-pravlenieMember0" checked onchange="App.onSignerOverride('pravlenieMember0','skip',!this.checked)">
@@ -224,15 +252,17 @@
       </div>
       </div>
     </div>
+    </section>
 
-    <!-- ============ Массовая генерация АР из реестра ============ -->
+    <!-- ============ Раздел 2: Проверка Договоров (массовая генерация АР из реестра) ============ -->
+    <section class="tab-panel" id="tab-contracts" role="tabpanel" aria-labelledby="tabbtn-contracts">
     <!-- Загрузка ежедневной выгрузки договоров (.xlsx) → заполненные .docx
          «Андеррайтинговое решение» по каждой строке (форма «АРешение»).
-         Имена файлов «АР {БИН}.docx», пакетом в ZIP. Открыта по умолчанию. -->
+         Имена файлов «АР {БИН}.docx», пакетом в ZIP. -->
     <div class="section section-collapsible is-open" id="batch-section">
       <div class="section-title section-title--clickable" onclick="App.toggleBatchSection(event)">
         <span class="section-chevron" id="batch-chevron">▸</span>
-        Массовая генерация Рекомендации ДАиП (Андеррайтинговое решение)
+        Проверка Договоров
         <span class="badge" id="batch-badge">из выгрузки</span>
         <button class="btn-clear" id="batch-clear" style="display:none" onclick="BatchAR.clear(); event.stopPropagation()">Очистить</button>
       </div>
@@ -341,7 +371,7 @@
           <div class="batch-legend-title">Цвет ячейки — почему значение подсвечено</div>
           <div class="batch-legend-chips">
             <div class="batch-legend-cellrow"><span class="batch-legend-swatch batch-legend-swatch--cell batch-legend-swatch--err"></span><span><b>Красная — значение неверно.</b> <span class="batch-legend-sub">СС &lt; ФОТ (страхователя или контрагента); СС страхователя &lt; страховой премии; премия &lt; 1&nbsp;МЗП (85&nbsp;000); при премии &lt; 1&nbsp;МЗП СС контрагента ≠ ФОТ; СП контрагента ≠ СС×тариф×ПК; Σ&nbsp;СС или Σ&nbsp;СП контрагентов ≠ итогу страхователя; ОКЭД&nbsp;(С) отсутствует у компании по stat.gov.kz; класс&nbsp;(С) не соответствует классификатору для своего ОКЭД; класс&nbsp;(К) отсутствует среди ОКЭД контрагента; тариф&nbsp;(К) не соответствует справочнику; невалидный БИН; скидка ПК (0,9) при компании моложе 3&nbsp;лет; гос.&nbsp;доля ≠ реестру e-Qazyna.</span></span></div>
-            <div class="batch-legend-cellrow"><span class="batch-legend-swatch batch-legend-swatch--cell batch-legend-swatch--warn"></span><span><b>Жёлтая — мягкое расхождение.</b> <span class="batch-legend-sub">Класс (С или К) есть среди ОКЭД компании, но не максимальный из её видов деятельности.</span></span></div>
+            <div class="batch-legend-cellrow"><span class="batch-legend-swatch batch-legend-swatch--cell batch-legend-swatch--warn"></span><span><b>Жёлтая — мягкое расхождение.</b> <span class="batch-legend-sub">Класс (С или К) <b>≥ 13</b> есть среди ОКЭД компании, но не максимальный из её видов деятельности. Расхождения среди классов 1–12 не выделяются (считаются нормой).</span></span></div>
           </div>
         </div>
         <div class="batch-progress" id="batch-progress" style="display:none">
@@ -350,7 +380,37 @@
         </div>
       </div>
     </div>
+    </section>
 
+    <!-- ============ Раздел 3: Проверка контрагента (быстрая проверка по БИН) ============ -->
+    <section class="tab-panel" id="tab-contractor" role="tabpanel" aria-labelledby="tabbtn-contractor">
+    <div class="section">
+      <div class="section-title">Проверка контрагента по БИН</div>
+      <p class="section-sub">Введите БИН/ИИН — приложение проверит компанию в реестрах (stat.gov.kz, гос. участие, аффилированные лица, юр. адрес, дата регистрации). Без расчёта тарифа и без файла заявки.</p>
+      <div class="contractor-check">
+        <div class="form-group">
+          <label for="contractorBin">БИН / ИИН</label>
+          <input type="text" id="contractorBin" inputmode="numeric" maxlength="12" placeholder="12 цифр"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();App.quickLookupByBin();}">
+        </div>
+        <button class="btn-manual-check" id="btn-contractor-check" onclick="App.quickLookupByBin()" title="Проверить БИН по реестрам (statgov, гос. участие) — без расчёта тарифа">
+          🔎 Проверить БИН
+        </button>
+      </div>
+      <!-- Alert: компания моложе 3 лет. Тот же рендер, что и в андеррайтинге. -->
+      <div class="avg-salary-alert js-young-alert" id="young-company-alert-contractor"></div>
+      <!-- Профиль контрагента — фокусный рендер (showPreview пишет сюда отдельно:
+           только БИН, наименование, юр. адрес, дата рег., гос. участие, ОКЭДы,
+           класс риска, тариф). Панель видима через .js-preview-panel, но грид
+           без .js-preview-grid — общий полный рендер его не заполняет. -->
+      <div class="preview-panel js-preview-panel" id="preview-panel-contractor">
+        <div class="preview-grid" id="preview-grid-contractor"></div>
+      </div>
+    </div>
+    </section>
+
+    <!-- ============ Раздел 4: Андеррайтинговое решение ============ -->
+    <section class="tab-panel" id="tab-decision" role="tabpanel" aria-labelledby="tabbtn-decision">
     <!-- Per-case files -->
     <div class="section">
       <div class="section-title">
@@ -444,11 +504,8 @@
             <input type="text" id="manualClaimsCount" inputmode="numeric" maxlength="4" placeholder="0" oninput="this.value=this.value.replace(/\D/g,'')">
           </div>
         </div>
-        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.<br>Или нажмите «Только проверить» — нужен лишь БИН для проверки в реестрах.</div>
+        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.<br>Только проверить компанию по реестрам можно во вкладке «Проверка контрагента».</div>
         <div class="manual-input-actions">
-          <button class="btn-manual-check" id="btn-manual-check" onclick="App.quickLookupByBin()" title="Проверить только по реестрам (statgov, гос. участие) — без расчёта тарифа">
-            🔎 Проверить БИН
-          </button>
           <button class="btn-manual-apply" id="btn-manual-apply" onclick="App.applyManualZayavka()">Применить</button>
         </div>
       </div>
@@ -458,13 +515,13 @@
            результаты быстрой проверки «Проверить БИН» выводятся прямо в
            панель «Полный профиль компании» ниже (без отдельной карточки). -->
       <!-- Alert: компания моложе 3 лет (скидка не применяется). -->
-      <div class="avg-salary-alert" id="young-company-alert"></div>
+      <div class="avg-salary-alert js-young-alert" id="young-company-alert"></div>
       <!-- Alert: средняя ЗП < 85 000 ₸. -->
-      <div class="avg-salary-alert" id="avg-salary-alert"></div>
+      <div class="avg-salary-alert js-avg-alert" id="avg-salary-alert"></div>
 
       <!-- Preview panel -->
-      <div class="preview-panel" id="preview-panel">
-        <div class="preview-grid" id="preview-grid"></div>
+      <div class="preview-panel js-preview-panel" id="preview-panel">
+        <div class="preview-grid js-preview-grid" id="preview-grid"></div>
       </div>
 
       <!-- Принудительное обновление данных: re-fetch statgov + БИН + пересборка -->
@@ -542,7 +599,7 @@
         </div>
         <div class="form-group" id="payment-frequency-wrap" style="display:none">
           <label for="paymentFrequency">Периодичность рассрочки</label>
-          <select id="paymentFrequency" onchange="App.onPaymentChange()">
+          <select id="paymentFrequency" onchange="App.fillTranchesByFreq()">
             <option value="month">Раз в месяц</option>
             <option value="quarter">Раз в квартал</option>
             <option value="halfYear">Раз в полгода</option>
@@ -561,7 +618,21 @@
         </div>
       </div>
 
-      <!-- Preview траншей рассрочки (показывается только когда порядок = «В рассрочку») -->
+      <!-- Рассрочка: редактируемый список траншей (даты + суммы). Заполняется
+           по выбранной периодичности либо вручную (для ручного ввода / правки
+           данных из выгрузки). Кол-во траншей = число строк. -->
+      <div class="manual-tranches" id="manual-tranches" style="display:none">
+        <div class="manual-tranches-head">
+          <span class="manual-tranches-title">Транши рассрочки <span class="mt-count" id="mt-count"></span></span>
+          <div class="manual-tranches-actions">
+            <button type="button" class="mt-btn mt-btn--fill" onclick="App.fillTranchesByFreq()" title="Сгенерировать даты по выбранной периодичности (потом можно править)">↻ По периодичности</button>
+            <button type="button" class="mt-btn mt-btn--add" onclick="App.addManualTranche()">+ Транш</button>
+          </div>
+        </div>
+        <div class="manual-tranches-list" id="manual-tranches-list"></div>
+        <div class="manual-tranches-hint" id="manual-tranches-hint"></div>
+      </div>
+      <!-- Старое превью рассрочки (не используется, когда показан редактор). -->
       <div class="payment-preview" id="payment-preview"></div>
     </div>
 
@@ -674,6 +745,7 @@
       </button>
       <div class="msg" id="msg"></div>
     </div>
+    </section>
   </div>
 
   <!-- AI Consultant: плавающая кнопка (видна, пока развёрнута встроенная аналитика)

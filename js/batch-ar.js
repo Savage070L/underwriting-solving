@@ -174,10 +174,11 @@ const BatchAR = {
       const r = BatchAR.rows[i];
       const okedErr = BatchAR._okedError(r);
       const cDiff = BatchAR._classDiff(r);
+      const cDiffWarn = BatchAR._classDiffWarn(r);
       const classWrong = BatchAR._classWrongForOked(r);
       const gDiff = BatchAR._govDiff(r);
       const okedCls = okedErr ? ' batch-cell--err' : '';
-      const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiff ? ' batch-cell--warn' : '');
+      const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiffWarn ? ' batch-cell--warn' : '');
       const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"` : '';
       const govCls = gDiff ? ' batch-cell--err' : '';
       const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
@@ -430,7 +431,10 @@ const BatchAR = {
     const classes = BatchAR._contrClassList(r).filter(c => c != null);
     const k = BatchAR._contrClass(r);
     if (!classes.length || k == null || !classes.includes(k)) return false;
-    return k !== Math.max(...classes);
+    const maxC = Math.max(...classes);
+    if (k === maxC) return false;
+    // Жёлтым только высокие классы (≥ _CLASS_WARN_MIN); до 12-го → зелёное.
+    return maxC >= BatchAR._CLASS_WARN_MIN;
   },
 
   // ===== Уровень СТРАХОВАТЕЛЯ (договор) =====
@@ -686,10 +690,24 @@ const BatchAR = {
     return BatchAR._okedConfirmed(r) === false;
   },
 
+  // Жёлтым подсвечиваем мягкое расхождение класса ТОЛЬКО для высоких классов
+  // (≥ _CLASS_WARN_MIN). Расхождения среди классов 1–12 несущественны → зелёные.
+  _CLASS_WARN_MIN: 13,
+
   // Расхождение класса: вычисленный по ОКЭД (макс.) ≠ класс из выгрузки.
+  // (Сырое расхождение — используется и для красной ветки «ОКЭД ошибочен + класс».)
   _classDiff(r) {
     const comp = BatchAR._computedClass(r);
     return comp != null && String(comp) !== String(r.riskClass || '').trim();
+  },
+  // Жёлтое (мягкое) расхождение класса СТРАХОВАТЕЛЯ — только если задействован
+  // высокий класс (≥ _CLASS_WARN_MIN). До 12-го расхождение считается зелёным.
+  _classDiffWarn(r) {
+    if (!BatchAR._classDiff(r)) return false;
+    const comp = BatchAR._computedClass(r);
+    const v = parseInt(r.riskClass, 10);
+    const maxClass = Math.max(comp || 0, Number.isFinite(v) ? v : 0);
+    return maxClass >= BatchAR._CLASS_WARN_MIN;
   },
 
   // ГРУБАЯ ошибка класса (КРАСНЫЙ): класс из выгрузки не совпадает с классом ЕЁ ЖЕ
@@ -726,8 +744,9 @@ const BatchAR = {
         || BatchAR._contrSumLtFotError(r) || BatchAR._contrTariffClassError(r)
         || BatchAR._contrClassWrongByBin(r) || BatchAR._contrSumDiff(r) || BatchAR._contrPremiumDiff(r)
         || BatchAR._insurerSumMismatch(r) || BatchAR._insurerPremMismatch(r)) return 'err';
-    // Жёлтым остаются только мягкие расхождения класса (СС/СП-расхождения теперь красные).
-    if (BatchAR._classDiff(r) || BatchAR._contrClassDiffByBin(r)) return 'warn';
+    // Жёлтым остаются только мягкие расхождения класса (СС/СП-расхождения теперь
+    // красные), и только для высоких классов (≥13) — см. _classDiffWarn.
+    if (BatchAR._classDiffWarn(r) || BatchAR._contrClassDiffByBin(r)) return 'warn';
     return null;
   },
   // Эффективный уровень строки для ВСЕЙ логики (печать/счётчики/сортировка/цвет).

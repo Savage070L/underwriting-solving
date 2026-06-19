@@ -42,22 +42,19 @@ const App = {
     // Состояние раскрытия раздела «Справочники» — восстановить из localStorage,
     // либо умолчание: свёрнут если все 6/6 загружены, иначе раскрыт.
     App._initRefsSection();
+    // Активная вкладка-раздел (Справочники / Проверка Договоров / Проверка
+    // контрагента / Андеррайтинговое решение).
+    App._initTabs();
+    // Индикатор подключения к stat.gov.kz в шапке.
+    App.STATGOV.init();
   },
 
   _initRefsSection() {
     const section = document.getElementById('refs-section');
     if (!section) return;
     const saved = localStorage.getItem('refs_section_open');
-    let open;
-    if (saved === '1') open = true;
-    else if (saved === '0') open = false;
-    else {
-      // Умолчание: если все 6 справочников загружены — свёрнут (чтобы не мешал),
-      // иначе раскрыт (чтобы пользователь видел, что нужно загрузить).
-      const count = ['popravka','normativ','ku','calculator','classifier','affiliated']
-        .filter(k => !!App.refData[k]).length;
-      open = count < 6;
-    }
+    // По умолчанию раздел раскрыт; сворачивается только если пользователь явно свернул.
+    const open = saved !== '0';
     section.classList.toggle('is-open', open);
   },
 
@@ -72,12 +69,129 @@ const App = {
     localStorage.setItem('refs_section_open', open ? '1' : '0');
   },
 
-  // Клик по заголовку «Массовая генерация АР» — раскрыть/свернуть.
+  // Клик по заголовку «Проверка Договоров» — раскрыть/свернуть.
   toggleBatchSection(event) {
     if (event && event.target && event.target.closest('.btn-clear')) return;
     const section = document.getElementById('batch-section');
     if (!section) return;
     section.classList.toggle('is-open', !section.classList.contains('is-open'));
+  },
+
+  // ===== РАЗДЕЛЫ (ВКЛАДКИ) =====
+  // Страница разбита на 4 раздела-вкладки. Состояние App общее и НЕ теряется
+  // при переключении — мы лишь показываем/скрываем панели (.tab-panel).
+  // Порядок в массиве — визуальный порядок вкладок в шапке.
+  TABS: ['contractor', 'contracts', 'decision', 'refs'],
+
+  switchTab(name, scroll = true) {
+    if (!App.TABS.includes(name)) name = App.TABS[0];
+    App.TABS.forEach(t => {
+      const active = (t === name);
+      const panel = document.getElementById('tab-' + t);
+      const btn = document.getElementById('tabbtn-' + t);
+      if (panel) panel.classList.toggle('is-active', active);
+      if (btn) {
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+    });
+    try { localStorage.setItem('active_tab', name); } catch (e) {}
+    if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  // Восстановить активную вкладку из localStorage. Умолчание: если справочники
+  // загружены не полностью — открыть «Справочники», иначе «Андеррайтинговое решение».
+  _initTabs() {
+    let name = null;
+    try { name = localStorage.getItem('active_tab'); } catch (e) {}
+    if (!App.TABS.includes(name)) {
+      const count = ['popravka', 'normativ', 'ku', 'calculator', 'classifier', 'affiliated']
+        .filter(k => !!App.refData[k]).length;
+      name = count < 6 ? 'refs' : 'decision';
+    }
+    App.switchTab(name, false);
+  },
+
+  // ===== СТАТУС ПОДКЛЮЧЕНИЯ К stat.gov.kz =====
+  // Индикатор в шапке. Подключение идёт через расширение-мост (StatGovClient):
+  // ping → PONG = мост активен. Опрашиваем периодически и при возврате фокуса.
+  STATGOV: {
+    // checking | online | nologin | unreachable | offline
+    state: 'checking',
+    _timer: null,
+    _busy: false,
+    _STATES: ['checking', 'online', 'nologin', 'unreachable', 'offline'],
+    _LABELS: {
+      checking: 'stat.gov.kz · проверка…',
+      online: 'stat.gov.kz · подключено',
+      nologin: 'stat.gov.kz · нужен вход по ЭЦП',
+      unreachable: 'stat.gov.kz · недоступен',
+      offline: 'stat.gov.kz · нет связи',
+    },
+    _TITLES: {
+      checking: 'Проверяем реальное подключение к stat.gov.kz…',
+      online: 'stat.gov.kz отвечает, ЭЦП-сессия активна — запросы по БИН пройдут. Нажмите, чтобы перепроверить.',
+      nologin: 'Расширение-мост активно, но ЭЦП-сессия не найдена. Откройте stat.gov.kz и войдите в кабинет по ЭЦП, затем нажмите, чтобы перепроверить.',
+      unreachable: 'Расширение-мост активно, но stat.gov.kz не отвечает (сеть/блокировка). Нажмите, чтобы перепроверить.',
+      offline: 'Расширение «Standard Life — мост к stat.gov.kz» не установлено или выключено. Установите/включите его и нажмите, чтобы перепроверить.',
+    },
+    // Время последнего УСПЕШНОГО реального лукапа stat.gov. В течение окна доверия
+    // (ниже) пассивная health-проверка не понижает статус — реальный лукап важнее
+    // (он мог пройти, а лёгкий GET — словить rate-limit/таймаут и дать ложный сбой).
+    _lastLookupOk: 0,
+    _TRUST_MS: 600000, // 10 минут (> интервала пассивного опроса, чтобы он не сбрасывал рабочий статус)
+    init() {
+      // Handshake расширения означает лишь «мост установлен» — не статус stat.gov.
+      // Поэтому на него запускаем РЕАЛЬНУЮ проверку, а не зеленим индикатор.
+      document.addEventListener('sl:bridge-ready', () => App.STATGOV.check());
+      App.STATGOV.check();
+      // Периодический опрос (редкий, чтобы не долбить stat.gov) + при возврате на вкладку.
+      App.STATGOV._timer = setInterval(() => App.STATGOV.check(), 300000);
+      window.addEventListener('focus', () => App.STATGOV.check());
+    },
+    // Вызывается из autoLookupStatGov с результатом РЕАЛЬНОГО запроса по БИН —
+    // это самый достоверный сигнал: если данные пришли, stat.gov точно работает.
+    noteLookup(ok, errorMsg) {
+      if (ok) {
+        App.STATGOV._lastLookupOk = Date.now();
+        App.STATGOV._set('online');
+      } else if (errorMsg && /sessid|ЭЦП|войдите|логин|авториз/i.test(errorMsg)) {
+        App.STATGOV._set('nologin');
+      }
+    },
+    async check(manual) {
+      if (App.STATGOV._busy) return;
+      App.STATGOV._busy = true;
+      try {
+        if (typeof StatGovClient === 'undefined') { App.STATGOV._set('offline'); return; }
+        if (manual || App.STATGOV.state === 'checking') App.STATGOV._set('checking');
+        const h = await StatGovClient.health(6000).catch(() => ({ bridge: false }));
+        let state;
+        if (!h.bridge) state = 'offline';
+        else if (h.session) state = 'online';
+        else if (h.reachable) state = 'nologin';
+        else state = 'unreachable';
+        // Окно доверия: недавно прошёл реальный лукап → не понижаем статус из-за
+        // пассивной проверки (кроме явного «расширение пропало» = offline).
+        if (state !== 'online' && state !== 'offline'
+            && (Date.now() - App.STATGOV._lastLookupOk) < App.STATGOV._TRUST_MS) {
+          state = 'online';
+        }
+        App.STATGOV._set(state);
+      } finally {
+        App.STATGOV._busy = false;
+      }
+    },
+    _set(state) {
+      App.STATGOV.state = state;
+      const pill = document.getElementById('statgov-pill');
+      const text = document.getElementById('statgov-text');
+      if (!pill || !text) return;
+      App.STATGOV._STATES.forEach(s => pill.classList.remove('is-' + s));
+      pill.classList.add('is-' + state);
+      text.textContent = App.STATGOV._LABELS[state] || '';
+      pill.title = App.STATGOV._TITLES[state] || '';
+    },
   },
 
   // ===== VERDICT SELECTOR =====
@@ -389,31 +503,31 @@ const App = {
   // регистрации из stat.gov.kz). Срабатывает и в режиме быстрой проверки по
   // БИН, и при загруженной заявке. Скидка для таких компаний не применяется.
   _updateYoungCompanyAlert() {
-    const el = document.getElementById('young-company-alert');
-    if (!el) return;
+    // Алерт показывается в обеих вкладках с профилем («Проверка контрагента»
+    // и «Андеррайтинговое решение») — broadcast по классу .js-young-alert.
+    const els = document.querySelectorAll('.js-young-alert');
+    if (!els.length) return;
+    const hide = () => els.forEach(el => { el.classList.remove('visible'); el.innerHTML = ''; });
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
       ? App.statgov : null;
     const regRaw = sg?.registrationDate || null;
-    if (!regRaw) { el.classList.remove('visible'); el.innerHTML = ''; return; }
+    if (!regRaw) { hide(); return; }
     // Возраст на сегодняшнюю дату (а не на дату договора) — для предупреждения.
     const ageYears = Utils.companyAgeYears(regRaw, new Date());
     const threshold = App._getLimit('minCompanyAgeYears');
-    if (ageYears == null || ageYears >= threshold) {
-      el.classList.remove('visible'); el.innerHTML = '';
-      return;
-    }
+    if (ageYears == null || ageYears >= threshold) { hide(); return; }
     const regStr = Utils.fmtDateShort(regRaw);
     // После дробного числа — род. падеж ед.ч.: «≈ 2,6 года». Для порога —
     // «моложе 3 лет», «моложе 1 года» (согласование с целым числом).
     const ageStr = ageYears.toFixed(1).replace('.', ',');
     const thresholdWord = Utils.plural(threshold, 'года', 'лет', 'лет');
-    el.classList.add('visible');
-    el.innerHTML =
+    const html =
       `<div class="asa-icon">⚠</div>` +
       `<div class="asa-body">` +
         `<div class="asa-title">Молодая компания — моложе ${threshold} ${thresholdWord}</div>` +
         `<div class="asa-desc">Дата регистрации <b>${regStr}</b>, возраст ≈ <b>${ageStr} года</b>. Понижающая скидка не применяется (компания младше ${threshold} ${thresholdWord}) — обратите внимание андеррайтера.</div>` +
       `</div>`;
+    els.forEach(el => { el.classList.add('visible'); el.innerHTML = html; });
   },
 
   // Alert «не загружены Страховые случаи» — информационный, ни на что не влияет
@@ -1470,7 +1584,7 @@ const App = {
       const zoneZ = document.getElementById('zone-zayavka');
       if (zoneZ) zoneZ.classList.remove('loaded');
       document.getElementById('status-zayavka').textContent = 'Загрузите .xlsm файл';
-      document.getElementById('preview-panel')?.classList.remove('visible');
+      document.querySelectorAll('.js-preview-panel').forEach(p => p.classList.remove('visible'));
     } else if (which === 'claims') {
       App.claims = null;
       const zoneC = document.getElementById('zone-claims');
@@ -1607,7 +1721,7 @@ const App = {
     document.getElementById('analytics-cta')?.classList.remove('visible');
     document.getElementById('analytics-inline')?.classList.remove('is-open');
     document.body.classList.remove('inline-analytics-open');
-    document.getElementById('preview-panel')?.classList.remove('visible');
+    document.querySelectorAll('.js-preview-panel').forEach(p => p.classList.remove('visible'));
     App._refreshDerivedData();
     App.showMsg('Файлы кейса очищены.', 'success');
   },
@@ -1939,7 +2053,8 @@ const App = {
   // флагом _lookupOnly (без работников/ФОТ/премии); doc-кнопки для неё
   // остаются выключенными (см. updateButtons / updateVerdictHint).
   async quickLookupByBin() {
-    const binEl = document.getElementById('manualBin');
+    // Поле БИН живёт в разделе «Проверка контрагента» (#contractorBin).
+    const binEl = document.getElementById('contractorBin');
     const bin = (binEl?.value || '').trim().replace(/\s+/g, '');
     if (!/^\d{12}$/.test(bin)) {
       App.showMsg('Введите БИН/ИИН (12 цифр) для проверки.', 'error');
@@ -2271,6 +2386,11 @@ const App = {
       premiumBase: row.premiumBase,
       premiumWithCoeff: row.premiumWithCoeff,
       paymentOrder: row.paymentOrder || 'Единовременно',
+      // Реальные транши рассрочки из выгрузки (Этап{N}Дата/Сумма). Даты — ISO
+      // строки, чтобы переживали сериализацию кейса в localStorage.
+      tranchesFromFile: (row.tranches && row.tranches.length)
+        ? row.tranches.map(t => ({ date: t.date ? t.date.toISOString() : null, amount: t.amount }))
+        : null,
       govParticipation: row.govParticipation ? 'Да' : '',
       periodFrom: from, periodTo: to,
       oked: row.oked || '',
@@ -2356,8 +2476,11 @@ const App = {
   showPreview() {
     const z = App.zayavka;
     if (!z) return;
-    const panel = document.getElementById('preview-panel');
-    const grid = document.getElementById('preview-grid');
+    // Профиль компании рендерится в обе вкладки сразу (раздел «Проверка
+    // контрагента» и раздел «Андеррайтинговое решение») — broadcast по классу.
+    const panels = document.querySelectorAll('.js-preview-panel');
+    const grids = document.querySelectorAll('.js-preview-grid');
+    if (!grids.length) return;
 
     const resolved = App._resolveOked();
 
@@ -2544,32 +2667,60 @@ const App = {
       </div>` : '';
     const collapsibleTotal = okedsCount + detailRows.length;
 
-    grid.innerHTML =
+    const gridHtml =
       badges.join('') +
       `<div class="preview-section">
         <div class="preview-section-title">Основная информация</div>
         ${renderItems(mainRows)}
+        ${okedsSubBlock}
       </div>` +
-      (collapsibleTotal > 0 ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
+      (detailRows.length > 0 ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
         <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewDetails()">
           <span class="section-chevron">▸</span>
-          Подробности (ОКЭДы, руководитель, КРП, КФС, КАТО, сектор, дата заявки)
-          <span class="pi-count">${collapsibleTotal}</span>
+          Подробности (руководитель, КРП, КФС, КАТО, сектор, дата заявки)
+          <span class="pi-count">${detailRows.length}</span>
         </div>
         <div class="preview-collapsible-body">
-          ${okedsSubBlock}${detailsSubBlock}
+          ${detailsSubBlock}
         </div>
       </div>` : '') +
       sgStatus;
 
-    panel.classList.add('visible');
+    grids.forEach(g => { g.innerHTML = gridHtml; });
+    panels.forEach(p => { p.classList.add('visible'); });
+
+    // ===== Фокусный профиль для вкладки «Проверка контрагента» =====
+    // Только то, что нужно для проверки контрагента: БИН, наименование, юр. адрес,
+    // дата регистрации, гос. участие, ОКЭДы, класс риска, тариф. Без премий,
+    // работников, периода и НС — они тут не считаются (lookupOnly).
+    const cGrid = document.getElementById('preview-grid-contractor');
+    if (cGrid) {
+      const regVal = sg?.registrationDate || (statgovLoading ? '(поиск...)' : '—');
+      // Первая строка — компактная тройка: БИН · Дата регистрации · Гос. участие.
+      const rowKey = renderItems([['БИН', z.bin], ['Дата регистрации', regVal], ['Гос. участие', sgGov]]);
+      const rowName = renderItems([['Наименование', insurerName], ['Юридический адрес', legalAddress]]);
+      const rowRisk = renderItems([['Класс риска', effClass || '—'], ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—']]);
+      const contractorHtml =
+        badges.join('') +
+        `<div class="preview-section preview-section--contractor">
+          <div class="preview-section-title">Информация о контрагенте</div>
+          <div class="ci-grid ci-grid--3">${rowKey}</div>
+          <div class="ci-grid ci-grid--1">${rowName}</div>
+          <div class="ci-grid ci-grid--2">${rowRisk}</div>
+          ${okedsSubBlock}
+        </div>` +
+        sgStatus;
+      cGrid.innerHTML = contractorHtml;
+    }
   },
 
   togglePreviewDetails() {
-    const el = document.getElementById('preview-details-section');
-    if (!el) return;
-    const open = !el.classList.contains('is-open');
-    el.classList.toggle('is-open', open);
+    // «Подробности» рендерятся в обе панели профиля (одинаковый id) — синхронно
+    // переключаем все, чтобы состояние не рассыпалось между вкладками.
+    const els = document.querySelectorAll('.preview-collapsible');
+    if (!els.length) return;
+    const open = !els[0].classList.contains('is-open');
+    els.forEach(el => el.classList.toggle('is-open', open));
     localStorage.setItem('preview_details_open', open ? '1' : '0');
   },
 
@@ -2835,8 +2986,10 @@ const App = {
         data.legalAddress = Utils.statgovLegalAddress(data);
       }
       App.statgov = { ...data, loading: false };
+      App.STATGOV.noteLookup(true);
     } catch (e) {
       App.statgov = { error: e.message, loading: false };
+      App.STATGOV.noteLookup(false, e.message);
     }
     // statgov.name подставляем только в внутренние данные (App.zayavka.insurerName),
     // чтобы оно отразилось в preview / analytics / документах. Input-поле
@@ -3380,9 +3533,23 @@ const App = {
     let paymentTranches = null;
     let paymentScheduleText = paymentOrderEff;
     if (paymentOrderEff === 'В рассрочку') {
-      paymentFreqEff = formFreq;
-      paymentTranches = Utils.calcPaymentTranches(formFreq, periodFrom, periodTo);
-      paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
+      // Приоритет — РЕАЛЬНЫЕ транши из выгрузки (колонки Этап{N}Дата/Сумма).
+      // Кол-во траншей = число заполненных этапов; даты и суммы — как в файле.
+      const fileTr = Array.isArray(z.tranchesFromFile)
+        ? z.tranchesFromFile.filter(t => t && t.date) : null;
+      if (fileTr && fileTr.length) {
+        paymentTranches = fileTr.map(t => new Date(t.date));
+        const n = fileTr.length;
+        const parts = fileTr.map((t, i) => {
+          const amt = (t.amount != null) ? ` — ${Utils.fmtMoney(t.amount)}` : '';
+          return `${i + 1} транш: ${Utils.fmtDateShort(new Date(t.date))}${amt}`;
+        });
+        paymentScheduleText = `В рассрочку (${Utils.pluralize(n, 'транш', 'транша', 'траншей')}): ${parts.join('; ')}`;
+      } else {
+        paymentFreqEff = formFreq;
+        paymentTranches = Utils.calcPaymentTranches(formFreq, periodFrom, periodTo);
+        paymentScheduleText = `В рассрочку (${Utils.PAYMENT_FREQ_LABELS[formFreq]}): ${Utils.formatPaymentSchedule(paymentTranches, formFreq)}`;
+      }
     }
 
     // Источник имени, юр. адреса, региона и деятельности: ТОЛЬКО stat.gov.kz
@@ -3628,22 +3795,116 @@ const App = {
     const wrap = document.getElementById('payment-frequency-wrap');
     const preview = document.getElementById('payment-preview');
     if (!wrap) return;
+    const editor = document.getElementById('manual-tranches');
     if (order === 'В рассрочку') {
-      wrap.style.display = '';
-      const freq = document.getElementById('paymentFrequency')?.value || 'month';
-      const z = App.zayavka || {};
-      const tranches = Utils.calcPaymentTranches(freq, z.periodFrom, z.periodTo);
-      const list = Utils.formatPaymentSchedule(tranches, freq);
-      if (preview) {
-        const lines = list.split(';').map(s => s.trim()).filter(Boolean);
-        preview.innerHTML = lines.length <= 14
-          ? lines.map(l => `<div class="pp-line">${l}</div>`).join('')
-          : `<div class="pp-line">${list}</div>`;
+      wrap.style.display = '';                 // периодичность — кнопка авто-заполнения
+      if (editor) editor.style.display = '';
+      if (preview) preview.innerHTML = '';
+      const z = App.zayavka;
+      // Транши ещё не заданы (ни из файла, ни вручную) → авто-заполнить по периодичности.
+      if (z && (!Array.isArray(z.tranchesFromFile) || z.tranchesFromFile.length === 0)) {
+        App.fillTranchesByFreq();
+      } else {
+        App.renderManualTranches();
       }
     } else {
       wrap.style.display = 'none';
+      if (editor) editor.style.display = 'none';
       if (preview) preview.innerHTML = '';
     }
+  },
+
+  // ===== РЕДАКТОР ТРАНШЕЙ РАССРОЧКИ =====
+  // Источник правды — App.zayavka.tranchesFromFile ([{date: ISO, amount: number|null}]).
+  // Тот же массив, что приходит из выгрузки (Этап{N}) и используется в _collectData.
+  _caseTranches() {
+    const z = App.zayavka;
+    if (!z) return null;
+    if (!Array.isArray(z.tranchesFromFile)) z.tranchesFromFile = [];
+    return z.tranchesFromFile;
+  },
+  // ISO → значение <input type=date> (локальная дата YYYY-MM-DD).
+  _isoToDateInput(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  },
+  // Значение <input type=date> → ISO локальной полуночи (как у траншей из файла).
+  _dateInputToIso(val) {
+    if (!val) return null;
+    const d = new Date(val + 'T00:00:00');
+    return isNaN(d) ? null : d.toISOString();
+  },
+  renderManualTranches() {
+    const list = document.getElementById('manual-tranches-list');
+    const hint = document.getElementById('manual-tranches-hint');
+    const cnt = document.getElementById('mt-count');
+    if (!list) return;
+    const tr = App._caseTranches();
+    if (tr == null) {
+      list.innerHTML = '';
+      if (cnt) cnt.textContent = '';
+      if (hint) hint.textContent = 'Сначала примените данные по компании (кнопка «Применить» / выбор из реестра).';
+      return;
+    }
+    list.innerHTML = tr.map((t, i) => `
+      <div class="mt-row">
+        <span class="mt-num">${i + 1}</span>
+        <input type="date" class="mt-date" value="${App._isoToDateInput(t.date)}" onchange="App.updateManualTranche(${i},'date',this.value)" aria-label="Дата транша ${i + 1}">
+        <input type="text" class="mt-amount" inputmode="decimal" placeholder="Сумма, ₸ (необязательно)" value="${t.amount != null ? App._formatMoney(t.amount) : ''}" oninput="App.updateManualTranche(${i},'amount',this.value)" onblur="App._mtAmountBlur(${i})" aria-label="Сумма транша ${i + 1}">
+        <button type="button" class="mt-del" title="Удалить транш" onclick="App.removeManualTranche(${i})">✕</button>
+      </div>`).join('');
+    if (cnt) cnt.textContent = tr.length ? `(${Utils.pluralize(tr.length, 'транш', 'транша', 'траншей')})` : '';
+    if (hint) hint.textContent = tr.length
+      ? 'Кол-во траншей = число строк. Уберите/добавьте строки и правьте даты/суммы под фактический график.'
+      : 'Нажмите «+ Транш» или «↻ По периодичности», чтобы задать график.';
+  },
+  addManualTranche() {
+    const tr = App._caseTranches();
+    if (tr == null) { App.showMsg('Сначала примените данные по компании.', 'error'); return; }
+    tr.push({ date: null, amount: null });
+    App.renderManualTranches();
+    App._persistCase();
+  },
+  removeManualTranche(i) {
+    const tr = App._caseTranches();
+    if (tr == null) return;
+    tr.splice(i, 1);
+    App.renderManualTranches();
+    App._persistCase();
+  },
+  updateManualTranche(i, field, val) {
+    const tr = App._caseTranches();
+    if (tr == null || !tr[i]) return;
+    if (field === 'date') {
+      tr[i].date = App._dateInputToIso(val);
+    } else if (field === 'amount') {
+      const n = App._parseMoney(val);
+      tr[i].amount = Number.isFinite(n) ? n : null;
+    }
+    App._persistCase();
+    // Не пере-рендерим целиком (потеряли бы фокус) — обновляем только счётчик.
+    const cnt = document.getElementById('mt-count');
+    if (cnt && field === 'date') cnt.textContent = tr.length ? `(${Utils.pluralize(tr.length, 'транш', 'транша', 'траншей')})` : '';
+  },
+  _mtAmountBlur(i) {
+    const tr = App._caseTranches();
+    if (tr == null || !tr[i]) return;
+    const inputs = document.querySelectorAll('#manual-tranches-list .mt-amount');
+    if (inputs[i]) inputs[i].value = (tr[i].amount != null) ? App._formatMoney(tr[i].amount) : '';
+  },
+  // Заполнить транши датами по выбранной периодичности (суммы пустые — заполнит оператор).
+  fillTranchesByFreq() {
+    const tr = App._caseTranches();
+    if (tr == null) { App.showMsg('Сначала примените данные по компании.', 'error'); return; }
+    const z = App.zayavka;
+    const freq = document.getElementById('paymentFrequency')?.value || 'month';
+    const dates = Utils.calcPaymentTranches(freq, z.periodFrom, z.periodTo);
+    z.tranchesFromFile = dates.map(d => ({ date: d.toISOString(), amount: null }));
+    App.renderManualTranches();
+    App._persistCase();
   },
 
   // ===== ОКЭД INPUT HANDLER =====

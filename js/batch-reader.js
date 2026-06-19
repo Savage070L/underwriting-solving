@@ -138,6 +138,35 @@ const BatchReader = {
     return idx;
   },
 
+  // Колонки рассрочки: «Этап{N}Дата» / «Этап{N}Сумма» (N = 1, 2, …). Позиции
+  // плавают между версиями выгрузки, поэтому ищем строго по заголовку.
+  // Возвращает массив [{ dateIdx, sumIdx }, …] по найденным этапам подряд.
+  _resolveEtapCols(headerRowRaw) {
+    const header = (headerRowRaw || []).map(BatchReader._norm);
+    const stages = [];
+    for (let n = 1; n <= 24; n++) {
+      const dateIdx = header.indexOf('этап' + n + 'дата');
+      const sumIdx = header.indexOf('этап' + n + 'сумма');
+      if (dateIdx === -1 && sumIdx === -1) break; // дальше этапов в выгрузке нет
+      stages.push({ dateIdx, sumIdx });
+    }
+    return stages;
+  },
+
+  // Транши рассрочки из строки: идём по этапам, пока у этапа есть дата.
+  // Первый ПУСТОЙ «Этап{N}Дата» = граница (4 этапа → оплата в 4 транша, не 5).
+  _rowTranches(row, etapCols) {
+    const out = [];
+    for (const st of etapCols) {
+      const dRaw = (st.dateIdx >= 0 && st.dateIdx < row.length) ? row[st.dateIdx] : null;
+      const d = BatchReader._date(dRaw);
+      if (!d) break; // пустая дата этапа — дальше траншей нет
+      const sRaw = (st.sumIdx >= 0 && st.sumIdx < row.length) ? row[st.sumIdx] : null;
+      out.push({ date: d, amount: BatchReader._money(sRaw) });
+    }
+    return out;
+  },
+
   // Главный метод. arrayBuffer → { rows: [...], total, skipped }.
   parse(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
@@ -156,6 +185,8 @@ const BatchReader = {
     }
     // --- Резолвим индекс каждого поля: точный заголовок, иначе буква колонки ---
     const idx = BatchReader.resolveIdx(grid[headerRow] || []);
+    // --- Колонки рассрочки «Этап{N}Дата/Сумма» (динамически, по заголовку) ---
+    const etapCols = BatchReader._resolveEtapCols(grid[headerRow] || []);
 
     const cell = (row, field) => {
       const i = idx[field];
@@ -218,6 +249,9 @@ const BatchReader = {
         author: String(cell(row, 'author') || '').trim(),   // андеррайтер-автор решения
         region: String(cell(row, 'region') || '').trim(),
         paymentOrder: String(cell(row, 'paymentOrder') || '').trim(),
+        // Реальные транши рассрочки из колонок «Этап{N}Дата/Сумма» (если есть).
+        // Кол-во траншей = число заполненных этапов (пустой этап = граница).
+        tranches: BatchReader._rowTranches(row, etapCols),
         branch: '',
         // Дата договора — из номера договора (цифры [2..8) = ДД.ММ.ГГ).
         dateContract: BatchReader._contractDate(contractNumber),

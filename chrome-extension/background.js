@@ -513,8 +513,42 @@ function parseKycNuxt(html, bin) {
   }
 }
 
+/**
+ * Лёгкая проверка реального подключения к stat.gov.kz — БЕЗ БИН.
+ * Делает только Step 1 (GET кабинета) и смотрит, есть ли в странице sessid
+ * (= активная ЭЦП-сессия). Возвращает { reachable, session }.
+ *  - reachable:false        → stat.gov.kz не ответил (сеть/блокировка/5xx)
+ *  - reachable:true, session:false → сайт открылся, но ЭЦП-сессии нет (нужен вход)
+ *  - reachable:true, session:true  → всё работает, запросы по БИН пройдут
+ */
+async function statgovHealth() {
+  let pageResp;
+  try {
+    pageResp = await fetch(STATGOV_URL, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+    });
+  } catch (e) {
+    return { reachable: false, session: false, error: String(e && e.message || e) };
+  }
+  if (!pageResp.ok) {
+    return { reachable: false, session: false, error: 'stat.gov.kz GET вернул ' + pageResp.status };
+  }
+  const html = await pageResp.text();
+  const hasSessid = /<input[^>]*name="sessid"[^>]*value="[^"]+"/i.test(html)
+                 || /<input[^>]*value="[^"]+"[^>]*name="sessid"/i.test(html);
+  return { reachable: true, session: hasSessid };
+}
+
 // === Message handler: получает запросы из content script ===
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'STATGOV_HEALTH') {
+    statgovHealth()
+      .then(data => sendResponse({ ok: true, data }))
+      .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
+    return true;
+  }
   if (msg && msg.type === 'STATGOV_LOOKUP' && typeof msg.bin === 'string') {
     fetchByBin(msg.bin.trim())
       .then(data => sendResponse({ ok: true, data }))
