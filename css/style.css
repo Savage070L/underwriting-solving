@@ -1773,7 +1773,7 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
 /* ОКЭД-rows (внутри preview-collapsible) */
 .pi-oked-row {
   display: grid;
-  grid-template-columns: 90px 110px 1fr;
+  grid-template-columns: 84px 100px 56px 70px 1fr;
   gap: 10px;
   padding: 6px 8px;
   border-bottom: 1px dashed #e2e8f0;
@@ -1784,7 +1784,13 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
 .pi-oked-row--active { background: #f0fdf4; border-radius: 6px; }
 .pi-oked-code { font-weight: 700; color: #1e293b; font-family: ui-monospace, monospace; }
 .pi-oked-kind { font-size: 0.75rem; color: #64748b; }
+.pi-oked-class { font-size: 0.78rem; font-weight: 600; color: #475569; }
+.pi-oked-tariff { font-size: 0.78rem; font-weight: 600; color: #475569; font-variant-numeric: tabular-nums; }
 .pi-oked-name { color: #334155; }
+@media (max-width: 720px) {
+  .pi-oked-row { grid-template-columns: 70px 88px 48px 62px; gap: 6px 8px; }
+  .pi-oked-name { grid-column: 1 / -1; }
+}
 .pi-active-badge {
   display: inline-block;
   margin-left: 4px;

@@ -2515,16 +2515,29 @@ const App = {
         const kindLabel = o.kind === 'primary' ? 'основной' : 'вторичный';
         const isActive = o.code === effOked;
         const activeBadge = isActive ? ' <span class="pi-active-badge">активный</span>' : '';
+        // Класс и тариф per-OKED. Тариф — по классу из справочника (как «Страховой
+        // тариф» в профиле), fallback на тариф из калькулятора.
+        const okCls = (o.riskClass != null) ? o.riskClass : null;
+        const okTar = (okCls != null && App._resolveTariff) ? App._resolveTariff(okCls) : null;
+        const okTarVal = (okTar != null && !isNaN(okTar)) ? okTar : o.tariff;
+        const classStr = okCls != null ? `кл. ${okCls}` : '<span class="muted">—</span>';
+        const tariffStr = (okTarVal != null && !isNaN(okTarVal)) ? Utils.fmtPct(okTarVal) : '<span class="muted">—</span>';
         return `<div class="pi-oked-row${isActive ? ' pi-oked-row--active' : ''}">
           <span class="pi-oked-code">${o.code}</span>
           <span class="pi-oked-kind">(${kindLabel})${activeBadge}</span>
+          <span class="pi-oked-class">${classStr}</span>
+          <span class="pi-oked-tariff">${tariffStr}</span>
           <span class="pi-oked-name">${o.name || '<em class="muted">нет в классификаторе</em>'}</span>
         </div>`;
       }).join('');
     } else if (effOked) {
+      const fbClassStr = effClass != null ? `кл. ${effClass}` : '<span class="muted">—</span>';
+      const fbTariffStr = (effTariff != null && !isNaN(effTariff)) ? Utils.fmtPct(effTariff) : '<span class="muted">—</span>';
       okedsBlockHtml = `<div class="pi-oked-row pi-oked-row--active">
         <span class="pi-oked-code">${effOked}</span>
         <span class="pi-oked-kind">(активный)</span>
+        <span class="pi-oked-class">${fbClassStr}</span>
+        <span class="pi-oked-tariff">${fbTariffStr}</span>
         <span class="pi-oked-name">${effActivityName || '<em class="muted">—</em>'}</span>
       </div>`;
     }
