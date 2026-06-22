@@ -2015,7 +2015,7 @@ const App = {
     const primary = App._manualPrimary;
     const aff = okBin ? App._isAffiliatedBin(cleanBin) : null;
 
-    let msg = 'Заполните БИН, количество работников и одно из: ФОТ ИЛИ среднюю ЗП.';
+    let msg = '';
     let cls = '';
 
     // Success-сообщение «Готово к применению: ФОТ = …» убрано — оно избыточно,
@@ -2031,11 +2031,17 @@ const App = {
         cls = '';
       }
     } else {
+      // Подсказку «Не хватает: …» показываем только если оператор уже начал
+      // заполнять форму (хотя бы одно поле). На пустой форме — ничего не выводим.
+      const anyInput = !!bin
+        || !!(document.getElementById('manualWorkers')?.value || '').trim()
+        || !!(document.getElementById('manualFot')?.value || '').trim()
+        || !!(document.getElementById('manualAvgSalary')?.value || '').trim();
       const missing = [];
       if (!okBin) missing.push(bin ? 'БИН должен быть 12 цифр' : 'БИН');
       if (!okWorkers) missing.push('кол-во работников > 0');
       if (!hasFot && !hasAvg) missing.push('ФОТ или средняя ЗП');
-      if (missing.length) {
+      if (anyInput && missing.length) {
         msg = 'Не хватает: ' + missing.join(', ') + '.';
         cls = 'manual-input-hint--err';
       }
@@ -2782,19 +2788,29 @@ const App = {
     App.copyToClipboard(prompt, btn);
   },
 
-  // ===== ИИ-подбор ОКЭД/класса для договора (вкладка «Проверка контрагента») =====
+  // ===== ИИ-подбор ОКЭД/класса для договора =====
   // Строит промпт из ОКЭДов компании (код, наименование, класс, тариф) + место
-  // для вставки должностей. Возвращает строку или null, если ОКЭДов нет.
+  // для вставки штатки. Доступен ВСЕГДА, когда в работе есть компания (App.zayavka),
+  // независимо от успеха statgov: если ОКЭДов из реестра нет — берём активный ОКЭД
+  // (ручной/заявка), иначе оставляем плейсхолдер. null только если компании нет.
   _buildOkedAdvisorPrompt() {
-    const okeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
-    if (!okeds.length) return null;
-    const lines = okeds.map((o, i) => {
-      const kind = o.kind === 'primary' ? 'основной' : 'вторичный';
-      const cls = (o.riskClass != null) ? `класс ${o.riskClass}` : 'класс не определён';
-      const tarVal = (o.riskClass != null && App._resolveTariff) ? App._resolveTariff(o.riskClass) : o.tariff;
-      const tar = (tarVal != null && !isNaN(tarVal)) ? `тариф ${Utils.fmtPct(tarVal)}` : 'тариф не определён';
-      return `${i + 1}. ${o.code} — ${o.name || 'наименование не в классификаторе'} (${kind}; ${cls}; ${tar})`;
-    }).join('\n');
+    if (!App.zayavka) return null;
+    let okeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+    if (!okeds.length && App._resolveOked) {
+      const r = App._resolveOked();
+      if (r && r.oked) {
+        okeds = [{ code: r.oked, kind: 'primary', name: r.activity || null, riskClass: (r.riskClass != null ? r.riskClass : null), tariff: null }];
+      }
+    }
+    const lines = okeds.length
+      ? okeds.map((o, i) => {
+          const kind = o.kind === 'primary' ? 'основной' : 'вторичный';
+          const cls = (o.riskClass != null) ? `класс ${o.riskClass}` : 'класс не определён';
+          const tarVal = (o.riskClass != null && App._resolveTariff) ? App._resolveTariff(o.riskClass) : o.tariff;
+          const tar = (tarVal != null && !isNaN(tarVal)) ? `тариф ${Utils.fmtPct(tarVal)}` : 'тариф не определён';
+          return `${i + 1}. ${o.code} — ${o.name || 'наименование не в классификаторе'} (${kind}; ${cls}; ${tar})`;
+        }).join('\n')
+      : '(ОКЭД не определён — укажите ОКЭД(ы) компании, их класс и тариф)';
     return [
       'Ты — андеррайтер ОСНС (Казахстан).',
       '',
@@ -2813,8 +2829,8 @@ const App = {
       'ОКЭДЫ СТРАХОВАТЕЛЯ:',
       lines,
       '',
-      'ШТАТНОЕ РАСПИСАНИЕ:',
-      '[ВСТАВЬТЕ СПИСОК ДОЛЖНОСТЕЙ И ЧИСЛЕННОСТЬ]',
+      'ШТАТНОЕ РАСПИСАНИЕ (приведено ниже текстом ИЛИ приложено отдельным скриншотом/фото — если приложено изображение, распознай должности и их численность с него):',
+      '[ВСТАВЬТЕ ШТАТКУ ТЕКСТОМ — ЛИБО ПРИКРЕПИТЕ СКРИНШОТ/ФОТО ШТАТНОГО РАСПИСАНИЯ]',
     ].join('\n');
   },
 
@@ -2855,15 +2871,18 @@ const App = {
   // HTML блока ИИ-советника (кнопки сервисов + «Скопировать промпт»). '' если нет ОКЭДов.
   _okedAdvisorHtml() {
     if (!App._buildOkedAdvisorPrompt()) return '';
+    const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     return `
       <div class="oked-advisor">
-        <div class="oked-advisor-title">Подобрать ОКЭД и класс для договора (ИИ)</div>
-        <div class="oked-advisor-buttons">
-          <button type="button" class="btn-ai btn-ai--chatgpt" onclick="App.askOkedAdvisor('chatgpt', this)"><span class="ai-icon">💬</span><span>Спросить у ChatGPT</span></button>
-          <button type="button" class="btn-ai btn-ai--gemini" onclick="App.askOkedAdvisor('gemini', this)"><span class="ai-icon">✨</span><span>Спросить у Gemini</span></button>
-          <button type="button" class="btn-ai btn-ai--perplexity" onclick="App.askOkedAdvisor('perplexity', this)"><span class="ai-icon">🔍</span><span>Спросить у Perplexity</span></button>
-          <button type="button" class="btn-ai btn-ai--grok" onclick="App.askOkedAdvisor('grok', this)"><span class="ai-icon">✕</span><span>Спросить у Grok</span></button>
-          <button type="button" class="btn-copy-prompt" onclick="App.copyOkedAdvisorPrompt(this)">⧉ Скопировать промпт</button>
+        <div class="oked-advisor-top">
+          <div class="oked-advisor-title">ИИ-Советник по подбору ОКЭДа</div>
+          <button type="button" class="oked-advisor-copy" onclick="App.copyOkedAdvisorPrompt(this)" title="Скопировать промпт в буфер">${copyIcon}<span>Скопировать промпт</span></button>
+        </div>
+        <div class="oked-advisor-grid">
+          <button type="button" class="ai-chip ai-chip--chatgpt" onclick="App.askOkedAdvisor('chatgpt', this)"><span class="ai-chip-dot" aria-hidden="true"></span><span>Спросить у ChatGPT</span></button>
+          <button type="button" class="ai-chip ai-chip--gemini" onclick="App.askOkedAdvisor('gemini', this)"><span class="ai-chip-dot" aria-hidden="true"></span><span>Спросить у Gemini</span></button>
+          <button type="button" class="ai-chip ai-chip--perplexity" onclick="App.askOkedAdvisor('perplexity', this)"><span class="ai-chip-dot" aria-hidden="true"></span><span>Спросить у Perplexity</span></button>
+          <button type="button" class="ai-chip ai-chip--grok" onclick="App.askOkedAdvisor('grok', this)"><span class="ai-chip-dot" aria-hidden="true"></span><span>Спросить у Grok</span></button>
         </div>
       </div>`;
   },
@@ -3840,9 +3859,19 @@ const App = {
       const company = App._collectCompanyOkeds();
       const withCls = company.filter(o => o.riskClass != null);
       if (withCls.length > 0) {
-        withCls.sort((a, b) => b.riskClass - a.riskClass);
+        // Активный ОКЭД — с НАИБОЛЬШИМ ТАРИФОМ (а не номером класса): маппинг
+        // класс→тариф немонотонный (класс 13 = 1,29% выше, чем класс 16 = 1,17%).
+        // Тай-брейк при равных тарифах — больший номер класса.
+        withCls.sort((a, b) => {
+          const ta = App._tariffByClass(a.riskClass);
+          const tb = App._tariffByClass(b.riskClass);
+          const tav = (ta != null) ? ta : -Infinity;
+          const tbv = (tb != null) ? tb : -Infinity;
+          if (tbv !== tav) return tbv - tav;
+          return b.riskClass - a.riskClass;
+        });
         oked = withCls[0].code;
-        source = 'statgov-max-class';
+        source = 'statgov-max-tariff';
       }
     }
 
@@ -4298,6 +4327,16 @@ const App = {
   // Если ОКЭД остался из заявки (source = 'zayavka') — используем z.tariff (D12).
   // Если ОКЭД изменился (manual, statgov-max-class, override) — пересчитываем
   // через справочник/классификатор по новому классу.
+  // Страховой тариф по номеру класса напрямую из справочника «Поправочные
+  // коэффициенты» (без обращения к _resolveOked — иначе рекурсия). Возвращает
+  // долю (напр. 0.0129) или null. Используется для выбора класса с макс. тарифом.
+  _tariffByClass(cls) {
+    const rr = App.refData && App.refData.popravka && App.refData.popravka.riskRates;
+    if (!rr || cls == null) return null;
+    const t = rr.get(cls);
+    return Number.isFinite(t) ? t : null;
+  },
+
   _resolveTariff(riskClass) {
     const z = App.zayavka || {};
     const resolved = App._resolveOked ? App._resolveOked() : { source: 'zayavka' };

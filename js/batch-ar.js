@@ -192,7 +192,7 @@ const BatchAR = {
       const contrClassCls = (contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrClassDiffBin ? ' batch-cell--warn' : '');
       const contrClassTitle = contrClassWrongBin
         ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
-        : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не максимальный (макс. ${BatchAR._contrComputedClass(r)})"`
+        : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})"`
         : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
       // СС контрагента красным: < ФОТ, или отличается от расчётной больше чем на ±100 ₸.
       const contrSumDiff = BatchAR._contrSumDiff(r);
@@ -413,10 +413,10 @@ const BatchAR = {
   _contrClassList(r) {
     return BatchAR._contrStatgovOkeds(r).map(o => BatchAR._classOf(o));
   },
-  // Макс. класс по ОКЭД контрагента (для справки). null, если нет данных/совпадений.
+  // «Правильный» класс по ОКЭД контрагента — с НАИБОЛЬШИМ ТАРИФОМ (не номером).
   _contrComputedClass(r) {
     const classes = BatchAR._contrClassList(r).filter(c => c != null);
-    return classes.length ? Math.max(...classes) : null;
+    return classes.length ? BatchAR._maxTariffClass(classes) : null;
   },
   // 🔴 Класс из выгрузки (K) ОТСУТСТВУЕТ среди классов по ОКЭД контрагента —
   // класс невозможен для его деятельности (грубая ошибка).
@@ -425,13 +425,13 @@ const BatchAR = {
     const k = BatchAR._contrClass(r);
     return classes.length > 0 && k != null && !classes.includes(k);
   },
-  // 🟡 Класс из выгрузки (K) ЕСТЬ среди возможных по ОКЭД, но не максимальный —
-  // мягкое расхождение (выбран не самый высокий класс из деятельностей контрагента).
+  // 🟡 Класс из выгрузки (K) ЕСТЬ среди возможных по ОКЭД, но это НЕ класс с
+  // наибольшим тарифом — мягкое расхождение (выбран не самый «дорогой» класс).
   _contrClassDiffByBin(r) {
     const classes = BatchAR._contrClassList(r).filter(c => c != null);
     const k = BatchAR._contrClass(r);
     if (!classes.length || k == null || !classes.includes(k)) return false;
-    const maxC = Math.max(...classes);
+    const maxC = BatchAR._maxTariffClass(classes); // класс с наибольшим тарифом
     if (k === maxC) return false;
     // Жёлтым только высокие классы (≥ _CLASS_WARN_MIN); до 12-го → зелёное.
     return maxC >= BatchAR._CLASS_WARN_MIN;
@@ -819,15 +819,41 @@ const BatchAR = {
     return (found && found.cls != null && !isNaN(Number(found.cls))) ? Number(found.cls) : null;
   },
 
+  // Страховой тариф по классу из справочника «Поправочные коэффициенты» (или null).
+  _tariffByClass(cls) {
+    const rr = (typeof App !== 'undefined' && App.refData && App.refData.popravka) ? App.refData.popravka.riskRates : null;
+    if (!rr || cls == null) return null;
+    const t = rr.get(cls);
+    return Number.isFinite(t) ? t : null;
+  },
+
+  // Из набора классов возвращает класс с НАИБОЛЬШИМ страховым ТАРИФОМ (а не с
+  // наибольшим НОМЕРОМ): маппинг класс→тариф немонотонный (напр. класс 13 = 1,29%
+  // выше, чем класс 16 = 1,17%), поэтому «правильный» класс для договора — тот, у
+  // которого выше тариф. Тай-брейк при равных тарифах — больший номер класса.
+  // Если тарифов нет в справочнике — fallback на максимальный номер класса.
+  _maxTariffClass(classes) {
+    const list = (classes || []).filter(c => c != null);
+    if (!list.length) return null;
+    let best = null, bestTar = -Infinity, anyTar = false;
+    for (const c of list) {
+      const t = BatchAR._tariffByClass(c);
+      if (t == null) continue;
+      anyTar = true;
+      if (t > bestTar || (t === bestTar && (best == null || c > best))) { bestTar = t; best = c; }
+    }
+    return anyTar ? best : Math.max(...list);
+  },
+
   // Классы по каждому ОКЭД (в порядке _okedList).
   _computedClasses(r) {
     return BatchAR._okedList(r).map(o => BatchAR._classOf(o));
   },
 
-  // Макс. класс среди ОКЭД — для определения расхождения с выгрузкой.
+  // «Правильный» класс среди ОКЭД страхователя — с НАИБОЛЬШИМ ТАРИФОМ (не номером).
   _computedClass(r) {
     const list = BatchAR._computedClasses(r).filter(c => c != null);
-    return list.length ? Math.max(...list) : null;
+    return list.length ? BatchAR._maxTariffClass(list) : null;
   },
 
   // ОКЭД: сверху — из выгрузки, снизу в скобках — из stat.gov.kz (все коды по порядку).
@@ -1070,7 +1096,7 @@ const BatchAR = {
       contrClassCell.classList.toggle('batch-cell--err', ccErr);
       contrClassCell.classList.toggle('batch-cell--warn', !ccErr && contrClassDiffBin);
       if (contrClassWrongBin) contrClassCell.title = `Класс контрагента в выгрузке (${BatchAR._contrClass(r)}) отсутствует среди классов по его ОКЭД из stat.gov.kz`;
-      else if (contrClassDiffBin) contrClassCell.title = `Класс контрагента ${BatchAR._contrClass(r)} есть среди ОКЭД, но не максимальный (макс. ${BatchAR._contrComputedClass(r)})`;
+      else if (contrClassDiffBin) contrClassCell.title = `Класс контрагента ${BatchAR._contrClass(r)} есть среди ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})`;
       else if (contrTarErr) contrClassCell.title = 'Тариф не соответствует классу контрагента по справочнику';
       else contrClassCell.removeAttribute('title');
     }

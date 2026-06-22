@@ -1803,60 +1803,96 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   text-transform: uppercase;
 }
 
-/* ИИ-советник по ОКЭД/классу (кнопки сервисов + «Скопировать промпт») */
+/* ИИ-советник по ОКЭД/классу — чистая панель с ровными чипами сервисов */
 .oked-advisor {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid #f1f5f9;
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: #f6f7fd;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-lg);
+}
+.oked-advisor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 .oked-advisor-title {
-  font-size: 0.72rem;
+  position: relative;
+  padding-left: 12px;
+  font-size: 0.95rem;
   font-weight: 700;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 10px;
+  color: var(--c-brand-800);
+  letter-spacing: -0.01em;
 }
-.oked-advisor-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: stretch;
+.oked-advisor-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  bottom: 1px;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--c-brand-500), var(--c-brand-700));
 }
-.oked-advisor-buttons .btn-ai {
-  flex: 1 1 160px;
-  min-width: 150px;
-  padding: 10px 14px;
-  font-size: 0.85rem;
-}
-.btn-ai--grok {
-  background: linear-gradient(135deg, #1f2937 0%, #0b0f19 100%);
-}
-.btn-copy-prompt {
+.oked-advisor-copy {
   flex: 0 0 auto;
-  padding: 10px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
   border: 1px solid var(--c-border-default);
+  border-radius: var(--radius-sm);
   background: var(--c-surface-elevated);
   color: var(--c-text-secondary);
-  border-radius: 8px;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: background .15s, color .15s, border-color .15s;
 }
-.btn-copy-prompt:hover { background: var(--c-brand-50); color: var(--c-brand-700); border-color: var(--c-brand-100); }
-
-/* В блоке советника на вкладке андеррайтинга (отдельный маунт) — карточка. */
-#oked-advisor-mount .oked-advisor {
-  margin-top: 0;
-  margin-bottom: var(--sp-4);
-  padding: var(--sp-5) var(--sp-6);
-  border: 1px solid var(--c-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--c-surface-elevated);
-  box-shadow: var(--shadow-xs);
+.oked-advisor-copy svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.oked-advisor-copy:hover { background: var(--c-surface-sunken); color: var(--c-text-primary); border-color: var(--c-border-strong); }
+.oked-advisor-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
+.ai-chip {
+  flex: 1 1 168px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border-default);
+  border-radius: 10px;
+  background: var(--c-surface-elevated);
+  color: var(--c-text-primary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .12s ease;
+}
+.ai-chip:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.ai-chip:active { transform: translateY(0); }
+.ai-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.ai-chip-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.ai-chip--chatgpt .ai-chip-dot { background: #10a37f; }
+.ai-chip--chatgpt:hover { border-color: #10a37f; }
+.ai-chip--gemini .ai-chip-dot { background: #1a73e8; }
+.ai-chip--gemini:hover { border-color: #4285f4; }
+.ai-chip--perplexity .ai-chip-dot { background: #20808d; }
+.ai-chip--perplexity:hover { border-color: #20808d; }
+.ai-chip--grok .ai-chip-dot { background: #111827; }
+.ai-chip--grok:hover { border-color: #111827; }
+
+/* Маунт на вкладке андеррайтинга — отступ снизу от «1. Параметры страхования». */
+#oked-advisor-mount .oked-advisor { margin-top: 0; margin-bottom: var(--sp-4); }
 
 /* Преview-banners (affiliated / no-discount) */
 .pi-banner {

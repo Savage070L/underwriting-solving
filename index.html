@@ -386,7 +386,7 @@
     <section class="tab-panel" id="tab-contractor" role="tabpanel" aria-labelledby="tabbtn-contractor">
     <div class="section">
       <div class="section-title">Проверка контрагента по БИН</div>
-      <p class="section-sub">Введите БИН/ИИН — приложение проверит компанию в реестрах (stat.gov.kz, гос. участие, аффилированные лица, юр. адрес, дата регистрации). Без расчёта тарифа и без файла заявки.</p>
+      <p class="section-sub">Введите БИН/ИИН — приложение проверит компанию в реестрах (stat.gov.kz, гос. участие, аффилированные лица, юр. адрес, дата регистрации).</p>
       <div class="contractor-check">
         <div class="form-group">
           <label for="contractorBin">БИН / ИИН</label>
@@ -504,7 +504,7 @@
             <input type="text" id="manualClaimsCount" inputmode="numeric" maxlength="4" placeholder="0" oninput="this.value=this.value.replace(/\D/g,'')">
           </div>
         </div>
-        <div class="manual-input-hint" id="manual-hint">Заполните БИН, кол-во работников и хотя бы одно из: ФОТ или ср. зп.<br>Только проверить компанию по реестрам можно во вкладке «Проверка контрагента».</div>
+        <div class="manual-input-hint" id="manual-hint"></div>
         <div class="manual-input-actions">
           <button class="btn-manual-apply" id="btn-manual-apply" onclick="App.applyManualZayavka()">Применить</button>
         </div>
