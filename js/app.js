@@ -588,6 +588,8 @@ const App = {
     App.onOkedChange();
     // 2. Превью (если есть зайавка)
     if (App.zayavka) App.showPreview();
+    // 2b. Блок ИИ-советника по ОКЭД (всегда — '' когда нет компании/ОКЭДов).
+    App._renderOkedAdvisor();
     // 3. Кнопки (выбор организации зависит от normativ.fullAssetsTenge)
     App.updateButtons();
     // 4. Verdict-hint
@@ -2713,6 +2715,8 @@ const App = {
       const rowKey = renderItems([['БИН', z.bin], ['Дата регистрации', regVal], ['Гос. участие', sgGov]]);
       const rowName = renderItems([['Наименование', insurerName], ['Юридический адрес', legalAddress]]);
       const rowRisk = renderItems([['Класс риска', effClass || '—'], ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—']]);
+      // ИИ-советник: подобрать ОКЭД/класс для договора по ОКЭДам + должностям.
+      const advisorHtml = App._okedAdvisorHtml();
       const contractorHtml =
         badges.join('') +
         `<div class="preview-section preview-section--contractor">
@@ -2721,10 +2725,13 @@ const App = {
           <div class="ci-grid ci-grid--1">${rowName}</div>
           <div class="ci-grid ci-grid--2">${rowRisk}</div>
           ${okedsSubBlock}
+          ${advisorHtml}
         </div>` +
         sgStatus;
       cGrid.innerHTML = contractorHtml;
     }
+    // Блок советника на вкладке «Андеррайтинговое решение» (отдельный маунт).
+    App._renderOkedAdvisor();
   },
 
   togglePreviewDetails() {
@@ -2773,6 +2780,99 @@ const App = {
     }
     window.open(url, '_blank', 'noopener,noreferrer');
     App.copyToClipboard(prompt, btn);
+  },
+
+  // ===== ИИ-подбор ОКЭД/класса для договора (вкладка «Проверка контрагента») =====
+  // Строит промпт из ОКЭДов компании (код, наименование, класс, тариф) + место
+  // для вставки должностей. Возвращает строку или null, если ОКЭДов нет.
+  _buildOkedAdvisorPrompt() {
+    const okeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+    if (!okeds.length) return null;
+    const lines = okeds.map((o, i) => {
+      const kind = o.kind === 'primary' ? 'основной' : 'вторичный';
+      const cls = (o.riskClass != null) ? `класс ${o.riskClass}` : 'класс не определён';
+      const tarVal = (o.riskClass != null && App._resolveTariff) ? App._resolveTariff(o.riskClass) : o.tariff;
+      const tar = (tarVal != null && !isNaN(tarVal)) ? `тариф ${Utils.fmtPct(tarVal)}` : 'тариф не определён';
+      return `${i + 1}. ${o.code} — ${o.name || 'наименование не в классификаторе'} (${kind}; ${cls}; ${tar})`;
+    }).join('\n');
+    return [
+      'Ты — андеррайтер ОСНС (Казахстан).',
+      '',
+      'Тебе даны зарегистрированные ОКЭД страхователя и штатное расписание.',
+      '',
+      'Задача: выбери из предоставленных ОКЭД тот, который наиболее точно отражает фактическую деятельность работников, и укажи итоговый ОКЭД, класс риска и тариф для заключения договора ОСНС.',
+      '',
+      'Формат ответа:',
+      '① Таблица: Должность | Фактический вид деятельности | Примененимый ОКЭД',
+      '② Обоснование выбора (3–5 предложений)',
+      '③ Итог: ОКЭД / Класс риска / Тариф',
+      '',
+      'Если ни один ОКЭД не соответствует факту — укажи это явно.',
+      '',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      'ОКЭДЫ СТРАХОВАТЕЛЯ:',
+      lines,
+      '',
+      'ШТАТНОЕ РАСПИСАНИЕ:',
+      '[ВСТАВЬТЕ СПИСОК ДОЛЖНОСТЕЙ И ЧИСЛЕННОСТЬ]',
+    ].join('\n');
+  },
+
+  _AI_LABELS: { chatgpt: 'ChatGPT', gemini: 'Gemini', perplexity: 'Perplexity', grok: 'Grok' },
+
+  // Открывает выбранный ИИ-сервис с уже вставленным промптом + копирует в буфер.
+  askOkedAdvisor(service, btn) {
+    const prompt = App._buildOkedAdvisorPrompt();
+    if (!prompt) {
+      App.showMsg('Сначала проверьте компанию по БИН — нужны ОКЭДы.', 'error');
+      return;
+    }
+    const enc = encodeURIComponent(prompt);
+    // ?q= префилл. Кириллица в encodeURIComponent раздувает длину (1 символ → 6),
+    // поэтому держим запас: лимит ~8000. Если не уместилось — открываем без
+    // префилла; промпт всё равно в буфере (его можно вставить вручную).
+    const fits = enc.length <= 8000;
+    let url;
+    switch (service) {
+      case 'gemini':     url = 'https://gemini.google.com/app'; break; // ?q= не поддерживает — только буфер
+      case 'perplexity': url = fits ? `https://www.perplexity.ai/?q=${enc}` : 'https://www.perplexity.ai/'; break;
+      case 'grok':       url = fits ? `https://grok.com/?q=${enc}` : 'https://grok.com/'; break;
+      case 'chatgpt':
+      default:           url = fits ? `https://chatgpt.com/?q=${enc}` : 'https://chatgpt.com/';
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    App.copyToClipboard(prompt, btn);
+    App.showMsg(`Промпт скопирован в буфер и открыт в ${App._AI_LABELS[service] || 'ИИ'}. Вставьте штатное расписание и нажмите «Отправить».`, 'success');
+  },
+
+  // Копирует промпт ОКЭД-советника в буфер (кнопка «Скопировать промпт»).
+  copyOkedAdvisorPrompt(btn) {
+    const prompt = App._buildOkedAdvisorPrompt();
+    if (!prompt) { App.showMsg('Сначала проверьте компанию по БИН — нужны ОКЭДы.', 'error'); return; }
+    App.copyToClipboard(prompt, btn);
+  },
+
+  // HTML блока ИИ-советника (кнопки сервисов + «Скопировать промпт»). '' если нет ОКЭДов.
+  _okedAdvisorHtml() {
+    if (!App._buildOkedAdvisorPrompt()) return '';
+    return `
+      <div class="oked-advisor">
+        <div class="oked-advisor-title">Подобрать ОКЭД и класс для договора (ИИ)</div>
+        <div class="oked-advisor-buttons">
+          <button type="button" class="btn-ai btn-ai--chatgpt" onclick="App.askOkedAdvisor('chatgpt', this)"><span class="ai-icon">💬</span><span>Спросить у ChatGPT</span></button>
+          <button type="button" class="btn-ai btn-ai--gemini" onclick="App.askOkedAdvisor('gemini', this)"><span class="ai-icon">✨</span><span>Спросить у Gemini</span></button>
+          <button type="button" class="btn-ai btn-ai--perplexity" onclick="App.askOkedAdvisor('perplexity', this)"><span class="ai-icon">🔍</span><span>Спросить у Perplexity</span></button>
+          <button type="button" class="btn-ai btn-ai--grok" onclick="App.askOkedAdvisor('grok', this)"><span class="ai-icon">✕</span><span>Спросить у Grok</span></button>
+          <button type="button" class="btn-copy-prompt" onclick="App.copyOkedAdvisorPrompt(this)">⧉ Скопировать промпт</button>
+        </div>
+      </div>`;
+  },
+
+  // Рендерит блок советника в маунт на вкладке «Андеррайтинговое решение»
+  // (перед «1. Параметры страхования»). На вкладке контрагента блок вшит в профиль.
+  _renderOkedAdvisor() {
+    const mount = document.getElementById('oked-advisor-mount');
+    if (mount) mount.innerHTML = App._okedAdvisorHtml();
   },
 
   // Копирует значение в буфер обмена. Показывает анимацию на кнопке.

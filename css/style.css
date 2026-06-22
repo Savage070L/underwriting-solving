@@ -1803,6 +1803,61 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
   text-transform: uppercase;
 }
 
+/* ИИ-советник по ОКЭД/классу (кнопки сервисов + «Скопировать промпт») */
+.oked-advisor {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+.oked-advisor-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.oked-advisor-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+.oked-advisor-buttons .btn-ai {
+  flex: 1 1 160px;
+  min-width: 150px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+}
+.btn-ai--grok {
+  background: linear-gradient(135deg, #1f2937 0%, #0b0f19 100%);
+}
+.btn-copy-prompt {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border: 1px solid var(--c-border-default);
+  background: var(--c-surface-elevated);
+  color: var(--c-text-secondary);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.btn-copy-prompt:hover { background: var(--c-brand-50); color: var(--c-brand-700); border-color: var(--c-brand-100); }
+
+/* В блоке советника на вкладке андеррайтинга (отдельный маунт) — карточка. */
+#oked-advisor-mount .oked-advisor {
+  margin-top: 0;
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface-elevated);
+  box-shadow: var(--shadow-xs);
+}
+
 /* Преview-banners (affiliated / no-discount) */
 .pi-banner {
   margin-bottom: 12px;
