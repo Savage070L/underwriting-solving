@@ -3155,6 +3155,23 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 }
 .batch-sort-errors:hover { background: #fef2f2; }
 .batch-sort-errors.is-active { background: #fee2e2; border-color: #ef4444; }
+/* «Сначала транши» — нейтрально-индиго (не красная, как ошибки). */
+.batch-sort-tranche { border-color: #c7d2fe; color: #4338ca; }
+.batch-sort-tranche:hover { background: #eef2ff; }
+.batch-sort-tranche.is-active { background: #e0e7ff; border-color: #6366f1; }
+/* Столбец «Транш оплаты». */
+.batch-c-tranche { text-align: center; vertical-align: top; }
+.batch-tranche { display: inline-block; font-variant-numeric: tabular-nums; }
+.batch-tranche--once { color: #94a3b8; font-weight: 600; }
+.batch-tranche--split {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  font-weight: 700;
+}
 
 .batch-progress { margin-top: 12px; }
 .batch-progress-track {

@@ -126,6 +126,11 @@ const BatchAR = {
   // Возвращает массив ОРИГИНАЛЬНЫХ индексов (data-idx и «#» остаются исходными).
   _displayOrder() {
     const idxs = BatchAR.rows.map((_, i) => i);
+    // «Сначала транши» — по убыванию числа траншей рассрочки (наибольшее сверху).
+    if (BatchAR._sortByTranche) {
+      const cnt = BatchAR.rows.map((r) => BatchAR._trancheCount(r) || 0);
+      return idxs.sort((a, b) => cnt[b] - cnt[a]); // стабильно в совр. JS
+    }
     if (!BatchAR._sortByError) return idxs;
     // Уровень строки считаем ОДИН раз на строку (а не на каждое сравнение) — иначе при
     // тысячах строк сортировка пересчитывала _rowLevel десятки тысяч раз и подвешивала UI.
@@ -134,6 +139,13 @@ const BatchAR = {
   },
   toggleSortByError() {
     BatchAR._sortByError = !BatchAR._sortByError;
+    if (BatchAR._sortByError) BatchAR._sortByTranche = false; // режимы взаимоисключающие
+    BatchAR.renderTable();
+    BatchAR._updateControls();
+  },
+  toggleSortByTranche() {
+    BatchAR._sortByTranche = !BatchAR._sortByTranche;
+    if (BatchAR._sortByTranche) BatchAR._sortByError = false;
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
@@ -240,6 +252,7 @@ const BatchAR = {
         <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
         <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
+        <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
         <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
@@ -247,6 +260,23 @@ const BatchAR = {
       </tr>`;
     }).join('');
     BatchAR._tableVersion++;
+  },
+
+  // Кол-во траншей рассрочки (по числу заполненных этапов «Этап{N}Сумма»).
+  // null = единовременно / не рассрочка → в таблице «—».
+  _trancheCount(r) {
+    if (!/рассроч/i.test(String(r.paymentOrder || ''))) return null;
+    const tr = Array.isArray(r.tranches) ? r.tranches : [];
+    const bySum = tr.filter(t => t && t.amount != null).length; // считаем этапы с суммой
+    const n = bySum > 0 ? bySum : tr.length;
+    return n > 0 ? n : null;
+  },
+  // Ячейка «Транш оплаты»: «—» при единовременной оплате, иначе число траншей.
+  _trancheCell(r) {
+    const n = BatchAR._trancheCount(r);
+    if (n == null) return '<span class="batch-tranche batch-tranche--once">—</span>';
+    const word = (typeof Utils !== 'undefined' && Utils.pluralize) ? Utils.pluralize(n, 'транш', 'транша', 'траншей') : 'траншей';
+    return `<span class="batch-tranche batch-tranche--split" title="Рассрочка: ${n} ${word}">${n}</span>`;
   },
 
   // ПК: 1 (стандарт, зелёный) или 0,9 (со скидкой, синий).
@@ -1856,6 +1886,12 @@ const BatchAR = {
       btnSort.style.display = BatchAR.rows.length ? '' : 'none';
       btnSort.classList.toggle('is-active', !!BatchAR._sortByError);
       btnSort.textContent = BatchAR._sortByError ? '⚑ Ошибки сверху ✓' : '⚑ Сначала ошибки';
+    }
+    const btnSortTr = document.getElementById('batch-sort-tranche');
+    if (btnSortTr) {
+      btnSortTr.style.display = BatchAR.rows.length ? '' : 'none';
+      btnSortTr.classList.toggle('is-active', !!BatchAR._sortByTranche);
+      btnSortTr.textContent = BatchAR._sortByTranche ? '⏳ Транши сверху ✓' : '⏳ Сначала транши';
     }
     const btnClear = document.getElementById('batch-clear');
     if (btnClear) btnClear.style.display = BatchAR.rows.length ? '' : 'none';

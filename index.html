@@ -276,6 +276,7 @@
 
         <div class="batch-toolbar" id="batch-toolbar" style="display:none">
           <button class="batch-sort-errors" id="batch-sort-errors" type="button" onclick="BatchAR.toggleSortByError()" title="Показать сначала красные строки, затем жёлтые">⚑ Сначала ошибки</button>
+          <button class="batch-sort-errors batch-sort-tranche" id="batch-sort-tranche" type="button" onclick="BatchAR.toggleSortByTranche()" title="Показать сначала договоры с наибольшим числом траншей рассрочки (по убыванию)">⏳ Сначала транши</button>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
 
@@ -296,11 +297,11 @@
             <!-- Фиксированная раскладка: ширины колонок в % → таблица всегда = ширине
                  контейнера (без горизонтального скролла); содержимое переносится. -->
             <colgroup>
-              <col style="width:3.1%"><col style="width:6.3%"><col style="width:7.8%"><col style="width:7.8%">
+              <col style="width:3.1%"><col style="width:6%"><col style="width:7.8%"><col style="width:7.8%">
               <col style="width:4.3%"><col style="width:3.9%"><col style="width:3.9%"><col style="width:3%">
               <col style="width:7%"><col style="width:7.4%"><col style="width:7.4%"><col style="width:2.6%">
-              <col style="width:6.9%"><col style="width:6.9%"><col style="width:7.5%"><col style="width:2.9%">
-              <col style="width:7.7%"><col style="width:3.6%">
+              <col style="width:6.9%"><col style="width:6.9%"><col style="width:3.5%"><col style="width:6.5%">
+              <col style="width:2.9%"><col style="width:5.5%"><col style="width:3.6%">
             </colgroup>
             <thead>
               <tr>
@@ -318,6 +319,7 @@
                 <th class="batch-c-center" title="ПК — поправочный коэффициент: 1 — стандарт, 0,9 — со скидкой.">ПК</th>
                 <th class="batch-c-num2 batch-c-prem" title="СП (страхователь) → СП (С). Страховая премия — стоимость страховки (взнос), которую платит страхователь (клиент). Снизу: Σ СП контрагентов.">СП<br>(С)</th>
                 <th class="batch-c-num2" title="СП (контрагент) → СП (К). Страховая премия (взнос) по контрагенту (филиалу). Снизу: расчётная СС×тариф×ПК.">СП<br>(К)</th>
+                <th class="batch-c-tranche" title="Транш оплаты. «—» — оплата единовременно; число — количество траншей рассрочки (по заполненным этапам оплаты из выгрузки).">Транш<br>оплаты</th>
                 <th class="batch-c-reg" title="Дата регистрации (страхователь) → Дата рег. (С). Дата официальной регистрации компании-клиента (stat.gov.kz / kyc.kz).">Дата рег.<br>(С)</th>
                 <th class="batch-c-gov" title="Государственное участие / доля → Гос. доля. Процент владения компании государством. Сверху: из выгрузки; снизу: по реестру e-Qazyna.">Гос.<br>доля</th>
                 <th class="batch-c-author" title="Менеджер → Ответственный менеджер. Сотрудник страховой компании, который ввёл данную сделку (из выгрузки).">Менеджер</th>

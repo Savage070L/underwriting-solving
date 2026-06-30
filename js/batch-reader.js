@@ -159,10 +159,12 @@ const BatchReader = {
     const out = [];
     for (const st of etapCols) {
       const dRaw = (st.dateIdx >= 0 && st.dateIdx < row.length) ? row[st.dateIdx] : null;
-      const d = BatchReader._date(dRaw);
-      if (!d) break; // пустая дата этапа — дальше траншей нет
       const sRaw = (st.sumIdx >= 0 && st.sumIdx < row.length) ? row[st.sumIdx] : null;
-      out.push({ date: d, amount: BatchReader._money(sRaw) });
+      const d = BatchReader._date(dRaw);
+      const amount = BatchReader._money(sRaw);
+      // Граница: этап полностью пуст (нет ни даты, ни суммы) → дальше траншей нет.
+      if (d == null && amount == null) break;
+      out.push({ date: d, amount });
     }
     return out;
   },
