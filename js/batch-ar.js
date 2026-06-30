@@ -252,10 +252,10 @@ const BatchAR = {
         <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
         <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
         <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
-        <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
         <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
+        <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
         <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
       </tr>`;
     }).join('');
