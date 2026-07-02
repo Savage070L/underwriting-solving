@@ -242,6 +242,11 @@
                 <input type="text" id="sgn-role-pravlenieMember2" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieMember2','role',this.value)">
                 <input type="text" id="sgn-pravlenieMember2" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieMember2','name',this.value)">
               </div>
+              <div class="signer-row signer-row--editable" id="sgn-row-pravlenieMember3">
+                <input type="checkbox" id="sgn-skip-pravlenieMember3" checked onchange="App.onSignerOverride('pravlenieMember3','skip',!this.checked)">
+                <input type="text" id="sgn-role-pravlenieMember3" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieMember3','role',this.value)">
+                <input type="text" id="sgn-pravlenieMember3" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieMember3','name',this.value)">
+              </div>
               <div class="signer-row signer-row--solo" id="sgn-row-pravlenieSecretary">
                 <input type="text" id="sgn-role-pravlenieSecretary" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('pravlenieSecretary','role',this.value)">
                 <input type="text" id="sgn-pravlenieSecretary" placeholder="ФИО" oninput="App.onSignerOverride('pravlenieSecretary','name',this.value)">

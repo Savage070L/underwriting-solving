@@ -1160,7 +1160,7 @@ const App = {
   // Роли остаются hardcoded — они меняются редко, а ФИО гораздо чаще.
   SIGNERS_DEFAULTS: {
     // Solo positions
-    sdChair:          'М.К. Альжанов',     // Председатель Совета директоров (адресат СЗ на СД)
+    sdChair:          'М.К. Альжанову',    // Председатель Совета директоров (адресат СЗ на СД, дат. падеж)
     pravlenieChair:   'Г. Амерходжаев',    // Председатель Правления (адресат СЗ на Правление)
     daipDirector:     'Бурханов Д.К.',   // Директор ДАиП (подписант СЗ)
     upravDir:         'Аринов Д.С.',       // Управляющий директор
@@ -1176,6 +1176,7 @@ const App = {
     pravlenieMember0: 'Амерходжаев Г.Т.',  // Председатель Правления
     pravlenieMember1: 'Кныкова А.У.',      // Заместитель Председателя Правления, член Правления
     pravlenieMember2: 'Аринов Д.С.',       // Заместитель Председателя Правления, член Правления
+    pravlenieMember3: 'Ашимов Д.А.',       // Заместитель Председателя Правления, член Правления
     pravlenieSecretary: 'Боева И.В.',      // Секретарь Правления
   },
 
@@ -1195,6 +1196,7 @@ const App = {
     pravlenieMember0: 'Председатель Правления',
     pravlenieMember1: 'Заместитель Председателя Правления, член Правления',
     pravlenieMember2: 'Заместитель Председателя Правления, член Правления',
+    pravlenieMember3: 'Заместитель Председателя Правления, член Правления',
     pravlenieSecretary: 'Секретарь Правления',
   },
 
@@ -1251,7 +1253,7 @@ const App = {
       .map(k => [App._getSignerRole(k), App._getSigner(k)]);
 
     Utils.AS_MEMBERS = buildMembers(['asMember0','asMember1','asMember2','asMember3','asMember4','asMember5']);
-    Utils.PRAVLENIE_MEMBERS = buildMembers(['pravlenieMember0','pravlenieMember1','pravlenieMember2']);
+    Utils.PRAVLENIE_MEMBERS = buildMembers(['pravlenieMember0','pravlenieMember1','pravlenieMember2','pravlenieMember3']);
   },
 
   // Обработчик изменений на инпутах подписанта.

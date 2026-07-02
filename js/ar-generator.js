@@ -22,11 +22,16 @@ const ARGenerator = {
       : (verdict === 'accept_adjusted' ? autoDecision : autoDecision);
     const organName = Utils.getOrganName(organ);
     const organNameHeader = Utils.getOrganNameHeader(organ);
-    const members = organ === 'pravlenie' ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
-    const secretary = organ === 'pravlenie' ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;
-    const secretaryTitle = organ === 'pravlenie'
+    // Правление и Совет директоров используют ОДИН состав (члены Правления):
+    // в подписном блоке АР — «Члены Правления» и члены Правления даже при лимитах СД.
+    const isPravlOrSd = (organ === 'pravlenie' || organ === 'sd');
+    const members = isPravlOrSd ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
+    const secretary = isPravlOrSd ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;
+    const secretaryTitle = isPravlOrSd
       ? 'Секретарь Правления:'
       : 'Секретарь Андеррайтингового Совета:';
+    // Заголовок «Члены …»: для Правления и СД — «Правления»; для АС — «Андеррайтингового Совета».
+    const membersHeader = isPravlOrSd ? 'Правления' : organNameHeader;
     const dateShort = Utils.fmtDateShort(data.docDate);
     const dateRu = Utils.fmtDateRu(data.docDate);
 
@@ -301,7 +306,7 @@ const ARGenerator = {
     // Group header + tables into "signatureBlock" array referenced below
     const signatureParagraphs = [
       new Paragraph({
-        children: [tr(`Члены ${organNameHeader}: `, { bold: false })],
+        children: [tr(`Члены ${membersHeader}: `, { bold: false })],
         alignment: AlignmentType.LEFT,
         spacing: { line: 360 },
       }),

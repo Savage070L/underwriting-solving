@@ -21,7 +21,7 @@ const Utils = {
 
   // Совет директоров (адресат СЗ на СД)
   SD_CHAIR_ROLE: 'Председатель Совета директоров',
-  SD_CHAIR_NAME: 'М.К. Альжанов',
+  SD_CHAIR_NAME: 'М.К. Альжанову',
 
   // Кто подписывает СЗ
   DAIP_DIRECTOR_ROLE: 'Директор ДАиП',
@@ -48,6 +48,7 @@ const Utils = {
     ['Председатель Правления', 'Амерходжаев Г.Т.'],
     ['Заместитель Председателя Правления, член Правления', 'Кныкова А.У.'],
     ['Заместитель Председателя Правления, член Правления', 'Аринов Д.С.'],
+    ['Заместитель Председателя Правления, член Правления', 'Ашимов Д.А.'],
   ],
 
   PRAVLENIE_SECRETARY: 'Боева И.В.',
@@ -82,6 +83,13 @@ const Utils = {
     'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
   ],
 
+  // Месяцы в РОДИТЕЛЬНОМ падеже — для дат «02 июля 2026» (день числом, месяц
+  // прописью, год числом). Именительные (RUSSIAN_MONTHS) для дат НЕ используем.
+  RUSSIAN_MONTHS_GEN: [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ],
+
   // ===== FORMATTING FUNCTIONS =====
 
   // Format date as DD.MM.YYYY
@@ -99,7 +107,7 @@ const Utils = {
     if (!date) return '';
     if (!(date instanceof Date)) date = Utils.parseExcelDate(date);
     const dd = String(date.getDate()).padStart(2, '0');
-    const month = Utils.RUSSIAN_MONTHS[date.getMonth()];
+    const month = Utils.RUSSIAN_MONTHS_GEN[date.getMonth()];
     const yyyy = date.getFullYear();
     return `«${dd}» ${month} ${yyyy}г.`;
   },

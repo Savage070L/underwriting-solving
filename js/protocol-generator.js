@@ -64,11 +64,11 @@ const ProtocolGenerator = {
     // Format date
     const docDate = data.docDate ? new Date(data.docDate) : new Date();
     const day = String(docDate.getDate()).padStart(2, '0');
-    const monthNom = ProtocolGenerator.MONTHS_NOM[docDate.getMonth()];
+    const monthGen = ProtocolGenerator.MONTHS_GEN[docDate.getMonth()];
     const year = docDate.getFullYear();
     // NBSP ( ) между числом, месяцем, годом и «г.» — чтобы дата подписи
     // не переносилась по словам в узкой колонке табличного подписного блока.
-    const dateLine = `«${day}» ${monthNom} ${year} г.`;
+    const dateLine = `«${day}» ${monthGen} ${year} г.`;
     const dateDot = `${day}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${year} г.`;
 
     const companyName = Utils.formatCompanyName(data.insurerName);
