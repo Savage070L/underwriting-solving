@@ -77,9 +77,8 @@ const ProtocolGenerator = {
     // Решение по риску из блока «Решение по риску» (ручной выбор или авто).
     // Финальная формулировка «Принято РЕШЕНИЕ» должна идти именно из него —
     // иначе протокол расходится с принятым решением (стандарт/со скидкой/откл.).
-    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
-    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
-    const conditionText = Utils.acceptanceConditionText(verdict, autoDecision);
+    // Единый источник (Utils.acceptedConditions): вердикт андеррайтера главнее алгоритма.
+    const { verdict, conditionText } = Utils.acceptedConditions(data);
 
     // Page width A4 - 2×1134 twips margins = 9638 twips usable
     const COL_TOTAL = 9638;

@@ -361,6 +361,7 @@
     if (z.coeffDown != null && z.coeffDown > 0) contractRows.push(['Понижающий коэффициент', fmtPct(z.coeffDown * 100, 1)]);
     if (z.noDiscountReason === 'young_company') contractRows.push(['Скидка не применяется', 'компания младше 3 лет']);
     else if (z.noDiscountReason === 'claims') contractRows.push(['Скидка не применяется', 'были НС за 3 года']);
+    else if (z.noDiscountReason === 'below_min_premium') contractRows.push(['Скидка не применяется', 'премия со скидкой ниже 1 МЗП']);
     contractRows.push(['Период страхования', z.periodFrom && z.periodTo
       ? `${fmtDate(z.periodFrom)} — ${fmtDate(z.periodTo)}` : '—']);
     contractRows.push(['Порядок оплаты', z.paymentOrder || '—']);

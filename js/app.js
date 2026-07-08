@@ -295,6 +295,9 @@ const App = {
           const datePart = regDate ? `, зарегистрирована ${regDate}` : '';
           const agePart = age ? ` (возраст ≈ ${age})` : '';
           noDiscountNote = ` (скидка не применяется — компания младше 3 лет${datePart}${agePart})`;
+        } else if (effCoeff.noDiscountReason === 'below_min_premium') {
+          const minP = App._getLimit('minPremium') || 85000;
+          noDiscountNote = ` (скидка не применяется — со скидкой премия была бы ниже 1 МЗП ${Utils.fmtMoney(minP)})`;
         }
         const lrWarn = App._verdictLrWarning();
         hintText = `Авто-решение: «${safeLabel}»${noDiscountNote}${lrWarn ? '. ' + lrWarn : ''}. Можно переопределить вручную в списке выше.`;
@@ -403,9 +406,11 @@ const App = {
   // Эффективные значения коэффициента и премии-с-поправкой с учётом правил:
   //  - НС за последние 3 года → скидка не применяется
   //  - Возраст компании < 3 лет → скидка не применяется (даже при отсутствии НС)
+  //  - Премия ПОСЛЕ ПК < 1 МЗП (85 000 ₸) → скидка не применяется (методология ОСНС)
   // Возвращает { coeffDown, premiumWithCoeff, noDiscountReason, ageYears }.
   _effectiveCoeffInfo(z) {
     if (!z) return { coeffDown: 0, premiumWithCoeff: 0, noDiscountReason: null, ageYears: null };
+    const minPremium = App._getLimit('minPremium') || 85000;
     // Кол-во НС: из файла истории убытков, иначе из ручного ввода (z._manualClaimsCount).
     const claimsCount = App._effectiveClaimsCount(z);
     const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
@@ -414,7 +419,7 @@ const App = {
     const refDate = z.periodFrom || z.docDate || new Date();
     const ageYears = Utils.companyAgeYears(regDateRaw, refDate);
     const isYoung = ageYears != null && ageYears < App._getLimit('minCompanyAgeYears');
-    const noDiscountReason = (claimsCount > 0)
+    let noDiscountReason = (claimsCount > 0)
       ? 'claims'
       : (isYoung ? 'young_company' : null);
     // Понижающий коэффициент (скидка):
@@ -424,16 +429,28 @@ const App = {
     //   • снимается в 0, если есть НС или компания моложе порога.
     const explicitDown = (z.coeffDown != null && z.coeffDown > 0) ? z.coeffDown : 0;
     const autoDown = App._getLimit('defaultDiscount') || 0;
-    const coeffDown = noDiscountReason ? 0 : (explicitDown || autoDown);
+    let coeffDown = noDiscountReason ? 0 : (explicitDown || autoDown);
     // Премия с ПК пересчитывается от ЭФФЕКТИВНОГО коэффициента — иначе авто-скидка
     // не отразилась бы в сумме (z.premiumWithCoeff мог быть посчитан без скидки —
     // в ручном вводе или при пустом D16). coeffUp (повышающий) учитываем всегда.
     const coeffUp = (z.coeff != null && Number.isFinite(z.coeff)) ? z.coeff : 1;
-    let premiumWithCoeff;
-    if (z.premiumBase != null && Number.isFinite(z.premiumBase)) {
-      premiumWithCoeff = App._round2(z.premiumBase * coeffUp * (1 - coeffDown));
-    } else {
-      premiumWithCoeff = (z.premiumWithCoeff != null ? z.premiumWithCoeff : z.premiumBase);
+    const calcPremium = (down) => {
+      if (z.premiumBase != null && Number.isFinite(z.premiumBase)) {
+        return App._round2(z.premiumBase * coeffUp * (1 - down));
+      }
+      return (z.premiumWithCoeff != null ? z.premiumWithCoeff : z.premiumBase);
+    };
+    let premiumWithCoeff = calcPremium(coeffDown);
+    // ГЛОБАЛЬНОЕ ПРАВИЛО (методология ОСНС): страховая премия ПОСЛЕ ПК не может быть
+    // меньше 1 МЗП (85 000 ₸). Если понижающий коэффициент опустил бы премию ниже
+    // минимума — скидка НЕ применяется вовсе (снимается полностью, а не «подрезается»).
+    // Повышающий коэффициент (coeffUp) при этом сохраняется. Порог сравниваем с
+    // допуском в пол-тиына, чтобы ровно 85 000 после ПК считалось допустимым.
+    if (coeffDown > 0 && Number.isFinite(premiumWithCoeff)
+        && premiumWithCoeff < minPremium - 0.005) {
+      coeffDown = 0;
+      if (!noDiscountReason) noDiscountReason = 'below_min_premium';
+      premiumWithCoeff = calcPremium(0);
     }
     return { coeffDown, premiumWithCoeff, noDiscountReason, ageYears };
   },
@@ -1999,7 +2016,9 @@ const App = {
   },
 
   // Обновляет нижнюю подсказку (зелёная/красная/нейтральная).
-  // Для аффилированных лиц — другая подсказка: фикс. ставка, пакет СД.
+  // Для аффилированных лиц — отдельная подсказка про пакет документов СД.
+  // ВАЖНО: аффилированность НЕ влияет на скидку/ставку (никакой авто-скидки для
+  // аффилированных нет) — меняется только орган (СД) и состав пакета документов.
   _updateManualHint() {
     const hint = document.getElementById('manual-hint');
     if (!hint) return;
@@ -2658,6 +2677,8 @@ const App = {
     const badges = [];
     if (effFin.noDiscountReason === 'young_company') {
       badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: компания младше 3 лет (возраст ≈ ${effFin.ageYears.toFixed(1)} г.)</div>`);
+    } else if (effFin.noDiscountReason === 'below_min_premium') {
+      badges.push(`<div class="pi-banner pi-banner--warn">⚠ Скидка не применяется: со скидкой премия была бы ниже 1 МЗП (${Utils.fmtMoney(App._getLimit('minPremium') || 85000)})</div>`);
     }
 
     // Статус-плашка stat.gov.kz (loading/error/not-found)
@@ -2767,23 +2788,9 @@ const App = {
       `Расскажи кратко о компании. Наименование: ${name}, БИН: ${bin}. ` +
       `Максимум 4 предложений как один абзац — чем они занимаются ` +
       `и сделай краткий вывод. Используй веб-поиск.`;
-    const enc = encodeURIComponent(prompt);
-    let url = '';
-    switch (service) {
-      case 'chatgpt':
-        // hints=search активирует режим веб-поиска
-        url = `https://chatgpt.com/?hints=search&q=${enc}`;
-        break;
-      case 'gemini':
-        // Gemini не поддерживает ?q= параметр — открываем главную, промпт в буфере.
-        url = 'https://gemini.google.com/app';
-        break;
-      case 'perplexity':
-        url = `https://www.perplexity.ai/?q=${enc}`;
-        break;
-      default:
-        url = `https://chatgpt.com/?hints=search&q=${enc}`;
-    }
+    // Через общий помощник: если промпт вдруг не влезет в URL — откроем сервис
+    // без префилла (промпт всё равно в буфере), а не сломанной ссылкой.
+    const { url } = App._aiServiceUrl(service, prompt, null);
     window.open(url, '_blank', 'noopener,noreferrer');
     App.copyToClipboard(prompt, btn);
   },
@@ -2834,31 +2841,80 @@ const App = {
     ].join('\n');
   },
 
+  // Короткая версия промпта ОКЭД-советника — для авто-подстановки в URL ?q=,
+  // когда полный промпт слишком длинный (иначе ChatGPT/Perplexity отдают ошибку
+  // «сообщение слишком длинное»). Тот же смысл, без развёрнутого формата; список
+  // ОКЭД компактный (код + класс). Коды — цифры, они URL почти не раздувают.
+  _buildOkedAdvisorPromptShort() {
+    if (!App.zayavka) return null;
+    let okeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
+    if (!okeds.length && App._resolveOked) {
+      const r = App._resolveOked();
+      if (r && r.oked) okeds = [{ code: r.oked, riskClass: (r.riskClass != null ? r.riskClass : null) }];
+    }
+    const list = okeds.length
+      ? okeds.map(o => o.code + (o.riskClass != null ? ` (кл.${o.riskClass})` : '')).join(', ')
+      : '(ОКЭД не определён — укажите ОКЭД(ы) компании)';
+    return [
+      'Ты андеррайтер ОСНС (Казахстан). Из ОКЭД страхователя выбери тот, что точнее',
+      'всего отражает деятельность работников, и укажи итог: ОКЭД / класс риска / тариф.',
+      'Дай краткое обоснование (3–5 предложений).',
+      'ОКЭД страхователя: ' + list + '.',
+      'Штатное расписание вставлю ниже текстом или приложу скриншотом.',
+    ].join('\n');
+  },
+
+  // Безопасная длина ЗАКОДИРОВАННОГО ?q= (URL). Кириллица в encodeURIComponent
+  // раздувается ~в 6 раз, поэтому длинный промпт легко пробивает лимит браузера
+  // (~8 КБ) и ?q= ChatGPT — из-за чего страница открывалась с ошибкой. Держим
+  // с запасом ниже проблемной зоны (раньше здесь стояло 8000 — оно и давало сбои).
+  _AI_URL_MAX: 4000,
+
+  _AI_SERVICE_URLS: {
+    chatgpt:    { q: 'https://chatgpt.com/?hints=search&q=', bare: 'https://chatgpt.com/?hints=search' },
+    perplexity: { q: 'https://www.perplexity.ai/?q=',        bare: 'https://www.perplexity.ai/' },
+    grok:       { q: 'https://grok.com/?q=',                 bare: 'https://grok.com/' },
+    gemini:     { q: null,                                   bare: 'https://gemini.google.com/app' }, // ?q= не поддерживает
+  },
+
+  // Строит URL сервиса, гарантированно укладываясь в лимит: пробует полный промпт,
+  // затем короткий (если передан), иначе открывает сервис без префилла. Полный
+  // промпт в любом случае кладётся в буфер вызывающим кодом.
+  // Возвращает { url, prefilled, usedShort }.
+  _aiServiceUrl(service, fullPrompt, shortPrompt) {
+    const base = App._AI_SERVICE_URLS[service] || App._AI_SERVICE_URLS.chatgpt;
+    if (!base.q) return { url: base.bare, prefilled: false, usedShort: false };
+    const candidates = [{ p: fullPrompt, short: false }, { p: shortPrompt, short: true }];
+    for (const c of candidates) {
+      if (!c.p) continue;
+      if (encodeURIComponent(c.p).length <= App._AI_URL_MAX) {
+        return { url: base.q + encodeURIComponent(c.p), prefilled: true, usedShort: c.short };
+      }
+    }
+    return { url: base.bare, prefilled: false, usedShort: false };
+  },
+
   _AI_LABELS: { chatgpt: 'ChatGPT', gemini: 'Gemini', perplexity: 'Perplexity', grok: 'Grok' },
 
   // Открывает выбранный ИИ-сервис с уже вставленным промптом + копирует в буфер.
+  // Если полный промпт слишком длинный для URL — подставляем КОРОТКУЮ версию
+  // (иначе сервис отдавал ошибку по лимиту). Полный промпт всегда в буфере.
   askOkedAdvisor(service, btn) {
     const prompt = App._buildOkedAdvisorPrompt();
     if (!prompt) {
       App.showMsg('Сначала проверьте компанию по БИН — нужны ОКЭДы.', 'error');
       return;
     }
-    const enc = encodeURIComponent(prompt);
-    // ?q= префилл. Кириллица в encodeURIComponent раздувает длину (1 символ → 6),
-    // поэтому держим запас: лимит ~8000. Если не уместилось — открываем без
-    // префилла; промпт всё равно в буфере (его можно вставить вручную).
-    const fits = enc.length <= 8000;
-    let url;
-    switch (service) {
-      case 'gemini':     url = 'https://gemini.google.com/app'; break; // ?q= не поддерживает — только буфер
-      case 'perplexity': url = fits ? `https://www.perplexity.ai/?q=${enc}` : 'https://www.perplexity.ai/'; break;
-      case 'grok':       url = fits ? `https://grok.com/?q=${enc}` : 'https://grok.com/'; break;
-      case 'chatgpt':
-      default:           url = fits ? `https://chatgpt.com/?q=${enc}` : 'https://chatgpt.com/';
-    }
+    const { url, prefilled, usedShort } = App._aiServiceUrl(service, prompt, App._buildOkedAdvisorPromptShort());
     window.open(url, '_blank', 'noopener,noreferrer');
-    App.copyToClipboard(prompt, btn);
-    App.showMsg(`Промпт скопирован в буфер и открыт в ${App._AI_LABELS[service] || 'ИИ'}. Вставьте штатное расписание и нажмите «Отправить».`, 'success');
+    App.copyToClipboard(prompt, btn); // полный промпт всегда в буфере
+    const svc = App._AI_LABELS[service] || 'ИИ';
+    const msg = (prefilled && usedShort)
+      ? `Открыт ${svc}: подставлена краткая версия промпта (полный был слишком длинным для ссылки). Полный промпт — в буфере (Cmd/Ctrl+V). Вставьте штатное расписание и нажмите «Отправить».`
+      : (prefilled
+          ? `Открыт ${svc} с авто-промптом (он также в буфере). Вставьте штатное расписание и нажмите «Отправить».`
+          : `Промпт скопирован в буфер и открыт ${svc}. Вставьте промпт (Cmd/Ctrl+V), штатку — и нажмите «Отправить».`);
+    App.showMsg(msg, 'success');
   },
 
   // Копирует промпт ОКЭД-советника в буфер (кнопка «Скопировать промпт»).
@@ -3132,11 +3188,12 @@ const App = {
       App.zayavka.insurerName = App.statgov.name;
       App._persistCase();
     }
-    App.showPreview();
-    App.renderCompanyOkeds();
-    // После того как statgov загружен, _resolveOked() начнёт возвращать max-class ОКЭД —
-    // пересинхронизируем hint и автовыбор вида деятельности.
-    App.onOkedChange();
+    // statgov загружен — прогоняем ПОЛНУЮ цепочку производных данных (превью,
+    // ОКЭДы, тариф/премия, verdict-hint, алерты, snapshot, inline-аналитика).
+    // Раньше здесь были только showPreview/renderCompanyOkeds/onOkedChange — из-за
+    // этого «Применить» (запускает лукапы асинхронно) не обновлял всё до конца,
+    // и часть данных подтягивалась только после ручного «Обновить данные» / F5.
+    App._refreshDerivedData();
   },
 
   // Рендерит таблицу «ОКЭДы компании» под полем «Номер АР».
@@ -3209,8 +3266,10 @@ const App = {
       App.binData.loading = false;
     }
 
-    // Refresh preview with new data
-    App.showPreview();
+    // Полное обновление производных данных (не только превью): гос. участие и
+    // адрес влияют на документы, snapshot и inline-аналитику — чтобы «Применить»
+    // обновлял всё так же, как отдельная кнопка «Обновить данные».
+    App._refreshDerivedData();
   },
 
   // Собирает snapshot для аналитики на основе ВСЕХ актуальных значений:

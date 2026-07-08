@@ -369,6 +369,29 @@ const Utils = {
     return Utils.getDecisionText(decision);
   },
 
+  // ===== ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ ДЛЯ ВСЕХ ДОКУМЕНТОВ =====
+  // Как «Решение по риску» (вердикт андеррайтера) влияет на условия принятия,
+  // эффективный ПК и финальную премию. Правило действует ГЛОБАЛЬНО во всех
+  // генераторах (АР, Заключение, Протокол, СЗ): ФИНАЛЬНОЕ решение ВСЕГДА за
+  // андеррайтером — ручной вердикт перебивает авто-решение по алгоритму.
+  //   accept_standard → стандарт: скидка/повышение НЕ показываются, премия = premiumBase
+  //   accept_adjusted → показываем ПК, но ТОЛЬКО если coeffDown задан и ≠ 0
+  //   reject / defer  → премия-рекомендация не выводится
+  // data — из App._collectData(); data.coeffDown уже «эффективный» (учёт НС /
+  // молодой компании / минимальной премии в App._effectiveCoeffInfo).
+  acceptedConditions(data) {
+    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
+    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
+    const useAdjusted = (verdict === 'accept_adjusted')
+      && data.coeffDown != null && data.coeffDown !== 0;
+    // decision, «выпрямленный» под вердикт: при стандарте — всегда 'standard'
+    const decision = (verdict === 'accept_standard') ? 'standard' : autoDecision;
+    const coeffEffective = useAdjusted ? (1 - data.coeffDown) : 1;
+    const finalPremium = useAdjusted ? data.premiumWithCoeff : data.premiumBase;
+    const conditionText = Utils.acceptanceConditionText(verdict, decision);
+    return { autoDecision, verdict, decision, useAdjusted, coeffEffective, finalPremium, conditionText };
+  },
+
   // Get organ name in Russian (genitive case)
   getOrganName(organ) {
     switch (organ) {

@@ -18,8 +18,12 @@ const ZaklGenerator = {
     });
 
     const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
-    const decision = Utils.determineDecision(data.coeff, data.coeffDown);
-    const verdict = Utils.resolveVerdict(data.verdict, decision);
+    // ФИНАЛЬНОЕ решение всегда за андеррайтером — условия/ПК/премию берём из
+    // единого источника (Utils.acceptedConditions), а не из «сырого» coeffDown.
+    // Иначе при ручном вердикте «стандарт» заключение всё равно показывало бы
+    // алгоритмическую скидку.
+    const { decision, verdict, useAdjusted, coeffEffective, finalPremium }
+      = Utils.acceptedConditions(data);
     const dateShort = Utils.fmtDateShort(data.docDate);
     const companyName = Utils.formatCompanyName(data.insurerName);
     const residency = data.nonResident ? 'нерезидент' : 'резидент';
@@ -60,10 +64,6 @@ const ZaklGenerator = {
     // Tariff
     const tariffDisplay = data.tariff ? Utils.fmtPct(data.tariff) : '-';
 
-    // Coefficient effective
-    const coeffEffective = (data.coeffDown != null && data.coeffDown !== 0)
-      ? (1 - data.coeffDown) : 1;
-
     // Claims data
     const claimsCount = data.claims ? data.claims.totalClaims : 0;
     const claimsSummary = data.claims
@@ -79,10 +79,7 @@ const ZaklGenerator = {
     const avgAnnualClaims = claimsCount / 3;
     const predictedLoss = Math.round(avgAnnualClaims) * 900000;
 
-    // Final premium (recommendation)
-    const finalPremium = coeffEffective !== 1
-      ? data.premiumWithCoeff
-      : data.premiumBase;
+    // finalPremium приходит из Utils.acceptedConditions (учитывает вердикт).
 
     // Build paragraphs
     const paragraphs = [];
@@ -300,8 +297,9 @@ const ZaklGenerator = {
       alignment: AlignmentType.JUSTIFIED,
     }));
 
-    // Premium with adjustment (only if coefficient != 1)
-    if (coeffEffective !== 1) {
+    // Premium with adjustment — только когда вердикт = «с ПК» и ПК ненулевой
+    // (при ручном «стандарте» строку не показываем, даже если алгоритм дал скидку).
+    if (useAdjusted) {
       paragraphs.push(new Paragraph({
         children: [
           trB('Страховая премия с поправочным (понижающим) коэффициентом:'),

@@ -37,9 +37,8 @@ const SZGenerator = {
     // Решение по риску из блока «Решение по риску» (ручной выбор или авто).
     // Проект решения и условия в СЗ должны идти именно из него — иначе записка
     // расходится с принятым решением (стандарт / со скидкой / отклонение).
-    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
-    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
-    const conditionText = Utils.acceptanceConditionText(verdict, autoDecision);
+    // Единый источник (Utils.acceptedConditions): вердикт андеррайтера главнее алгоритма.
+    const { verdict, conditionText, useAdjusted } = Utils.acceptedConditions(data);
     const verdictLabel = Utils.VERDICT_LABELS[verdict] || Utils.VERDICT_LABELS.accept_standard;
 
     // Recipient block
@@ -129,10 +128,9 @@ const SZGenerator = {
       ? data.claims.detailedSummary
       : (data.claimsSummary || 'НС не было');
     // Премию «с учётом ПК» показываем ТОЛЬКО если решение действительно со
-    // скидкой/повышением (accept_adjusted с ненулевым coeffDown). При стандарте
+    // скидкой/повышением (useAdjusted из Utils.acceptedConditions). При стандарте
     // или отклонении — прочерк: иначе записка противоречила бы решению по риску
     // (показывала бы скидку там, где принято «со стандартным коэффициентом»).
-    const useAdjusted = (verdict === 'accept_adjusted') && data.coeffDown != null && data.coeffDown !== 0;
     const premWithCoeff = (useAdjusted && data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase)
       ? Utils.fmtMoney(data.premiumWithCoeff) : '-';
 

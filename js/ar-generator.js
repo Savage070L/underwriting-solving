@@ -10,16 +10,12 @@ const ARGenerator = {
     } = docx;
 
     const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
-    const autoDecision = Utils.determineDecision(data.coeff, data.coeffDown);
-    const verdict = Utils.resolveVerdict(data.verdict, autoDecision);
-    // Decision (для текста «...со стандартным/пониженным/повышенным коэффициентом»)
-    // привязан к вердикту:
-    //   accept_standard → стандартный (форсируем coeffEffective=1)
-    //   accept_adjusted → вычисленный (lowered/raised по coeff/coeffDown)
-    //   reject/defer     → не используется (execution-line другая)
-    const decision = (verdict === 'accept_standard')
-      ? 'standard'
-      : (verdict === 'accept_adjusted' ? autoDecision : autoDecision);
+    // Решение/условия/ПК — из единого источника (Utils.acceptedConditions):
+    // ФИНАЛЬНОЕ решение всегда за андеррайтером (ручной вердикт главнее алгоритма).
+    //   accept_standard → decision='standard', coeffEffective=1, премия с ПК = «-»
+    //   accept_adjusted → вычисленный decision (lowered/raised), реальный ПК/премия
+    //   reject/defer     → decision не используется (execution-line другая)
+    const { verdict, decision, useAdjusted, coeffEffective } = Utils.acceptedConditions(data);
     const organName = Utils.getOrganName(organ);
     const organNameHeader = Utils.getOrganNameHeader(organ);
     // Правление и Совет директоров используют ОДИН состав (члены Правления):
@@ -35,13 +31,11 @@ const ARGenerator = {
     const dateShort = Utils.fmtDateShort(data.docDate);
     const dateRu = Utils.fmtDateRu(data.docDate);
 
-    // Coefficient + premium-with-PK строго следуют решению:
+    // Coefficient + premium-with-PK строго следуют решению (useAdjusted/coeffEffective
+    // уже посчитаны выше через Utils.acceptedConditions):
     //   accept_standard → 1.0 в row 14, «-» в row 16
     //   accept_adjusted → реальный коэффициент в 14, премия с ПК в 16
     //   reject/defer   → также показываем как «1.0» / «-» (стандартный фон)
-    const useAdjusted = (verdict === 'accept_adjusted')
-      && data.coeffDown != null && data.coeffDown !== 0;
-    const coeffEffective = useAdjusted ? (1 - data.coeffDown) : 1;
     const premiumWithCoeffText = useAdjusted
       ? Utils.fmtMoney(data.premiumWithCoeff)
       : '-';
@@ -330,8 +324,10 @@ const ARGenerator = {
     } else if (verdict === 'accept_adjusted') {
       // Если знаем направление по коэффициенту — конкретизируем («с пониженным»
       // или «с повышенным»). Иначе используем generic-формулировку из чек-бокса.
-      if (autoDecision === 'lowered' || autoDecision === 'raised') {
-        executionLine = `- Принять на страхование риск ${Utils.getDecisionText(autoDecision)}.`;
+      // В ветке accept_adjusted decision === autoDecision (выпрямление меняет
+      // только accept_standard), поэтому берём decision из acceptedConditions.
+      if (decision === 'lowered' || decision === 'raised') {
+        executionLine = `- Принять на страхование риск ${Utils.getDecisionText(decision)}.`;
       } else {
         executionLine = '- Принять на страхование риск с повышенным или пониженным коэффициентом.';
       }
