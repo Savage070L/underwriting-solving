@@ -3142,23 +3142,66 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-legend-swatch--cell { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; margin-top: 1px; }
 .batch-legend-swatch--err  { background: #fca5a5; box-shadow: inset 0 0 0 2px #dc2626; }
 .batch-legend-swatch--warn { background: #fde68a; box-shadow: inset 0 0 0 2px #d97706; }
-.batch-sort-errors {
-  padding: 6px 14px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
+/* ===== Мультисортировка: панель чипов по столбцам ===== */
+.batch-sort-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.batch-sort-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.batch-sort-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid #dfe3ea;
+  border-radius: 7px;
   background: #fff;
-  color: #b42318;
+  color: #475467;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   cursor: pointer;
   white-space: nowrap;
 }
-.batch-sort-errors:hover { background: #fef2f2; }
-.batch-sort-errors.is-active { background: #fee2e2; border-color: #ef4444; }
-/* «Сначала транши» — нейтрально-индиго (не красная, как ошибки). */
-.batch-sort-tranche { border-color: #c7d2fe; color: #4338ca; }
-.batch-sort-tranche:hover { background: #eef2ff; }
-.batch-sort-tranche.is-active { background: #e0e7ff; border-color: #6366f1; }
+.batch-sort-chip:hover { background: #f8fafc; border-color: #cbd5e1; }
+.batch-sort-chip.is-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
+.batch-sort-arrow { font-size: 0.9rem; line-height: 1; opacity: 0.55; }
+.batch-sort-chip.is-active .batch-sort-arrow { opacity: 1; }
+.batch-sort-prio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.batch-sort-reset {
+  padding: 4px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fff;
+  color: #b42318;
+  font-weight: 600;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.batch-sort-reset:hover { background: #fef2f2; }
 /* Столбец «Транш оплаты». */
 .batch-c-tranche { text-align: center; vertical-align: top; }
 .batch-tranche { display: inline-block; font-variant-numeric: tabular-nums; }
@@ -3204,7 +3247,10 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 /* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
 .batch-toolbar {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
   margin-top: 12px;
 }
 .batch-open-tab {

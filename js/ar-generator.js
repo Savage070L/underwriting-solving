@@ -63,8 +63,11 @@ const ARGenerator = {
     addressParts.push(`Признак резидентства – ${residency}.`);
     const addressLine = addressParts.join(', ');
 
-    // Row 7: reason text
-    const reasonText = `Страховая сумма в рамках лимита ${organName} Компании\n№ ${data.docNumber} от ${dateShort}г.`;
+    // Row 7: причина вынесения — «в рамках лимита <орган> Компании № 122 от 06.02.2026г.»
+    // organName склоняется по органу (Андеррайтингового совета / Правления / Совета
+    // директоров). Ссылка на лимитный документ Компании — фиксированная (№ 122 от
+    // 06.02.2026г.); менять при переиздании приказа о лимитах.
+    const reasonText = `Страховая сумма в рамках лимита ${organName} Компании\n№ 122 от 06.02.2026г.`;
 
     // Decision options — driven by verdict (manual selection or auto-resolved)
     const decisionOptions = [

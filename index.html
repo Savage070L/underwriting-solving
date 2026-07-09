@@ -272,8 +272,10 @@
         </div>
 
         <div class="batch-toolbar" id="batch-toolbar" style="display:none">
-          <button class="batch-sort-errors" id="batch-sort-errors" type="button" onclick="BatchAR.toggleSortByError()" title="Показать сначала красные строки, затем жёлтые">⚑ Сначала ошибки</button>
-          <button class="batch-sort-errors batch-sort-tranche" id="batch-sort-tranche" type="button" onclick="BatchAR.toggleSortByTranche()" title="Показать сначала договоры с наибольшим числом траншей рассрочки (по убыванию)">⏳ Сначала транши</button>
+          <!-- Чипы мультисортировки (по столбцам) — рендерит BatchAR._renderSortChips().
+               Клик по чипу: ↕ выкл → ↓ по убыванию → ↑ по возрастанию → выкл.
+               Несколько чипов комбинируются (номер = приоритет). -->
+          <div class="batch-sort-chips" id="batch-sort-chips"></div>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
 
