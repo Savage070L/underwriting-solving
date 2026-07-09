@@ -272,10 +272,6 @@
         </div>
 
         <div class="batch-toolbar" id="batch-toolbar" style="display:none">
-          <!-- Чипы мультисортировки (по столбцам) — рендерит BatchAR._renderSortChips().
-               Клик по чипу: ↕ выкл → ↓ по убыванию → ↑ по возрастанию → выкл.
-               Несколько чипов комбинируются (номер = приоритет). -->
-          <div class="batch-sort-chips" id="batch-sort-chips"></div>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
 
@@ -291,6 +287,10 @@
           <span class="batch-stat batch-stat--unchecked" title="Не проверено — нет подключения к stat.gov.kz или ошибка проверки"><span class="batch-stat-dot"></span><b id="bs-unchecked">0</b>&nbsp;не проверено</span>
           <span class="batch-stat batch-stat--approved" title="Согласовано андеррайтером"><span class="batch-stat-dot"></span><b id="bs-approved">0</b>&nbsp;согласовано</span>
         </div>
+        <!-- Чипы мультисортировки (по столбцам) — под статус-баром. Рендерит
+             BatchAR._renderSortChips(). Клик: выкл → ↓ по убыванию → ↑ по
+             возрастанию → выкл. Несколько чипов комбинируются (номер = приоритет). -->
+        <div class="batch-sort-chips" id="batch-sort-chips" style="display:none"></div>
         <div class="batch-table-wrap" id="batch-table-wrap" style="display:none">
           <table class="batch-table">
             <!-- Фиксированная раскладка: ширины колонок в % → таблица всегда = ширине

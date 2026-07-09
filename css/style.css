@@ -3142,21 +3142,13 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-legend-swatch--cell { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; margin-top: 1px; }
 .batch-legend-swatch--err  { background: #fca5a5; box-shadow: inset 0 0 0 2px #dc2626; }
 .batch-legend-swatch--warn { background: #fde68a; box-shadow: inset 0 0 0 2px #d97706; }
-/* ===== Мультисортировка: панель чипов по столбцам ===== */
+/* ===== Мультисортировка: панель чипов по столбцам (под статус-баром) ===== */
 .batch-sort-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.batch-sort-label {
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: #64748b;
-  margin-right: 2px;
-  white-space: nowrap;
+  margin-top: 10px;
 }
 .batch-sort-chip {
   display: inline-flex;
@@ -3247,10 +3239,7 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 /* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
 .batch-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 12px;
 }
 .batch-open-tab {

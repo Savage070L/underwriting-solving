@@ -131,7 +131,7 @@ const BatchAR = {
   // «да/ошибка» сверху. dup — особый: группирует одинаковые номера договора.
   _SORT_DEFS: [
     { key: 'errors',  label: 'Ошибки',     title: 'Сначала строки с ошибками (красные), затем жёлтые', num: (r) => { const l = BatchAR._rowLevel(r); return l === 'err' ? 2 : (l === 'warn' ? 1 : 0); } },
-    { key: 'dup',     label: 'Дубли №',    title: 'Дублирующиеся номера договора — наверх и рядом друг с другом', dup: true },
+    { key: 'dup',     label: 'Ном. дог.',  title: 'Номер договора: дублирующиеся номера — наверх и рядом друг с другом', dup: true },
     { key: 'tranche', label: 'Транши',     title: 'По числу траншей рассрочки', num: (r) => BatchAR._trancheCount(r) || 0 },
     { key: 'gov',     label: 'Госники',    title: 'Компании с гос. участием', num: (r) => BatchAR._govSortVal(r) },
     { key: 'pk',      label: 'ПК',         title: 'Поправочный коэффициент', num: (r) => (r.coeff != null ? r.coeff : 1) },
@@ -140,10 +140,9 @@ const BatchAR = {
     { key: 'ssS',     label: 'СС (С)',     title: 'Страховая сумма страхователя', num: (r) => r.insuranceSumTotal },
     { key: 'ssK',     label: 'СС (К)',     title: 'Страховая сумма контрагента', num: (r) => r.insuranceSum },
     { key: 'fotK',    label: 'ФОТ (К)',    title: 'ФОТ контрагента', num: (r) => r.gfot },
-    { key: 'workers', label: 'Кол-во (К)', title: 'Количество сотрудников контрагента', num: (r) => r.workers },
+    { key: 'workers', label: 'Кол-во сотр. (К)', title: 'Количество сотрудников контрагента', num: (r) => r.workers },
     { key: 'classS',  label: 'Класс (С)',  title: 'Класс риска страхователя', num: (r) => BatchAR._numOrNull(r.riskClass) },
     { key: 'classK',  label: 'Класс (К)',  title: 'Класс риска контрагента', num: (r) => BatchAR._numOrNull(r.riskClassContragent) },
-    { key: 'contract',label: '№ дог.',     title: 'Номер договора', str: (r) => r.contractNumber || '' },
     { key: 'oked',    label: 'ОКЭД (С)',   title: 'ОКЭД страхователя', str: (r) => r.oked || '' },
     { key: 'insurer', label: 'Страх. (С)', title: 'Наименование/БИН страхователя', str: (r) => r.insurerNameSt || r.binInsurer || '' },
     { key: 'contr',   label: 'Контр. (К)', title: 'Наименование/БИН контрагента', str: (r) => r.insurerName || r.bin || '' },
@@ -1975,25 +1974,28 @@ const BatchAR = {
     BatchAR._updateStatusBar();
   },
 
-  // Рендер панели чипов сортировки. Каждый чип: выкл (↕) → ↓ → ↑ → выкл.
-  // При нескольких активных показываем номер приоритета. + кнопка «Сбросить».
+  // Рендер панели чипов сортировки (под статус-баром). Неактивный чип — только
+  // название (без стрелки); клик: выкл → ↓ → ↑ → выкл. При нескольких активных
+  // показываем номер приоритета. + кнопка «Сбросить».
   _renderSortChips() {
     const host = document.getElementById('batch-sort-chips');
     if (!host) return;
-    if (!BatchAR.rows.length) { host.innerHTML = ''; return; }
+    if (!BatchAR.rows.length) { host.innerHTML = ''; host.style.display = 'none'; return; }
+    host.style.display = '';
     const active = BatchAR._sorts;
     const multi = active.length > 1;
     const chips = BatchAR._SORT_DEFS.map((def) => {
       const i = active.findIndex((s) => s.key === def.key);
       const on = i >= 0;
-      const arrow = !on ? '↕' : (active[i].dir === 'desc' ? '↓' : '↑');
+      // Стрелку показываем ТОЛЬКО у активного чипа (у неактивных — без иконки).
+      const arrowHtml = on ? ` <span class="batch-sort-arrow">${active[i].dir === 'desc' ? '↓' : '↑'}</span>` : '';
       const prio = (on && multi) ? `<span class="batch-sort-prio">${i + 1}</span>` : '';
-      return `<button type="button" class="batch-sort-chip${on ? ' is-active' : ''}" onclick="BatchAR.cycleSort('${def.key}')" title="${ARForm._esc(def.title || def.label)}">${ARForm._esc(def.label)} <span class="batch-sort-arrow">${arrow}</span>${prio}</button>`;
+      return `<button type="button" class="batch-sort-chip${on ? ' is-active' : ''}" onclick="BatchAR.cycleSort('${def.key}')" title="${ARForm._esc(def.title || def.label)}">${ARForm._esc(def.label)}${arrowHtml}${prio}</button>`;
     }).join('');
     const reset = active.length
       ? `<button type="button" class="batch-sort-reset" onclick="BatchAR.clearSorts()" title="Сбросить все сортировки — вернуть порядок как в файле">✕ Сбросить</button>`
       : '';
-    host.innerHTML = `<span class="batch-sort-label">Сортировка:</span>${chips}${reset}`;
+    host.innerHTML = `${chips}${reset}`;
   },
 
   // Статус-бар: сводка по строкам реестра (по состоянию строки). Согласованные
