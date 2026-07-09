@@ -18,8 +18,8 @@ const BatchAR = {
   _sgQueue: null,             // очередь оставшихся индексов statgov (для возобновления после паузы)
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
-  // Мультисортировка: массив активных ключей в порядке ПРИОРИТЕТА (0 — главный).
-  // {key, dir} где dir 'desc' (↓, «интересное сверху») | 'asc' (↑). Пусто — как в файле.
+  // Активные переключатели сортировки «Сначала …» (массив ключей: 'errors' |
+  // 'filial' | 'tranche'). Приоритет применения — порядок _SORT_DEFS. Пусто — как в файле.
   _sorts: [],
 
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
@@ -124,115 +124,50 @@ const BatchAR = {
     }
   },
 
-  // ===== МУЛЬТИСОРТИРОВКА =====
-  // Определения сортировок по столбцам. num(r)/str(r) — значение для сравнения
-  // (числа: null → в конец; строки: '' → в конец). Для «desc» (↓) «интересное»
-  // сверху: у числовых — больше сверху, у ранговых (ошибки/госники/дубли) —
-  // «да/ошибка» сверху. dup — особый: группирует одинаковые номера договора.
+  // ===== СОРТИРОВКА «Сначала …» =====
+  // Три переключателя: показать сверху строки с ошибками / с траншами рассрочки /
+  // с дублирующимися номерами договора (несколько филиалов на один договор).
+  // Каждый — вкл/выкл; можно включить несколько сразу (не сбрасывают друг друга),
+  // применяются в фиксированном приоритете — порядок _SORT_DEFS.
   _SORT_DEFS: [
-    { key: 'errors',  label: 'Ошибки',     title: 'Сначала строки с ошибками (красные), затем жёлтые', num: (r) => { const l = BatchAR._rowLevel(r); return l === 'err' ? 2 : (l === 'warn' ? 1 : 0); } },
-    { key: 'dup',     label: 'Ном. дог.',  title: 'Номер договора: дублирующиеся номера — наверх и рядом друг с другом', dup: true },
-    { key: 'tranche', label: 'Транши',     title: 'По числу траншей рассрочки', num: (r) => BatchAR._trancheCount(r) || 0 },
-    { key: 'gov',     label: 'Госники',    title: 'Компании с гос. участием', num: (r) => BatchAR._govSortVal(r) },
-    { key: 'pk',      label: 'ПК',         title: 'Поправочный коэффициент', num: (r) => (r.coeff != null ? r.coeff : 1) },
-    { key: 'spS',     label: 'СП (С)',     title: 'Страховая премия страхователя', num: (r) => r.premiumTotal },
-    { key: 'spK',     label: 'СП (К)',     title: 'Страховая премия контрагента', num: (r) => r.premiumWithCoeff },
-    { key: 'ssS',     label: 'СС (С)',     title: 'Страховая сумма страхователя', num: (r) => r.insuranceSumTotal },
-    { key: 'ssK',     label: 'СС (К)',     title: 'Страховая сумма контрагента', num: (r) => r.insuranceSum },
-    { key: 'fotK',    label: 'ФОТ (К)',    title: 'ФОТ контрагента', num: (r) => r.gfot },
-    { key: 'workers', label: 'Кол-во сотр. (К)', title: 'Количество сотрудников контрагента', num: (r) => r.workers },
-    { key: 'classS',  label: 'Класс (С)',  title: 'Класс риска страхователя', num: (r) => BatchAR._numOrNull(r.riskClass) },
-    { key: 'classK',  label: 'Класс (К)',  title: 'Класс риска контрагента', num: (r) => BatchAR._numOrNull(r.riskClassContragent) },
-    { key: 'oked',    label: 'ОКЭД (С)',   title: 'ОКЭД страхователя', str: (r) => r.oked || '' },
-    { key: 'insurer', label: 'Страх. (С)', title: 'Наименование/БИН страхователя', str: (r) => r.insurerNameSt || r.binInsurer || '' },
-    { key: 'contr',   label: 'Контр. (К)', title: 'Наименование/БИН контрагента', str: (r) => r.insurerName || r.bin || '' },
-    { key: 'reg',     label: 'Дата рег.',  title: 'Дата регистрации страхователя', num: (r) => { const d = BatchAR._effRegDate(r); return d ? (d instanceof Date ? d.getTime() : new Date(d).getTime()) : null; } },
-    { key: 'manager', label: 'Менеджер',   title: 'Ответственный менеджер', str: (r) => r.author || '' },
+    { key: 'errors',  icon: '⚑', off: 'Сначала ошибки',  on: 'Ошибки сверху',  title: 'Показать сначала строки с ошибками (красные), затем жёлтые', rank: (r) => { const l = BatchAR._rowLevel(r); return l === 'err' ? 2 : (l === 'warn' ? 1 : 0); } },
+    { key: 'filial',  icon: '🏢', off: 'Сначала филиалы', on: 'Филиалы сверху', title: 'Договоры с несколькими филиалами (дублирующиеся номера договора) — наверх и рядом друг с другом', dup: true },
+    { key: 'tranche', icon: '⏳', off: 'Сначала транши',  on: 'Транши сверху',  title: 'Показать сначала договоры с наибольшим числом траншей рассрочки', rank: (r) => BatchAR._trancheCount(r) || 0 },
   ],
 
-  _sortDefMap() {
-    if (!BatchAR.__sortDefMap) {
-      BatchAR.__sortDefMap = {};
-      for (const d of BatchAR._SORT_DEFS) BatchAR.__sortDefMap[d.key] = d;
-    }
-    return BatchAR.__sortDefMap;
-  },
-
-  // Гос. участие как число для сортировки: 1 — участник (по e-Qazyna или выгрузке), иначе 0.
-  _govSortVal(r) {
-    if (r.egov && r.egov.status === 'done' && r.egov.found != null) return r.egov.found ? 1 : 0;
-    return r.govParticipation ? 1 : 0;
-  },
-  _numOrNull(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; },
-
-  // Порядок строк для отрисовки. По умолчанию — как в файле. При активных
-  // сортировках — стабильный многоключевой sort по _sorts (0 — главный ключ).
-  // Возвращает массив ОРИГИНАЛЬНЫХ индексов (data-idx и «#» остаются исходными).
+  // Порядок строк для отрисовки. По умолчанию — как в файле. Активные переключатели
+  // применяются в фиксированном приоритете (порядок _SORT_DEFS), все — «сверху»
+  // (по убыванию ранга). Возвращает массив ОРИГИНАЛЬНЫХ индексов («#» и data-idx
+  // остаются исходными).
   _displayOrder() {
     const idxs = BatchAR.rows.map((_, i) => i);
-    const sorts = BatchAR._sorts;
-    if (!sorts.length) return idxs;
-    const defMap = BatchAR._sortDefMap();
-    // Значения считаем ОДИН раз на строку (а не на каждое сравнение) — иначе при
-    // тысячах строк аксессоры пересчитывались бы десятки тысяч раз.
-    const cols = sorts.map((s) => {
-      const def = defMap[s.key];
-      if (!def) return null;
-      if (def.dup) {
+    if (!BatchAR._sorts.length) return idxs;
+    const active = new Set(BatchAR._sorts);
+    // Значения считаем ОДИН раз на строку (не на каждое сравнение) — при тысячах строк важно.
+    const cols = BatchAR._SORT_DEFS.filter((d) => active.has(d.key)).map((d) => {
+      if (d.dup) {
         const counts = {};
         for (const r of BatchAR.rows) { const c = String(r.contractNumber || ''); counts[c] = (counts[c] || 0) + 1; }
-        return { dir: s.dir, dup: true, val: BatchAR.rows.map((r) => counts[String(r.contractNumber || '')] || 1), cn: BatchAR.rows.map((r) => String(r.contractNumber || '')) };
+        return { dup: true, val: BatchAR.rows.map((r) => counts[String(r.contractNumber || '')] || 1), cn: BatchAR.rows.map((r) => String(r.contractNumber || '')) };
       }
-      const isNum = !!def.num;
-      return { dir: s.dir, isNum, val: BatchAR.rows.map(isNum ? def.num : def.str) };
-    }).filter(Boolean);
+      return { val: BatchAR.rows.map(d.rank) };
+    });
     return idxs.sort((ia, ib) => {
       for (const c of cols) {
-        if (c.dup) {
-          // Дубли: по числу повторов номера (↓ — самые дублируемые сверху),
-          // затем всегда по номеру договора — чтобы одинаковые шли подряд.
-          const a = c.val[ia], b = c.val[ib];
-          const base = a < b ? -1 : (a > b ? 1 : 0);
-          const d = c.dir === 'desc' ? -base : base;
-          if (d !== 0) return d;
-          const t = String(c.cn[ia]).localeCompare(String(c.cn[ib]), 'ru');
-          if (t !== 0) return t;
-          continue;
-        }
         const a = c.val[ia], b = c.val[ib];
-        let d;
-        if (c.isNum) {
-          const na = (a == null || Number.isNaN(a)), nb = (b == null || Number.isNaN(b));
-          if (na && nb) d = 0;
-          else if (na) d = 1;            // пустые значения — всегда в конец
-          else if (nb) d = -1;
-          else { const base = a < b ? -1 : (a > b ? 1 : 0); d = c.dir === 'desc' ? -base : base; }
-        } else {
-          const ea = (a === ''), eb = (b === '');
-          if (ea && eb) d = 0;
-          else if (ea) d = 1;
-          else if (eb) d = -1;
-          else { const base = String(a).localeCompare(String(b), 'ru'); d = c.dir === 'desc' ? -base : base; }
-        }
-        if (d !== 0) return d;
+        if (b !== a) return b - a;   // больший ранг (ошибочнее / больше траншей / дублируемее) — выше
+        // Одинаковый ранг у филиалов → всегда по номеру договора, чтобы одинаковые шли подряд.
+        if (c.dup) { const t = String(c.cn[ia]).localeCompare(String(c.cn[ib]), 'ru'); if (t !== 0) return t; }
       }
-      return 0; // стабильно в совр. JS — при равенстве сохраняется порядок файла
+      return 0; // стабильно — при равенстве сохраняется порядок файла
     });
   },
 
-  // Клик по чипу сортировки: выкл → ↓ (desc) → ↑ (asc) → выкл. Ключи НЕ
-  // взаимоисключающие — комбинируются в порядке добавления (первый = главный).
-  cycleSort(key) {
-    const sorts = BatchAR._sorts;
-    const i = sorts.findIndex((s) => s.key === key);
-    if (i < 0) sorts.push({ key, dir: 'desc' });
-    else if (sorts[i].dir === 'desc') sorts[i].dir = 'asc';
-    else sorts.splice(i, 1);
-    BatchAR.renderTable();
-    BatchAR._updateControls();
-  },
-  clearSorts() {
-    BatchAR._sorts = [];
+  // Вкл/выкл переключателя «Сначала …». Несколько можно держать активными сразу.
+  toggleSort(key) {
+    const i = BatchAR._sorts.indexOf(key);
+    if (i >= 0) BatchAR._sorts.splice(i, 1);
+    else BatchAR._sorts.push(key);
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
@@ -1974,28 +1909,18 @@ const BatchAR = {
     BatchAR._updateStatusBar();
   },
 
-  // Рендер панели чипов сортировки (под статус-баром). Неактивный чип — только
-  // название (без стрелки); клик: выкл → ↓ → ↑ → выкл. При нескольких активных
-  // показываем номер приоритета. + кнопка «Сбросить».
+  // Рендер кнопок сортировки «Сначала …» (под статус-баром). Каждая — вкл/выкл;
+  // активная подсвечивается и меняет текст на «… сверху ✓».
   _renderSortChips() {
     const host = document.getElementById('batch-sort-chips');
     if (!host) return;
     if (!BatchAR.rows.length) { host.innerHTML = ''; host.style.display = 'none'; return; }
     host.style.display = '';
-    const active = BatchAR._sorts;
-    const multi = active.length > 1;
-    const chips = BatchAR._SORT_DEFS.map((def) => {
-      const i = active.findIndex((s) => s.key === def.key);
-      const on = i >= 0;
-      // Стрелку показываем ТОЛЬКО у активного чипа (у неактивных — без иконки).
-      const arrowHtml = on ? ` <span class="batch-sort-arrow">${active[i].dir === 'desc' ? '↓' : '↑'}</span>` : '';
-      const prio = (on && multi) ? `<span class="batch-sort-prio">${i + 1}</span>` : '';
-      return `<button type="button" class="batch-sort-chip${on ? ' is-active' : ''}" onclick="BatchAR.cycleSort('${def.key}')" title="${ARForm._esc(def.title || def.label)}">${ARForm._esc(def.label)}${arrowHtml}${prio}</button>`;
+    host.innerHTML = BatchAR._SORT_DEFS.map((d) => {
+      const on = BatchAR._sorts.includes(d.key);
+      const text = on ? `${d.icon} ${d.on} ✓` : `${d.icon} ${d.off}`;
+      return `<button type="button" class="batch-sort-btn batch-sort-btn--${d.key}${on ? ' is-active' : ''}" onclick="BatchAR.toggleSort('${d.key}')" title="${ARForm._esc(d.title)}">${text}</button>`;
     }).join('');
-    const reset = active.length
-      ? `<button type="button" class="batch-sort-reset" onclick="BatchAR.clearSorts()" title="Сбросить все сортировки — вернуть порядок как в файле">✕ Сбросить</button>`
-      : '';
-    host.innerHTML = `${chips}${reset}`;
   },
 
   // Статус-бар: сводка по строкам реестра (по состоянию строки). Согласованные

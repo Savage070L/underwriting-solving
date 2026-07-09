@@ -3142,58 +3142,39 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-legend-swatch--cell { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; margin-top: 1px; }
 .batch-legend-swatch--err  { background: #fca5a5; box-shadow: inset 0 0 0 2px #dc2626; }
 .batch-legend-swatch--warn { background: #fde68a; box-shadow: inset 0 0 0 2px #d97706; }
-/* ===== Мультисортировка: панель чипов по столбцам (под статус-баром) ===== */
+/* ===== Сортировка «Сначала …»: три кнопки-переключателя (под статус-баром) ===== */
 .batch-sort-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-top: 10px;
 }
-.batch-sort-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border: 1px solid #dfe3ea;
-  border-radius: 7px;
+.batch-sort-btn {
+  padding: 6px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   background: #fff;
   color: #475467;
   font-weight: 600;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   cursor: pointer;
   white-space: nowrap;
 }
-.batch-sort-chip:hover { background: #f8fafc; border-color: #cbd5e1; }
-.batch-sort-chip.is-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
-.batch-sort-arrow { font-size: 0.9rem; line-height: 1; opacity: 0.55; }
-.batch-sort-chip.is-active .batch-sort-arrow { opacity: 1; }
-.batch-sort-prio {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: #6366f1;
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 700;
-  line-height: 1;
-}
-.batch-sort-reset {
-  padding: 4px 10px;
-  border: 1px solid #fecaca;
-  border-radius: 7px;
-  background: #fff;
-  color: #b42318;
-  font-weight: 600;
-  font-size: 0.78rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.batch-sort-reset:hover { background: #fef2f2; }
+.batch-sort-btn:hover { background: #f8fafc; }
+.batch-sort-btn.is-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
+/* «Сначала ошибки» — красноватая. */
+.batch-sort-btn--errors { border-color: #fecaca; color: #b42318; }
+.batch-sort-btn--errors:hover { background: #fef2f2; }
+.batch-sort-btn--errors.is-active { background: #fee2e2; border-color: #ef4444; color: #b42318; }
+/* «Сначала транши» — индиго. */
+.batch-sort-btn--tranche { border-color: #c7d2fe; color: #4338ca; }
+.batch-sort-btn--tranche:hover { background: #eef2ff; }
+.batch-sort-btn--tranche.is-active { background: #e0e7ff; border-color: #6366f1; }
+/* «Сначала филиалы» — бирюзовая. */
+.batch-sort-btn--filial { border-color: #99f6e4; color: #0f766e; }
+.batch-sort-btn--filial:hover { background: #f0fdfa; }
+.batch-sort-btn--filial.is-active { background: #ccfbf1; border-color: #14b8a6; color: #0f766e; }
 /* Столбец «Транш оплаты». */
 .batch-c-tranche { text-align: center; vertical-align: top; }
 .batch-tranche { display: inline-block; font-variant-numeric: tabular-nums; }
