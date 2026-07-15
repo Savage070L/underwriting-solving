@@ -155,6 +155,15 @@ const SZGenerator = {
           : (isPravlenie ? [] : [detailLine('Лимит СД', `– ${sdDealNom}`)])),
     ];
 
+    // ============ Метки левого столбца ============
+    // СЗ на Правление обновлена под новый бланк (короткие формулировки). СЗ на СД
+    // пока оставляем в прежнем виде.
+    const lblQuestion = isPravlenie ? 'Вопросы на повестку дня' : 'Укажите формулировку вопроса включаемого в повестку дня заседания.';
+    const lblExplain  = isPravlenie ? 'Краткое пояснение по вопросу повестки дня' : 'Коротко дайте пояснения по предлагаемому вопросу повестки дня.';
+    const lblDecision = isPravlenie ? 'Проект решения по вопросу повестки дня' : 'Укажите проект решения по вопросу повестки.';
+    const lblReporter = isPravlenie ? 'ФИО докладчика:' : 'Докладчик:';
+    const lblAttach   = isPravlenie ? 'Приложения:' : 'Приложения';
+
     // ============ Build the main table ============
     const makeRow = (leftText, rightParas) => new TableRow({
       children: [
@@ -165,27 +174,18 @@ const SZGenerator = {
 
     const mainTable = new Table({
       rows: [
-        makeRow(
-          'Укажите формулировку вопроса включаемого в повестку дня заседания.',
-          justifyP(trB(subject))
-        ),
-        makeRow(
-          'Коротко дайте пояснения по предлагаемому вопросу повестки дня.',
-          detailParas
-        ),
-        makeRow(
-          'Укажите проект решения по вопросу повестки.',
-          justifyP(tr(projectDecision))
-        ),
+        makeRow(lblQuestion, justifyP(trB(subject))),
+        makeRow(lblExplain, detailParas),
+        makeRow(lblDecision, justifyP(tr(projectDecision))),
         new TableRow({
           children: [
-            cell(justifyP(tr('Докладчик:')), COL_LEFT),
+            cell(justifyP(tr(lblReporter)), COL_LEFT),
             cell(justifyP(tr(Utils.DAIP_DIRECTOR_NAME)), COL_RIGHT),
           ],
         }),
         new TableRow({
           children: [
-            cell(justifyP(tr('Приложения')), COL_LEFT),
+            cell(justifyP(tr(lblAttach)), COL_LEFT),
             cell([
               justifyP(tr(`Андеррайтинговое решение № ${docNumber} от ${dateDot}`)),
               justifyP(tr(`Заключение ДАиП от ${dateDot}`)),
@@ -206,16 +206,13 @@ const SZGenerator = {
     });
 
     // ============ Compose final paragraphs ============
+    const rightP = (text) => new Paragraph({ children: [trB(text)], alignment: AlignmentType.RIGHT });
     const paragraphs = [
-      // Recipient (right-aligned)
-      new Paragraph({
-        children: [trB(recipientRole)],
-        alignment: AlignmentType.RIGHT,
-      }),
-      new Paragraph({
-        children: [trB(fixedRecipientName)],
-        alignment: AlignmentType.RIGHT,
-      }),
+      // Recipient (right-aligned). Для Правления — новый бланк: добавлена строка
+      // «АО «КСЖ «Standard Life»» и обращение «г-ну …».
+      ...(isPravlenie
+        ? [rightP(recipientRole), rightP(Utils.COMPANY_SHORT_NAME), rightP(`г-ну ${fixedRecipientName}`)]
+        : [rightP(recipientRole), rightP(fixedRecipientName)]),
       emptyP(),
 
       // Title centered (without date)
