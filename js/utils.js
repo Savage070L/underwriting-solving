@@ -119,6 +119,15 @@ const Utils = {
     return Utils.fmtDateShort(date) + 'г.';
   },
 
+  // Format date as «DD месяц YYYY года» (день числом без нуля впереди, месяц
+  // прописью в родительном падеже, год числом + «года»). Напр. «14 июня 2026 года».
+  // Для даты под подписантами.
+  fmtDateProse(date) {
+    if (!date) return '';
+    if (!(date instanceof Date)) date = Utils.parseExcelDate(date);
+    return `${date.getDate()} ${Utils.RUSSIAN_MONTHS_GEN[date.getMonth()]} ${date.getFullYear()} года`;
+  },
+
   // Format money: 58 830 248,00 тенге
   fmtMoney(value) {
     return Utils.fmtMoneyRaw(value) + ' тенге';

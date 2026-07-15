@@ -239,6 +239,11 @@ const SZGenerator = {
       }),
       emptyP(), // дополнительный отступ после «Согласовано:» перед ролью утверждающего
       sigLine(approverRole, approverName),
+      // Дата под подписантом (Заместитель Председателя Правления) — слева,
+      // «14 июня 2026 года». Пока только для СЗ на Правление (новый бланк).
+      ...(isPravlenie
+        ? [new Paragraph({ children: [tr(Utils.fmtDateProse(docDate))], alignment: AlignmentType.LEFT })]
+        : []),
     ];
 
     const doc = new Document({
