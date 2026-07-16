@@ -1,57 +1,26 @@
 // daip-print.js — вкладка «Печать рекомендации ДАиП».
 //
-// Отдельный от «Проверки договоров» поток: СВОЙ файл-реестр, БЕЗ проверки
-// stat.gov.kz. Печатает по каждому договору ТОЛЬКО секцию «Рекомендация ДАиП»
-// (одна на договор, филиалы — внутри) с РЕДАКТИРУЕМЫМ подписантом: ФИО и
-// должность (они периодически меняются). Всё в один ZIP.
+// Реестр берётся из вкладки «Проверка договоров» (общий BatchAR.rows) — своей
+// загрузки файла тут НЕТ. Проверка stat.gov.kz НЕ требуется. По каждому договору
+// печатается ТОЛЬКО секция «Рекомендация ДАиП» (одна на договор, филиалы —
+// внутри) с РЕДАКТИРУЕМЫМ подписантом: ФИО и должность (периодически меняются).
+// Всё в один ZIP.
 //
-// Переиспользуем BatchReader.parse (тот же парсер выгрузки), ARForm.buildDocx
-// (с opts.only='recommendation' и underwriterName/Role), BatchAR._ensureZip
-// (ленивая загрузка JSZip) и глобальный saveAs (FileSaver).
+// Переиспользуем ARForm.buildDocx (opts.only='recommendation' + underwriterName/
+// Role), BatchAR._ensureZip (ленивая загрузка JSZip) и глобальный saveAs.
 
 const DaipPrint = {
-  rows: [],
   _busy: false,
 
-  async loadFile(file) {
-    if (!file) return;
-    const statusEl = document.getElementById('daip-status');
-    try {
-      if (statusEl) statusEl.textContent = 'Чтение файла…';
-      const buf = await file.arrayBuffer();
-      const { rows, total, skipped } = BatchReader.parse(buf);
-      DaipPrint.rows = rows || [];
-      const zone = document.getElementById('daip-zone');
-      if (zone) zone.classList.toggle('loaded', !!total);
-      const contracts = DaipPrint.rows.length ? DaipPrint._groupByContract().size : 0;
-      if (statusEl) {
-        statusEl.textContent = total
-          ? `Загружено: ${total} строк ОСНС · договоров: ${contracts}${skipped ? ` (пропущено строк: ${skipped})` : ''}`
-          : 'Подходящих строк ОСНС не найдено';
-      }
-      DaipPrint._updateControls();
-    } catch (e) {
-      console.error('DAiP load error:', e);
-      if (statusEl) statusEl.textContent = 'Ошибка чтения файла: ' + e.message;
-      if (typeof App !== 'undefined' && App.showMsg) App.showMsg('Не удалось прочитать реестр: ' + e.message, 'error');
-    }
-  },
-
-  clear() {
-    DaipPrint.rows = [];
-    const zone = document.getElementById('daip-zone');
-    if (zone) zone.classList.remove('loaded');
-    const input = zone ? zone.querySelector('input[type=file]') : null;
-    if (input) input.value = '';
-    const statusEl = document.getElementById('daip-status');
-    if (statusEl) statusEl.textContent = 'Загрузите .xlsx выгрузку';
-    DaipPrint._updateControls();
+  // Строки реестра — из «Проверки договоров».
+  _rows() {
+    return (typeof BatchAR !== 'undefined' && Array.isArray(BatchAR.rows)) ? BatchAR.rows : [];
   },
 
   // Группировка по номеру договора: одна рекомендация на договор (филиалы — внутри).
   _groupByContract() {
     const groups = new Map();
-    DaipPrint.rows.forEach((r, i) => {
+    DaipPrint._rows().forEach((r, i) => {
       const key = r.contractNumber || `__no_${r.bin}_${i}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(r);
@@ -67,6 +36,27 @@ const DaipPrint = {
     };
   },
 
+  // Обновить статус/кнопку по текущему реестру. Вызывается при переключении на
+  // вкладку (App.switchTab) и после загрузки/очистки реестра в «Проверке договоров».
+  refresh() {
+    const rows = DaipPrint._rows();
+    const contracts = rows.length ? DaipPrint._groupByContract().size : 0;
+    const statusEl = document.getElementById('daip-status');
+    if (statusEl) {
+      statusEl.style.display = rows.length ? '' : 'none';
+      statusEl.textContent = rows.length
+        ? `Реестр из «Проверки договоров»: ${rows.length} строк ОСНС · договоров: ${contracts}`
+        : '';
+    }
+    const emptyEl = document.getElementById('daip-empty');
+    if (emptyEl) emptyEl.style.display = rows.length ? 'none' : '';
+    const btn = document.getElementById('daip-gen');
+    if (btn) {
+      btn.disabled = DaipPrint._busy || !contracts;
+      btn.textContent = contracts ? `Печать рекомендаций ДАиП (${contracts})` : 'Печать рекомендаций ДАиП';
+    }
+  },
+
   _fileName(cn, taken) {
     const base = `Рекомендация ДАиП ${String(cn || 'без номера').replace(/[\\/:*?"<>|]/g, '_')}`;
     let name = `${base}.docx`;
@@ -76,21 +66,11 @@ const DaipPrint = {
     return name;
   },
 
-  _updateControls() {
-    const n = DaipPrint.rows.length ? DaipPrint._groupByContract().size : 0;
-    const btn = document.getElementById('daip-gen');
-    if (btn) {
-      btn.disabled = DaipPrint._busy || !n;
-      btn.textContent = n ? `Печать рекомендаций ДАиП (${n})` : 'Печать рекомендаций ДАиП';
-    }
-    const clr = document.getElementById('daip-clear');
-    if (clr) clr.style.display = DaipPrint.rows.length ? '' : 'none';
-  },
-
   async generateAll() {
-    if (DaipPrint._busy || !DaipPrint.rows.length) return;
+    const rows = DaipPrint._rows();
+    if (DaipPrint._busy || !rows.length) return;
     DaipPrint._busy = true;
-    DaipPrint._updateControls();
+    DaipPrint.refresh();
     const progress = document.getElementById('daip-progress');
     const bar = document.getElementById('daip-progress-bar');
     const txt = document.getElementById('daip-progress-text');
@@ -129,7 +109,7 @@ const DaipPrint = {
     } finally {
       DaipPrint._busy = false;
       if (progress) progress.style.display = 'none';
-      DaipPrint._updateControls();
+      DaipPrint.refresh();
     }
   },
 };

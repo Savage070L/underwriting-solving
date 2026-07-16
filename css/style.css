@@ -3288,7 +3288,37 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   border-color: #6366f1;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
 }
-.daip-zone { max-width: 520px; margin-bottom: 16px; }
+.daip-status {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.daip-empty {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--c-surface-subtle, #f8fafc);
+  border: 1px dashed var(--c-border, #cbd5e1);
+  color: var(--c-text-secondary, #64748b);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.daip-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #4f46e5;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.daip-link:hover { color: #4338ca; }
 .daip-gen { margin-top: 4px; }
 
 /* Панель над таблицей: кнопка «открыть в отдельной вкладке». */

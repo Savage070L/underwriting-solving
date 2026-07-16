@@ -94,6 +94,9 @@ const App = {
       }
     });
     try { localStorage.setItem('active_tab', name); } catch (e) {}
+    // Вкладка «Печать рекомендации ДАиП» берёт реестр из «Проверки договоров» —
+    // при открытии обновляем счётчик/кнопку по текущему BatchAR.rows.
+    if (name === 'daip' && typeof DaipPrint !== 'undefined') DaipPrint.refresh();
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 

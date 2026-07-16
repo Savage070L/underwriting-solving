@@ -39,7 +39,7 @@ If you add new derived data to documents, you must also add it to the snapshot i
 
 1. **Проверка контрагента** — `#tab-contractor`: standalone БИН check: `#contractorBin` + «Проверить БИН» → `App.quickLookupByBin()` (which reads `#contractorBin`, not `#manualBin`). Renders the company profile only, no tariff.
 2. **Проверка Договоров** — `#tab-contracts` / `#batch-section` (batch AR generation; see below).
-3. **Печать рекомендации ДАиП** — `#tab-daip` / `js/daip-print.js` (`DaipPrint`): **separate** from «Проверка Договоров» — its own `.xlsx` upload, **no stat.gov.kz gate**, prints ONLY the «Рекомендация ДАиП» section (one doc per contract, филиалы inside) to a ZIP. Editable signer via `#daip-signer-role` / `#daip-signer-name` → `ARForm.buildDocx(row, {only:'recommendation', underwriterRole, underwriterName, filials})`. Reuses `BatchReader.parse` / `BatchAR._ensureZip` / `saveAs`.
+3. **Печать рекомендации ДАиП** — `#tab-daip` / `js/daip-print.js` (`DaipPrint`): prints ONLY the «Рекомендация ДАиП» section (one doc per contract, филиалы inside) to a ZIP. **No own upload — reads the registry from «Проверка Договоров» (`BatchAR.rows`)**; `App.switchTab('daip')` calls `DaipPrint.refresh()` to sync the count/button (empty state links back to `#tab-contracts`). **No stat.gov.kz gate.** Editable signer via `#daip-signer-role` / `#daip-signer-name` → `ARForm.buildDocx(row, {only:'recommendation', underwriterRole, underwriterName, filials})`. Reuses `BatchAR._ensureZip` / `saveAs`.
 4. **Андеррайтинговое решение** — `#tab-decision`: per-case files + manual full input (`#manualBin` + «Применить» → `applyManualZayavka`) + Шаги 1–3 + document generation.
 5. **Справочники** — `#tab-refs` / `#refs-section` (the 6 reference files).
 
