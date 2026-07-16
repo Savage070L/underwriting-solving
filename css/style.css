@@ -3217,6 +3217,39 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   border: 1px solid var(--c-border-subtle, #e2e8f0);
   border-radius: 10px;
 }
+/* Пагинация таблицы «Проверка договоров». */
+.batch-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: #475467;
+}
+.batch-pg-btn {
+  padding: 5px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  background: #fff;
+  color: #344054;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.batch-pg-btn:hover:not(:disabled) { background: #f8fafc; border-color: #98a2b3; }
+.batch-pg-btn:disabled { opacity: 0.45; cursor: default; }
+.batch-pg-info { margin: 0 6px; font-variant-numeric: tabular-nums; }
+.batch-pg-info b { color: #1d2939; }
+.batch-pg-size { margin-left: auto; white-space: nowrap; }
+.batch-pg-size select {
+  padding: 4px 6px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
 /* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
 .batch-toolbar {
   display: flex;

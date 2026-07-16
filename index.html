@@ -328,6 +328,9 @@
             <tbody id="batch-tbody"></tbody>
           </table>
         </div>
+        <!-- Пагинация таблицы (BatchAR._renderPagination). В DOM держим только
+             одну страницу строк — большие реестры иначе вешают вкладку. -->
+        <div class="batch-pagination" id="batch-pagination" style="display:none"></div>
 
         <!-- Статус проверки stat.gov.kz — под таблицей. Генерация доступна только
              после того, как все БИН успешно проверены (без подключения — недоступна). -->

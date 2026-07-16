@@ -22,6 +22,12 @@ const BatchAR = {
   // 'filial' | 'tranche'). Приоритет применения — порядок _SORT_DEFS. Пусто — как в файле.
   _sorts: [],
 
+  // Пагинация таблицы: рендерим в DOM только одну страницу строк. Без этого при
+  // больших реестрах (десятки тысяч строк) сборка всей таблицы одной innerHTML
+  // подвешивала вкладку. Проверка/статус/выгрузка работают по всему массиву rows.
+  _page: 0,
+  _pageSize: 200,
+
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
   // ExcelJS — для выгрузки ошибок с заливкой ячеек (XLSX CE заливки не пишет).
   CDN: {
@@ -67,6 +73,7 @@ const BatchAR = {
       const buf = await file.arrayBuffer();
       const { rows, total, skipped, header, idx } = BatchReader.parse(buf);
       BatchAR.rows = rows;
+      BatchAR._page = 0;                   // на первую страницу
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
       BatchAR._aggByContract = null;       // сбросить кэш агрегатов по договору (СС/СП/ФОТ контрагентов)
@@ -168,6 +175,7 @@ const BatchAR = {
     const i = BatchAR._sorts.indexOf(key);
     if (i >= 0) BatchAR._sorts.splice(i, 1);
     else BatchAR._sorts.push(key);
+    BatchAR._page = 0; // после смены сортировки — на первую страницу
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
@@ -195,16 +203,27 @@ const BatchAR = {
     if (!BatchAR.rows.length) {
       wrap.style.display = 'none';
       if (toolbar) toolbar.style.display = 'none';
+      const pg = document.getElementById('batch-pagination');
+      if (pg) { pg.style.display = 'none'; pg.innerHTML = ''; }
       tbody.innerHTML = '';
       return;
     }
     wrap.style.display = 'block';
     if (toolbar) toolbar.style.display = '';
+    // Пагинация: порядок считаем по всем строкам, но в DOM рендерим только срез
+    // текущей страницы. Иначе сборка всей таблицы (десятки тысяч строк) одной
+    // innerHTML подвешивает вкладку. Проверка/статус/выгрузка идут по всему rows.
+    const order = BatchAR._displayOrder();
+    const pageCount = Math.max(1, Math.ceil(order.length / BatchAR._pageSize));
+    if (BatchAR._page >= pageCount) BatchAR._page = pageCount - 1;
+    if (BatchAR._page < 0) BatchAR._page = 0;
+    const pageStart = BatchAR._page * BatchAR._pageSize;
+    const pageOrder = order.slice(pageStart, pageStart + BatchAR._pageSize);
     // Порядок столбцов: # · Договор · Наим.Страхователя · БИН Страхователя ·
     // Контрагент(имя+БИН) · ОКЭД · Класс(страх) · Класс+тариф(контр) ·
     // Кол-во(контр) · ФОТ(контр) · СС(контр) · СП(контр) · СС(страх) · ПК ·
     // СПсПК(страх) · Дата рег. · Гос. участие · Менеджер.
-    tbody.innerHTML = BatchAR._displayOrder().map((i) => {
+    tbody.innerHTML = pageOrder.map((i) => {
       const r = BatchAR.rows[i];
       const okedErr = BatchAR._okedError(r);
       const cDiff = BatchAR._classDiff(r);
@@ -282,6 +301,42 @@ const BatchAR = {
       </tr>`;
     }).join('');
     BatchAR._tableVersion++;
+    BatchAR._renderPagination(order.length, pageCount, pageStart, pageOrder.length);
+  },
+
+  // Панель пагинации под таблицей. Скрыта, если строк ≤ размера страницы.
+  _renderPagination(total, pageCount, pageStart, shown) {
+    const host = document.getElementById('batch-pagination');
+    if (!host) return;
+    if (total <= BatchAR._pageSize) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    const page = BatchAR._page;
+    const first = total ? pageStart + 1 : 0;
+    const last = pageStart + shown;
+    const btn = (label, target, disabled) =>
+      `<button type="button" class="batch-pg-btn" ${disabled ? 'disabled' : `onclick="BatchAR.gotoPage(${target})"`}>${label}</button>`;
+    const opt = (v) => `<option value="${v}"${BatchAR._pageSize === v ? ' selected' : ''}>${v}</option>`;
+    host.innerHTML =
+      btn('« Первая', 0, page === 0) +
+      btn('‹ Назад', page - 1, page === 0) +
+      `<span class="batch-pg-info">Стр. <b>${page + 1}</b> из <b>${pageCount}</b> · строки <b>${first}–${last}</b> из <b>${total}</b></span>` +
+      btn('Вперёд ›', page + 1, page >= pageCount - 1) +
+      btn('Последняя »', pageCount - 1, page >= pageCount - 1) +
+      `<span class="batch-pg-size">по <select onchange="BatchAR.setPageSize(this.value)">${opt(100)}${opt(200)}${opt(500)}${opt(1000)}</select> на стр.</span>`;
+  },
+
+  gotoPage(p) {
+    // Верхнюю границу страницы обрежет renderTable (там уже есть clamp по pageCount),
+    // поэтому не считаем порядок повторно — иначе _displayOrder гоняется дважды.
+    BatchAR._page = Math.max(0, p);
+    BatchAR.renderTable();
+    const wrap = document.getElementById('batch-table-wrap');
+    if (wrap) wrap.scrollTop = 0; // к началу страницы
+  },
+  setPageSize(v) {
+    BatchAR._pageSize = Math.max(1, parseInt(v, 10) || 200);
+    BatchAR._page = 0;
+    BatchAR.renderTable();
   },
 
   // Кол-во траншей рассрочки (по числу заполненных этапов «Этап{N}Сумма»).
