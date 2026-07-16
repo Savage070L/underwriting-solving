@@ -211,8 +211,13 @@ const ARForm = {
     const docDate = ARForm._dateRu(row.dateContract);
     const period = `с ${ARForm._dateRu(row.periodFrom)} по ${ARForm._dateRu(row.periodTo)}`;
     const recText = `принять на страхование на указанных условиях — ${ARForm.decisionText(row)}`;
-    // Подписант/автор в документе — по умолчанию фиксированный (Бурханов Д.К.).
-    const sigText = `${ARForm.UNDERWRITER}   _______________ Подпись`;
+    // Подписант и его должность — по умолчанию «Андеррайтер» / Бурханов Д.К., но их
+    // можно переопределить через opts (вкладка «Печать рекомендации ДАиП»).
+    const uwName = (opts.underwriterName && String(opts.underwriterName).trim()) || ARForm.UNDERWRITER;
+    const uwRole = (opts.underwriterRole && String(opts.underwriterRole).trim()) || 'Андеррайтер';
+    const sigText = `${uwName}   _______________ Подпись`;
+    // opts.only === 'recommendation' → печатаем ТОЛЬКО секцию «Рекомендация ДАиП».
+    const recommendationOnly = opts.only === 'recommendation';
 
     const rows = [];
 
@@ -227,28 +232,30 @@ const ARForm = {
     rows.push(labelRow('Срок действия договора страхования', period));
     rows.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
     rows.push(labelRow('ДАиП рекомендовано:', recText));
-    rows.push(labelRow('Андеррайтер:', sigText));
+    rows.push(labelRow(`${uwRole}:`, sigText));
 
-    // ===== СЕКЦИЯ 2: ЗАКЛЮЧЕНИЕ ПО УПРАВЛЕНИЮ РИСКАМИ =====
-    rows.push(sectionRow('ЗАКЛЮЧЕНИЕ ПОДРАЗДЕЛЕНИЯ ПО УПРАВЛЕНИЮ РИСКАМИ', docNo, docDate));
-    rows.push(labelRow('Класс профессионального риска', 'соответствует'));
-    rows.push(labelRow('Страховой тариф', 'соответствует'));
-    rows.push(labelRow('Источник данных по статистике страховых случаев Страхователя', 'Единая Страховая База Данных'));
-    rows.push(labelRow('Риск-менеджер', `${ARForm.RISK_MANAGER}   _______________ Подпись`));
+    if (!recommendationOnly) {
+      // ===== СЕКЦИЯ 2: ЗАКЛЮЧЕНИЕ ПО УПРАВЛЕНИЮ РИСКАМИ =====
+      rows.push(sectionRow('ЗАКЛЮЧЕНИЕ ПОДРАЗДЕЛЕНИЯ ПО УПРАВЛЕНИЮ РИСКАМИ', docNo, docDate));
+      rows.push(labelRow('Класс профессионального риска', 'соответствует'));
+      rows.push(labelRow('Страховой тариф', 'соответствует'));
+      rows.push(labelRow('Источник данных по статистике страховых случаев Страхователя', 'Единая Страховая База Данных'));
+      rows.push(labelRow('Риск-менеджер', `${ARForm.RISK_MANAGER}   _______________ Подпись`));
 
-    // ===== СЕКЦИЯ 3: АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ =====
-    rows.push(sectionRow('АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ', docNo, docDate));
-    rows.push(labelRow('На основании Рекомендации', `№ ${docNo || '____'} от ${docDate}`));
-    rows.push(labelRow('Страхователь', nameCell));
-    rows.push(labelRow('БИН/ИИН', row.bin));
-    rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
-    rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
-    rows.push(finHeaderRow());
-    finBodyRows().forEach(tr => rows.push(tr));
-    rows.push(labelRow('Срок действия договора страхования', period));
-    rows.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
-    rows.push(labelRow('РЕШЕНИЕ:', recText));
-    rows.push(labelRow('Андеррайтер:', sigText));
+      // ===== СЕКЦИЯ 3: АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ =====
+      rows.push(sectionRow('АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ', docNo, docDate));
+      rows.push(labelRow('На основании Рекомендации', `№ ${docNo || '____'} от ${docDate}`));
+      rows.push(labelRow('Страхователь', nameCell));
+      rows.push(labelRow('БИН/ИИН', row.bin));
+      rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
+      rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
+      rows.push(finHeaderRow());
+      finBodyRows().forEach(tr => rows.push(tr));
+      rows.push(labelRow('Срок действия договора страхования', period));
+      rows.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
+      rows.push(labelRow('РЕШЕНИЕ:', recText));
+      rows.push(labelRow(`${uwRole}:`, sigText));
+    }
 
     const table = new Table({
       rows,

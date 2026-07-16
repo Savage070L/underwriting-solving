@@ -76,10 +76,10 @@ const App = {
   },
 
   // ===== РАЗДЕЛЫ (ВКЛАДКИ) =====
-  // Страница разбита на 4 раздела-вкладки. Состояние App общее и НЕ теряется
+  // Страница разбита на разделы-вкладки. Состояние App общее и НЕ теряется
   // при переключении — мы лишь показываем/скрываем панели (.tab-panel).
   // Порядок в массиве — визуальный порядок вкладок в шапке.
-  TABS: ['contractor', 'contracts', 'decision', 'refs'],
+  TABS: ['contractor', 'contracts', 'daip', 'decision', 'refs'],
 
   switchTab(name, scroll = true) {
     if (!App.TABS.includes(name)) name = App.TABS[0];

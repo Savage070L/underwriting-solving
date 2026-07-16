@@ -3250,6 +3250,47 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   font-size: 0.8rem;
   cursor: pointer;
 }
+
+/* ===== Вкладка «Печать рекомендации ДАиП» ===== */
+.daip-hint {
+  margin: 4px 0 18px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--c-text-secondary, #64748b);
+}
+.daip-signer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.daip-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+.daip-field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--c-text-secondary, #475467);
+}
+.daip-field input {
+  padding: 9px 12px;
+  border: 1px solid var(--c-border, #d0d5dd);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.daip-field input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+.daip-zone { max-width: 520px; margin-bottom: 16px; }
+.daip-gen { margin-top: 4px; }
+
 /* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
 .batch-toolbar {
   display: flex;
