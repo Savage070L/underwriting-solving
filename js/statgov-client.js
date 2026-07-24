@@ -199,6 +199,45 @@ const StatGovClient = {
       }, timeoutMs);
     });
   },
+
+  // Резидентство по БИН через egov P30.11 (мост EGOV_RESIDENCY_LOOKUP). Использует
+  // сессию egov.kz пользователя. Возвращает { resident, statusCode, statusText,
+  // shortName, registrationDate, incorporationCountry } — авторитетный источник.
+  async lookupEgovResidency(bin) {
+    const cleanBin = String(bin || '').trim();
+    if (!/^\d{12}$/.test(cleanBin)) {
+      throw new Error('БИН должен содержать 12 цифр');
+    }
+    if (!StatGovClient._ready) {
+      const p = await StatGovClient.ping();
+      if (!p.ok) throw new Error('Расширение-мост не установлено или не активно');
+    }
+    const requestId = 'egov-' + Math.random().toString(36).slice(2);
+    const timeoutMs = 20000;
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        const d = event.data;
+        if (!d || d.source !== StatGovClient.SOURCE_BRIDGE) return;
+        if (d.type !== 'EGOV_RESIDENCY_LOOKUP_RESULT' || d.requestId !== requestId) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        if (d.ok) resolve(d.data);
+        else reject(new Error(d.error || 'Неизвестная ошибка моста (egov)'));
+      };
+      window.addEventListener('message', handler);
+      window.postMessage(
+        { source: StatGovClient.SOURCE_APP, type: 'EGOV_RESIDENCY_LOOKUP', requestId, bin: cleanBin },
+        '*',
+      );
+      setTimeout(() => {
+        if (done) return;
+        window.removeEventListener('message', handler);
+        reject(new Error('Таймаут запроса к egov.kz (' + timeoutMs + ' мс)'));
+      }, timeoutMs);
+    });
+  },
 };
 
 document.addEventListener('DOMContentLoaded', () => StatGovClient.init());

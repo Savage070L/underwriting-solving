@@ -3270,36 +3270,68 @@ const App = {
   // Пересчитать признак резидентства по БИН текущего кейса и синхронизировать
   // галочку «Нерезидент». Вызывается из _refreshDerivedData (единая точка).
   _applyResidency() {
-    const badge = document.getElementById('resident-status');
     const cb = document.getElementById('nonResident');
     const bin = App.zayavka?.bin || '';
     if (typeof ResidentCheck === 'undefined' || !bin) {
       App.residency = null;
-      if (badge) { badge.textContent = ''; badge.className = 'resident-badge'; }
+      App._renderResidencyBadge();
       return;
     }
-    const res = ResidentCheck.check(bin);
+    // Приоритет — уже полученный авторитетный вердикт egov (мост). Иначе —
+    // мгновенный локальный из индекса ГБД ЮЛ.
+    const egCached = ResidentCheck.egovResolved ? ResidentCheck.egovResolved(bin) : null;
+    const res = egCached || ResidentCheck.check(bin);
     App.residency = res;
     // Автоподстановка галочки: только пока андеррайтер не переключил её сам.
     if (cb && !App._residencyManual && res.nonResident !== null) cb.checked = res.nonResident;
+    App._renderResidencyBadge();
+    // Авторитетное уточнение через egov P30.11 (если мост доступен, вердикта ещё
+    // нет и андеррайтер не правил вручную). При ответе — перекрываем локальный.
+    if (!egCached && !App._residencyManual
+        && ResidentCheck.bridgeAvailable && ResidentCheck.bridgeAvailable()) {
+      const reqBin = bin;
+      ResidentCheck.checkEgov(reqBin).then((eg) => {
+        if (!eg) return;
+        if ((App.zayavka?.bin || '') !== reqBin || App._residencyManual) return;
+        App.residency = eg;
+        const cb2 = document.getElementById('nonResident');
+        if (cb2 && eg.nonResident !== null) cb2.checked = eg.nonResident;
+        App._renderResidencyBadge();
+        App.showPreview();  // egovResolved теперь заполнен → без цикла (см. egCached)
+      }).catch(() => {});
+    }
+  },
+
+  // Бейдж рядом с галочкой «Нерезидент» из App.residency + ручной правки.
+  _renderResidencyBadge() {
+    const badge = document.getElementById('resident-status');
     if (!badge) return;
+    const res = App.residency;
+    const cb = document.getElementById('nonResident');
+    if (!res) { badge.textContent = ''; badge.className = 'resident-badge'; return; }
     // registryStatus ≠ 0 — БИН в реестре есть (резидент), но самая свежая запись
     // говорит «ликвидирован/реорганизован» → жёлтая пометка, а не зелёная.
     const MOD = { resident: res.registryStatus ? 'warn' : 'ok', nonresident: 'no', individual: 'ip', invalid: 'na', unavailable: 'na', loading: 'na' };
-    // Ручная правка: показываем решение андеррайтера, а вердикт базы — справочно.
     if (App._residencyManual) {
       const manualNR = !!cb?.checked;
       badge.className = `resident-badge resident-badge--${manualNR ? 'no' : 'ok'}`;
       badge.title = `Выставлено вручную андеррайтером. Автопроверка: ${res.title}`;
-      badge.textContent = `${manualNR ? 'нерезидент' : 'резидент'} · вручную (по ГБД ЮЛ — ${res.label})`;
+      badge.textContent = `${manualNR ? 'нерезидент' : 'резидент'} · вручную`;
       return;
     }
     badge.className = `resident-badge resident-badge--${MOD[res.status] || 'na'}`;
     badge.title = res.title;
-    const src = res.status === 'resident' || res.status === 'nonresident'
-      ? ` · ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''}`
-      : '';
-    badge.textContent = `${res.label}${src}`;
+    badge.textContent = `${res.label}${App._residencySrcSuffix(res)}`;
+  },
+
+  // « · egov» / « · ГБД ЮЛ от DD.MM.YYYY» — откуда вердикт (для бейджа/карточки).
+  _residencySrcSuffix(res) {
+    if (!res) return '';
+    if (res.source === 'egov') return ' · egov';
+    if (res.status === 'resident' || res.status === 'nonresident') {
+      return ` · ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''}`;
+    }
+    return '';
   },
 
   // Ручное переключение галочки «Нерезидент» — отключает автоподстановку
@@ -3334,8 +3366,9 @@ const App = {
     const label = stManual ? (manualNR ? 'нерезидент' : 'резидент') : res.label;
     const title = stManual ? `Выставлено вручную андеррайтером. Автопроверка: ${res.title}` : res.title;
     const src = stManual ? '(вручную)'
-      : ((res.status === 'resident' || res.status === 'nonresident')
-        ? `(ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''})` : '');
+      : (res.source === 'egov' ? '(egov)'
+        : ((res.status === 'resident' || res.status === 'nonresident')
+          ? `(ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''})` : ''));
     return `<span class="pi-resident pi-resident--${mod}" title="${App._residEsc(title)}">${App._residEsc(label)}</span>`
       + (src ? ` <span class="pi-resident-src">${App._residEsc(src)}</span>` : '');
   },
@@ -3367,9 +3400,10 @@ const App = {
     if (!App.residency || !['resident', 'nonresident', 'individual'].includes(App.residency.status)) return null;
     return { status: App.residency.status, label: App.residency.label,
       registryStatus: App.residency.registryStatus || 0,
-      source: (App.residency.status === 'resident' || App.residency.status === 'nonresident')
-        ? `ГБД ЮЛ${(typeof ResidentCheck !== 'undefined' && ResidentCheck.updatedText()) ? ' от ' + ResidentCheck.updatedText() : ''}`
-        : '' };
+      source: App.residency.source === 'egov' ? 'egov'
+        : ((App.residency.status === 'resident' || App.residency.status === 'nonresident')
+          ? `ГБД ЮЛ${(typeof ResidentCheck !== 'undefined' && ResidentCheck.updatedText()) ? ' от ' + ResidentCheck.updatedText() : ''}`
+          : '') };
   },
 
   // ===== AUTO BIN LOOKUP via Cloudflare Worker proxy =====
@@ -3931,7 +3965,7 @@ const App = {
       // residency* — справочно: откуда взялось значение (для подсказок/аналитики).
       nonResident: document.getElementById('nonResident').checked,
       residencyStatus: App.residency ? App.residency.status : null,
-      residencySource: App._residencyManual ? 'manual' : (App.residency ? 'gbd_ul' : null),
+      residencySource: App._residencyManual ? 'manual' : (App.residency ? (App.residency.source || 'gbd_ul') : null),
       residencyNote: App.residency ? App.residency.title : null,
       isAffiliated,
       affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,

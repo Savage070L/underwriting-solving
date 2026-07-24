@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Standard Life — мост к stat.gov.kz",
-  "version": "0.3.0",
-  "description": "Тянет данные по БИН со stat.gov.kz (ЭЦП-сессия), statsnet.co и kyc.kz, отдаёт андеррайтинговому приложению.",
+  "version": "0.5.0",
+  "description": "Тянет данные по БИН со stat.gov.kz (ЭЦП-сессия), egov.kz (резидентство), statsnet.co и kyc.kz; держит сессии живыми в течение дня. Отдаёт андеррайтинговому приложению.",
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://stat.gov.kz/*",
+    "https://egov.kz/*",
     "https://statsnet.co/*",
     "https://kyc.kz/*",
     "https://yandex.kz/*",

@@ -14,8 +14,10 @@
 // ИИН (ИП и физлица) в ГБД ЮЛ отсутствуют по определению — реестр только для
 // юридических лиц. Поэтому для ИИН правило «нет в базе → нерезидент» НЕ
 // применяется (иначе все ИП стали бы нерезидентами: в реальной выгрузке
-// договоров это ~38% строк). Такие строки помечаются отдельным статусом
-// 'individual' и по умолчанию считаются резидентами — см. IIN_RESIDENT.
+// договоров это ~38% строк). Резидентство ИП автоматически НЕ определяется
+// (egov P30.11 их тоже не проверяет, среди ИП есть и нерезиденты), поэтому такие
+// строки помечаются статусом 'individual' и подписью «ИП (ХЗ)» — резидентство
+// неизвестно, галочку не трогаем (nonResident:null), решает андеррайтер.
 //
 // Различаем БИН и ИИН по 5-й цифре (структура идентификатора РК):
 //   БИН: ГГММ + [4|5|6] + признак + номер + к.ц.  (4 — резидент, 5 — нерезидент,
@@ -27,10 +29,6 @@
 const ResidentCheck = {
   DATA_URL: 'data/gbd_ul_bins.bin',
   META_URL: 'data/gbd_ul_meta.json',
-
-  // ИИН нельзя проверить по ГБД ЮЛ. true → считаем ИП резидентом (текущее
-  // поведение приложения по умолчанию), false → нерезидентом.
-  IIN_RESIDENT: true,
 
   _bins: null,        // Float64Array, отсортирован по возрастанию
   _flagged: null,     // Float64Array: БИН, у которых свежая запись не «Зарегистрирован»
@@ -214,12 +212,17 @@ const ResidentCheck = {
         title: 'Некорректный БИН/ИИН: нужно 12 цифр' };
     }
     if (kind === 'iin') {
-      const resident = ResidentCheck.IIN_RESIDENT;
+      // ИП/физлицо. Резидентство ИП автоматически НЕ определяется: реестр юр. лиц
+      // (ГБД ЮЛ) к ним неприменим, egov P30.11 их тоже не проверяет. Среди ИП есть
+      // и нерезиденты, поэтому «резидент по умолчанию» — ложное утверждение.
+      // Показываем «ИП (ХЗ)» = резидентство неизвестно, галочку НЕ трогаем
+      // (nonResident:null) — решение за андеррайтером.
       return {
-        status: 'individual', nonResident: !resident,
-        label: resident ? 'резидент (ИП)' : 'нерезидент (ИП)', badge: 'ИП',
-        title: 'Это ИИН (ИП или физлицо). ГБД ЮЛ — реестр только юридических лиц, '
-          + `проверка по нему неприменима; принято «${resident ? 'резидент' : 'нерезидент'}» по умолчанию — при необходимости измените вручную.`,
+        status: 'individual', nonResident: null,
+        label: 'ИП (ХЗ)', badge: 'ИП',
+        title: 'Это ИИН (ИП или физлицо). Резидентство ИП автоматически не определяется '
+          + '(реестр юр. лиц к нему неприменим, egov его не проверяет). Среди ИП есть и нерезиденты — '
+          + 'уточните и выставьте вручную.',
       };
     }
     if (!ResidentCheck._bins) {
@@ -258,6 +261,78 @@ const ResidentCheck = {
 
   // Проверка списка (индекс уже в памяти — это просто map, без сети).
   checkMany(ids) { return (ids || []).map((id) => ResidentCheck.check(id)); },
+
+  // ===== АВТОРИТЕТНАЯ ПРОВЕРКА ЧЕРЕЗ egov (P30.11, мост-расширение) =====
+  // Локальный индекс gbd_ul отстаёт (нет свежих регистраций) → даёт ложных
+  // нерезидентов. egov P30.11 — источник резидентства (налоговый) и актуальнее.
+  // Схема гибридная: локальный индекс = мгновенный ответ (оффлайн, без сети),
+  // egov через мост = АВТОРИТЕТНОЕ уточнение (по одному запросу на БИН, только
+  // когда мост доступен). Кэшируем по БИН, чтобы не дёргать повторно.
+  _egovCache: new Map(),     // bin → Promise (дедуп запросов «в полёте»)
+  _egovResolved: new Map(),  // bin → verdict (синхронно доступный результат)
+
+  bridgeAvailable() {
+    return typeof StatGovClient !== 'undefined'
+      && typeof StatGovClient.isAvailable === 'function'
+      && StatGovClient.isAvailable();
+  },
+
+  // Готовый (уже полученный) авторитетный вердикт egov по БИН — синхронно, без сети.
+  egovResolved(id) {
+    return ResidentCheck._egovResolved.get(ResidentCheck._norm(id)) || null;
+  },
+
+  // Авторитетная проверка. Возвращает verdict той же формы, что check(), но с
+  // source:'egov'. null — мост недоступен или запрос не удался (тогда вызывающий
+  // остаётся на локальном вердикте). Промис кэшируется (в т.ч. на время полёта).
+  checkEgov(id) {
+    const s = ResidentCheck._norm(id);
+    if (s.length !== 12) return Promise.resolve(null);
+    // Эндпоинт P30.11 /organizations/ — ТОЛЬКО для БИН юрлиц. Для ИИН (ИП/физлицо,
+    // 5-я цифра 0–3) он отдаёт «не является БИН» / статус 031 «не зарегистрирован»
+    // с resident:false — что для ИИН стало бы ложным «нерезидентом». Поэтому для
+    // ИИН egov НЕ дёргаем — остаётся локальный вердикт 'individual' (ИП, резидент
+    // по умолчанию). БИН типа 6 (5-я цифра 6) — это тоже ИП, но egov его принимает
+    // и сам вернёт статус 033 «является ИП», поэтому для БИН всех типов запрос идёт.
+    if (ResidentCheck.idKind(s) !== 'bin') return Promise.resolve(null);
+    if (!ResidentCheck.bridgeAvailable()) return Promise.resolve(null);
+    if (ResidentCheck._egovCache.has(s)) return ResidentCheck._egovCache.get(s);
+    const p = StatGovClient.lookupEgovResidency(s)
+      .then((d) => { const v = ResidentCheck._egovVerdict(d); if (v) ResidentCheck._egovResolved.set(s, v); return v; })
+      .catch(() => { ResidentCheck._egovCache.delete(s); return null; }); // ошибку не кэшируем
+    ResidentCheck._egovCache.set(s, p);
+    return p;
+  },
+
+  // Ответ egov P30.11 → verdict. resident:true → резидент; status 033 → ИП;
+  // 034/прочее при resident:false → нерезидент (с причиной из статуса).
+  _egovVerdict(d) {
+    if (!d || d.resident == null) return null;
+    const note = d.statusText || '';
+    const nm = d.shortName || d.fullName || '';
+    if (d.resident === true) {
+      return {
+        status: 'resident', nonResident: false, source: 'egov', registryStatus: 0,
+        label: 'резидент', badge: 'резидент', egovName: nm || null,
+        title: `egov (P30.11): резидент${nm ? ' — ' + nm : ''}`,
+      };
+    }
+    if (d.statusCode === '033') {
+      // egov подтвердил, что БИН принадлежит ИП. Но резидентство ИП egov не
+      // определяет → «ИП (ХЗ)», галочку не трогаем (nonResident:null).
+      return {
+        status: 'individual', nonResident: null, source: 'egov', registryStatus: 0,
+        label: 'ИП (ХЗ)', badge: 'ИП',
+        title: 'egov (P30.11): БИН принадлежит индивидуальному предпринимателю (не юрлицо). '
+          + 'Резидентство ИП автоматически не определяется — уточните вручную.',
+      };
+    }
+    return {
+      status: 'nonresident', nonResident: true, source: 'egov', registryStatus: 0,
+      label: 'нерезидент', badge: 'нерезидент',
+      title: `egov (P30.11): нерезидент${note ? ' — ' + note : ''}`,
+    };
+  },
 };
 
 // Автозагрузка индекса сразу при подключении скрипта: ~0,8 МБ, не блокирует

@@ -97,4 +97,21 @@ window.addEventListener('message', (event) => {
       );
     });
   }
+
+  // Резидентство по БИН через egov P30.11 (использует сессию egov.kz пользователя).
+  if (data.type === 'EGOV_RESIDENCY_LOOKUP') {
+    chrome.runtime.sendMessage({ type: 'EGOV_RESIDENCY_LOOKUP', bin: data.bin }, (response) => {
+      window.postMessage(
+        {
+          source: SOURCE_BRIDGE,
+          type: 'EGOV_RESIDENCY_LOOKUP_RESULT',
+          requestId: data.requestId,
+          ok: !!(response && response.ok),
+          data: response && response.data,
+          error: response && response.error,
+        },
+        '*',
+      );
+    });
+  }
 });

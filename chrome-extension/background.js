@@ -297,6 +297,54 @@ async function fetchStatsnetIndustry(bin) {
 // хвостовыми аргументами вызова. eval/new Function в MV3 запрещены, поэтому
 // разбираем сбалансированными скобками + резолвим плейсхолдеры из карты args.
 // ============================================================
+// ============================================================================
+// EGOV — РЕЗИДЕНТСТВО ПО БИН (P30.11)
+// ----------------------------------------------------------------------------
+// Эндпоинт поля БИН на портале egov (услуга e_084 / P30.11). Отдаёт JSON с
+// АВТОРИТЕТНЫМ признаком resident + код статуса. Требует активную сессию egov —
+// credentials:'include' + host_permissions на egov.kz прикладывают куки
+// пользователя автоматически (расширение работает в его браузере).
+//   resident:true,  status.code 002              → резидент
+//   resident:false, status.code 033              → БИН принадлежит ИП (не юрлицо)
+//   resident:false, status.code 034              → снят с учётной регистрации
+//   resident:false (прочее)                      → нерезидент
+// Источник актуальнее и полнее открытого gbd_ul: видит свежие регистрации,
+// которых в открытых данных ещё нет.
+const EGOV_RESID_URL = 'https://egov.kz/services/P30.11/rest/gbdul/organizations/';
+
+async function fetchEgovResidency(bin) {
+  if (!/^\d{12}$/.test(bin)) throw new Error('Invalid BIN — must be 12 digits');
+  const resp = await fetch(EGOV_RESID_URL + bin, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'Accept': 'application/json, text/plain, */*',
+      'Referer': 'https://egov.kz/services/P30.11/',
+    },
+  });
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error('Нет сессии egov.kz — войдите на портал egov.kz');
+  }
+  if (!resp.ok) throw new Error('egov P30.11 вернул ' + resp.status);
+  // Без сессии egov редиректит на SSO и отдаёт HTML вместо JSON — ловим это.
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('json')) {
+    throw new Error('egov вернул не JSON — войдите в egov.kz (нужна активная сессия портала)');
+  }
+  const d = await resp.json();
+  const st = (d && d.status) || {};
+  return {
+    bin: d && d.bin || bin,
+    resident: (d && typeof d.resident === 'boolean') ? d.resident : null,
+    statusCode: st.code || null,
+    statusText: (st.description && st.description.ru) || '',
+    shortName: (d && (d.shortName || d.fullName)) || null,
+    fullName: (d && d.fullName) || null,
+    registrationDate: (d && d.registrationDate) || null,
+    incorporationCountry: (d && d.incorporationCountry) || null,
+  };
+}
+
 const KYC_URL = 'https://kyc.kz/search/company/';
 
 async function fetchKyc(bin) {
@@ -542,7 +590,70 @@ async function statgovHealth() {
 }
 
 // === Message handler: получает запросы из content script ===
+// ============================================================================
+// KEEPALIVE — держим сессии stat.gov.kz и egov живыми в течение рабочего дня.
+// ----------------------------------------------------------------------------
+// Сессии обеих служб истекают по БЕЗДЕЙСТВИЮ (обычно 15–30 мин) → под вечер
+// пришлось бы перелогиниваться. Раз в KEEPALIVE_PERIOD_MIN минут делаем лёгкий
+// авторизованный GET к каждой службе — это сдвигает idle-таймаут сессии
+// (Set-Cookie обновляет общий cookie-jar браузера). Пингуем ТОЛЬКО пока открыта
+// вкладка приложения (закрыл на ночь → сессии истекают сами). MV3 service worker
+// эфемерный, поэтому расписание — на chrome.alarms (будит worker), не setInterval.
+//
+// Оговорка: если служба ограничивает АБСОЛЮТНУЮ длину сессии (а не только
+// бездействие), keepalive её не продлит — тогда один перелогин за смену всё равно
+// понадобится. Но частый кейс (вылет по бездействию) закрывается.
+const KEEPALIVE_ALARM = 'sl-session-keepalive';
+const KEEPALIVE_PERIOD_MIN = 5;
+const KEEPALIVE_APP_TABS = [
+  'https://savage070l.github.io/*',
+  'http://localhost/*',
+  'http://127.0.0.1/*',
+];
+const keepaliveState = { lastRun: 0, statgov: null, egov: null };
+
+function ensureKeepaliveAlarm() {
+  chrome.alarms.get(KEEPALIVE_ALARM, (a) => {
+    if (!a) chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
+  });
+}
+ensureKeepaliveAlarm();
+chrome.runtime.onInstalled.addListener(ensureKeepaliveAlarm);
+chrome.runtime.onStartup.addListener(ensureKeepaliveAlarm);
+
+async function keepaliveHasAppTab() {
+  try {
+    const tabs = await chrome.tabs.query({ url: KEEPALIVE_APP_TABS });
+    return !!(tabs && tabs.length);
+  } catch (e) {
+    return true; // не смогли узнать — на всякий случай пингуем
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM) return;
+  if (!(await keepaliveHasAppTab())) return; // приложение закрыто → сессии пусть истекают сами
+  keepaliveState.lastRun = Date.now();
+  // Лёгкие authenticated GET'ы. Сессия жива → запрос сдвигает её таймаут.
+  // Ошибки / редирект на SSO (сессия уже мертва) — просто глотаем.
+  fetch(STATGOV_URL, { method: 'GET', credentials: 'include', cache: 'no-store' })
+    .then((r) => { keepaliveState.statgov = !!(r && r.ok); })
+    .catch(() => { keepaliveState.statgov = false; });
+  // egov: read-only GET org-endpoint с dummy-БИН (000…0) — «трогает» сессию,
+  // не запрашивая реальную компанию (сервер вернёт «не зарегистрирован»).
+  fetch(EGOV_RESID_URL + '000000000000', {
+    method: 'GET', credentials: 'include', cache: 'no-store',
+    headers: { 'Accept': 'application/json' },
+  })
+    .then((r) => { keepaliveState.egov = !!(r && r.ok); })
+    .catch(() => { keepaliveState.egov = false; });
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'KEEPALIVE_STATUS') {
+    sendResponse({ ok: true, data: { ...keepaliveState, periodMin: KEEPALIVE_PERIOD_MIN } });
+    return false;
+  }
   if (msg && msg.type === 'STATGOV_HEALTH') {
     statgovHealth()
       .then(data => sendResponse({ ok: true, data }))
@@ -563,6 +674,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'KYC_LOOKUP' && typeof msg.bin === 'string') {
     fetchKyc(msg.bin.trim())
+      .then(data => sendResponse({ ok: true, data }))
+      .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
+    return true;
+  }
+  if (msg && msg.type === 'EGOV_RESIDENCY_LOOKUP' && typeof msg.bin === 'string') {
+    fetchEgovResidency(msg.bin.trim())
       .then(data => sendResponse({ ok: true, data }))
       .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
     return true;

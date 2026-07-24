@@ -41,6 +41,7 @@ const BatchAR = {
   STATGOV_CONCURRENCY: 6,
   EGOV_CONCURRENCY: 8,
   KYC_CONCURRENCY: 5,   // fallback дат/адреса через kyc.kz (один GET ~250 КБ)
+  EGOV_RESID_CONCURRENCY: 6,  // авторитетная проверка резидентства через egov P30.11
 
   _loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -73,6 +74,7 @@ const BatchAR = {
       const buf = await file.arrayBuffer();
       const { rows, total, skipped, header, idx } = BatchReader.parse(buf);
       BatchAR.rows = rows;
+      BatchAR._sourceFileName = file.name || '';  // для шапки HTML-отчёта
       BatchAR._page = 0;                   // на первую страницу
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
@@ -140,6 +142,7 @@ const BatchAR = {
     { key: 'errors',  icon: '⚑', off: 'Сначала ошибки',  on: 'Ошибки сверху',  title: 'Показать сначала строки с ошибками (красные), затем жёлтые', rank: (r) => { const l = BatchAR._rowLevel(r); return l === 'err' ? 2 : (l === 'warn' ? 1 : 0); } },
     { key: 'filial',  icon: '🏢', off: 'Сначала филиалы', on: 'Филиалы сверху', title: 'Договоры с несколькими филиалами (дублирующиеся номера договора) — наверх и рядом друг с другом', dup: true },
     { key: 'tranche', icon: '⏳', off: 'Сначала транши',  on: 'Транши сверху',  title: 'Показать сначала договоры с наибольшим числом траншей рассрочки', rank: (r) => BatchAR._trancheCount(r) || 0 },
+    { key: 'nonresident', icon: '🌐', off: 'Сначала нерезиденты', on: 'Нерезиденты сверху', title: 'Показать сначала нерезидентов, затем ИП, затем резидентов. Учитывается любая из сторон договора (Страхователь или Контрагент).', rank: (r) => BatchAR._residRowRank(r) },
   ],
 
   // Порядок строк для отрисовки. По умолчанию — как в файле. Активные переключатели
@@ -1182,17 +1185,26 @@ const BatchAR = {
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
 
-  // Признак резидентства одного БИН по ГБД ЮЛ (локальный индекс, js/resident-check.js).
-  // Сети не требует: индекс уже в памяти → считается синхронно при рендере,
-  // в отличие от stat.gov.kz / e-Qazyna, которые опрашиваются построчно.
-  //   ✓        — БИН найден в реестре юр. лиц РК → резидент
-  //   ✓ ликв.  — резидент, но самая свежая запись реестра «ликвидирован/реорганизован»
-  //   нерез.   — БИН не найден → нерезидент
-  //   ИП       — это ИИН: реестр юр. лиц неприменим (по умолчанию резидент)
-  //   н/д      — индекс не загружен / некорректный идентификатор
+  // Вердикт резидентства по одному БИН: приоритет — АВТОРИТЕТНЫЙ egov P30.11
+  // (если мост уже вернул ответ, лежит в ResidentCheck.egovResolved), иначе —
+  // мгновенный локальный индекс ГБД ЮЛ. Фоновый пул _poolEgovResidency наполняет
+  // egovResolved и перерисовывает строки по мере ответов.
+  _residVerdict(bin) {
+    if (typeof ResidentCheck === 'undefined') return null;
+    return (ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin)) || ResidentCheck.check(bin);
+  },
+
+  // Признак резидентства одного БИН. Источник — egov (если есть) → локальный индекс.
+  //   ✓        — резидент
+  //   ✓ ликв.  — резидент, но по gbd_ul ликвидирован/реорганизован
+  //   нерез.   — нерезидент
+  //   ИП       — ИП/физлицо (резидентство не определяется)
+  //   н/д      — нет данных / некорректный идентификатор
+  //   …        — egov ещё проверяет (локального вердикта нет)
   _residBadge(bin) {
     if (typeof ResidentCheck === 'undefined') return { cls: 'na', txt: 'н/д', title: 'индекс ГБД ЮЛ не загружен' };
-    const res = ResidentCheck.check(bin);
+    const res = BatchAR._residVerdict(bin);
+    // Источник — в подсказку (egov title сам содержит «egov (P30.11): …»).
     switch (res.status) {
       case 'resident':
         return res.registryStatus
@@ -1212,6 +1224,19 @@ const BatchAR = {
   _residCellFor(bin) {
     const b = BatchAR._residBadge(bin);
     return `<span class="batch-res batch-res--${b.cls}" title="${ARForm._esc(b.title)}">${b.txt}</span>`;
+  },
+
+  // Ранг резидентства одного БИН для сортировки «Сначала нерезиденты»:
+  // нерезидент(3) > ИП(2) > резидент(1) > нет данных(0). Чем больше — тем выше.
+  _residStatusRank(bin) {
+    const v = BatchAR._residVerdict(bin);
+    const s = v ? v.status : '';
+    return s === 'nonresident' ? 3 : (s === 'individual' ? 2 : (s === 'resident' ? 1 : 0));
+  },
+  // Ранг строки = «худшая» сторона договора: если ЛЮБАЯ из сторон
+  // (Страхователь / Контрагент) нерезидент — строка поднимается наверх.
+  _residRowRank(r) {
+    return Math.max(BatchAR._residStatusRank(BatchAR._insurerBin(r)), BatchAR._residStatusRank(r.bin));
   },
 
   // Обновить одну строку таблицы (после statgov / e-Qazyna), не перерисовывая всю.
@@ -1351,6 +1376,10 @@ const BatchAR = {
     // в фоне. Гос. участие не гейтит генерацию, поэтому не ждём его здесь — чтобы
     // не тормозить основную проверку statgov.
     BatchAR._poolEgov(targets.slice());
+
+    // Авторитетное резидентство через egov P30.11 — тоже отдельным фоновым пулом.
+    // Не гейтит генерацию; уточняет локальный вердикт по мере ответов.
+    BatchAR._poolEgovResidency(targets.slice());
 
     // Очередь и кэш statgov храним на объекте, чтобы «Продолжить» после паузы дочитал
     // ОСТАВШИЕСЯ БИН, а не начинал заново. Кэш по БИН дедуплицирует филиалы.
@@ -1524,6 +1553,42 @@ const BatchAR = {
       }
     };
     const n = Math.max(1, BatchAR.EGOV_CONCURRENCY);
+    await Promise.all(Array.from({ length: n }, worker));
+  },
+
+  // Пул АВТОРИТЕТНОГО резидентства через egov P30.11 (мост-расширение). Локальный
+  // индекс ГБД ЮЛ даёт мгновенный вердикт в каждой ячейке при рендере; этот пул в
+  // фоне уточняет его egov'ом (источник актуальнее — видит свежие регистрации) и
+  // перерисовывает строки по мере ответов. Наполняет общий кэш
+  // ResidentCheck.egovResolved (его же читает _residVerdict). Не гейтит генерацию.
+  // ИИН пропускаются (эндпоинт P30.11 — только для БИН юрлиц; checkEgov сам это
+  // проверяет). Дедуп по БИН: страхователь и филиалы с одним БИН — один запрос.
+  async _poolEgovResidency(targets) {
+    if (typeof ResidentCheck === 'undefined'
+        || !ResidentCheck.bridgeAvailable || !ResidentCheck.bridgeAvailable()) return;
+    // Уникальные БИН обеих сторон → какие строки их используют (для перерисовки).
+    const binRows = new Map();
+    const isBin = (b) => ResidentCheck.idKind && ResidentCheck.idKind(b) === 'bin';
+    for (const i of targets) {
+      const r = BatchAR.rows[i];
+      if (!r) continue;
+      for (const bin of [BatchAR._insurerBin(r), r.bin]) {
+        if (!isBin(bin)) continue;                       // ИИН/некорректные — не в egov
+        if (ResidentCheck.egovResolved(bin)) continue;   // уже получен — не перезапрашиваем
+        if (!binRows.has(bin)) binRows.set(bin, new Set());
+        binRows.get(bin).add(i);
+      }
+    }
+    const queue = [...binRows.keys()];
+    const worker = async () => {
+      while (queue.length) {
+        const bin = queue.shift();
+        await ResidentCheck.checkEgov(bin).catch(() => null);  // наполняет egovResolved
+        const rows = binRows.get(bin);
+        if (rows) rows.forEach((i) => BatchAR._refreshRow(i));
+      }
+    };
+    const n = Math.max(1, BatchAR.EGOV_RESID_CONCURRENCY);
     await Promise.all(Array.from({ length: n }, worker));
   },
 
@@ -1823,6 +1888,156 @@ const BatchAR = {
     }
   },
 
+  // Сводные счётчики для шапки HTML-отчёта: статусы строк + резидентство сторон.
+  _resultCounts() {
+    let ok = 0, warn = 0, err = 0, checking = 0, pending = 0, approved = 0, unchecked = 0;
+    let nrS = 0, nrK = 0, ipS = 0, ipK = 0;  // нерезиденты/ИП по сторонам договора
+    const rc = (typeof ResidentCheck !== 'undefined') ? ResidentCheck : null;
+    for (const r of BatchAR.rows) {
+      if (r._approved) approved++;
+      else {
+        const s = BatchAR._rowState(r);
+        if (s === 'err') err++;
+        else if (s === 'warn') warn++;
+        else if (s === 'checking') checking++;
+        else if (s === 'ok') ok++;
+        else { const st = r.statgovStatus; if (st === 'skip' || st === 'error') unchecked++; else pending++; }
+      }
+      if (rc) {
+        // Приоритет egov (если получен), иначе локальный индекс — как в таблице.
+        const vS = BatchAR._residVerdict(BatchAR._insurerBin(r));
+        const vK = BatchAR._residVerdict(r.bin);
+        const sS = vS ? vS.status : '';
+        const sK = vK ? vK.status : '';
+        if (sS === 'nonresident') nrS++; else if (sS === 'individual') ipS++;
+        if (sK === 'nonresident') nrK++; else if (sK === 'individual') ipK++;
+      }
+    }
+    return { total: BatchAR.rows.length, ok, warn, err, checking, pending, approved, unchecked, nrS, nrK, ipS, ipK };
+  },
+
+  // Кнопка «Скачать результаты проверки (HTML)»: единый самодостаточный HTML со
+  // ВСЕМИ строками (не только текущая страница пагинации), сводкой, легендой и
+  // цветовой разметкой — открывается в браузере, печатается в PDF. Проверка
+  // stat.gov.kz НЕ требуется (резидентство/расчёты/подсветка уже в таблице).
+  async downloadResults(btn) {
+    if (!BatchAR.rows.length) { App.showMsg && App.showMsg('Сначала загрузите реестр договоров.', 'error'); return; }
+    const prev = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Готовлю HTML…'; }
+    try {
+      // 1. Синхронно (без await до снятия разметки — иначе мелькнёт вся таблица):
+      //    отрисовать ВСЕ строки, снять HTML, вернуть пагинацию на место.
+      const savedSize = BatchAR._pageSize, savedPage = BatchAR._page;
+      BatchAR._pageSize = Math.max(BatchAR.rows.length, 1);
+      BatchAR._page = 0;
+      BatchAR.renderTable();
+      const wrap = document.getElementById('batch-table-wrap');
+      const tmp = document.createElement('div');
+      tmp.innerHTML = wrap ? wrap.innerHTML : '';
+      // Статичный отчёт: галочку «Согласовано» → текст ✓/—, снять все обработчики.
+      tmp.querySelectorAll('.batch-c-approve').forEach((td) => {
+        const cb = td.querySelector('input[type="checkbox"]');
+        td.innerHTML = (cb && cb.checked) ? '<span style="color:#16a34a;font-weight:700">✓</span>' : '—';
+      });
+      tmp.querySelectorAll('[onclick]').forEach((el) => el.removeAttribute('onclick'));
+      tmp.querySelectorAll('[oninput]').forEach((el) => el.removeAttribute('oninput'));
+      tmp.querySelectorAll('input, button').forEach((el) => el.setAttribute('disabled', 'disabled'));
+      const tableHtml = tmp.innerHTML;
+      BatchAR._pageSize = savedSize; BatchAR._page = savedPage;
+      BatchAR.renderTable();
+
+      // 2. Собрать документ (инлайн CSS приложения) и скачать.
+      const html = await BatchAR._buildResultsHtml(tableHtml);
+      const t = new Date();
+      const stamp = `${String(t.getDate()).padStart(2, '0')}.${String(t.getMonth() + 1).padStart(2, '0')}.${t.getFullYear()}`;
+      const blob = new Blob(['﻿' + html], { type: 'text/html;charset=utf-8' });
+      saveAs(blob, `Результаты проверки договоров ${stamp} (${BatchAR.rows.length}).html`);
+      App.showMsg && App.showMsg(`Скачан HTML-отчёт по ${BatchAR.rows.length} строкам.`, 'success');
+    } catch (e) {
+      console.error('download results', e);
+      App.showMsg && App.showMsg('Ошибка формирования HTML-отчёта: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prev; }
+    }
+  },
+
+  async _buildResultsHtml(tableHtml) {
+    const esc = (s) => ARForm._esc(s == null ? '' : String(s));
+    const c = BatchAR._resultCounts();
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dt = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const src = BatchAR._sourceFileName ? esc(BatchAR._sourceFileName) : '—';
+    const resDate = (typeof ResidentCheck !== 'undefined' && ResidentCheck.updatedText) ? ResidentCheck.updatedText() : '';
+    const sortsActive = BatchAR._sorts.length
+      ? BatchAR._SORT_DEFS.filter((d) => BatchAR._sorts.includes(d.key)).map((d) => d.on).join(', ')
+      : 'как в файле';
+
+    // CSS приложения — инлайним для точной вёрстки; при неудаче отчёт всё равно
+    // читаем (базовые wrapper-стили ниже дают таблицу без цветов).
+    let appCss = '';
+    try { appCss = await (await fetch(new URL('css/style.css', location.href).href)).text(); } catch (e) { appCss = ''; }
+
+    const chip = (label, val, color) => `<span class="rp-chip"><b style="color:${color}">${val}</b> ${esc(label)}</span>`;
+    const notChecked = c.pending + c.checking + c.unchecked;
+    const summary = [
+      chip('всего', c.total, '#334155'),
+      chip('корректных', c.ok, '#16a34a'),
+      chip('расхождений', c.warn, '#d97706'),
+      chip('ошибок', c.err, '#dc2626'),
+      c.approved ? chip('согласовано андеррайтером', c.approved, '#2563eb') : '',
+      notChecked ? chip('не проверено (stat.gov.kz)', notChecked, '#94a3b8') : '',
+    ].filter(Boolean).join('');
+    const resSummary = [
+      chip('нерезидент — страхователь', c.nrS, '#dc2626'),
+      chip('нерезидент — контрагент', c.nrK, '#dc2626'),
+      chip('ИП — страхователь', c.ipS, '#64748b'),
+      chip('ИП — контрагент', c.ipK, '#64748b'),
+    ].join('');
+
+    const legend = `
+      <div class="rp-section-title">Обозначения</div>
+      <div class="rp-legend">
+        <span><i style="background:#fdcdcd"></i>красный — некорректные данные</span>
+        <span><i style="background:#fde68a"></i>жёлтый — расхождения, нужна доп. проверка</span>
+        <span><i style="background:#dcfce7"></i>зелёный — корректно</span>
+        <span><i style="background:#e0e7ff"></i>синий — согласовано андеррайтером</span>
+        <span class="rp-legend-res"><b style="color:#16a34a">✓</b> резидент&nbsp;·&nbsp;<b style="color:#b91c1c">нерез.</b> нерезидент&nbsp;·&nbsp;<b style="color:#64748b">ИП</b> ИИН/физлицо&nbsp;·&nbsp;<b style="color:#b45309">✓ ликв.</b> резидент, но ликвидирован/реорганизован</span>
+      </div>`;
+
+    const wrapperCss = `
+      body{margin:0;padding:24px;background:#fff;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .rp-head h1{font-size:1.18rem;margin:0 0 6px;color:#111827;}
+      .rp-meta{color:#64748b;font-size:.85rem;line-height:1.6;}
+      .rp-meta b{color:#334155;}
+      .rp-section-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;font-weight:700;margin:16px 0 7px;}
+      .rp-summary{display:flex;flex-wrap:wrap;gap:8px;}
+      .rp-chip{font-size:.82rem;border:1px solid #e2e8f0;border-radius:999px;padding:4px 12px;background:#fff;white-space:nowrap;}
+      .rp-legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.8rem;color:#475569;align-items:center;}
+      .rp-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:5px;}
+      .rp-legend-res{flex-basis:100%;color:#334155;}
+      .rp-table{display:block!important;max-height:none!important;overflow:auto;border:1px solid #e5e7eb;border-radius:10px;margin-top:8px;}
+      .rp-table table.batch-table{width:100%;}
+      .rp-foot{color:#94a3b8;font-size:.76rem;margin-top:18px;border-top:1px solid #eef2f6;padding-top:10px;line-height:1.5;}
+      @media print{@page{size:A4 landscape;margin:8mm;}body{padding:0;}.rp-table{border:none;overflow:visible;max-height:none!important;border-radius:0;}}`;
+
+    return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">`
+      + `<meta name="viewport" content="width=device-width, initial-scale=1">`
+      + `<title>Результаты проверки договоров — ${dt}</title>`
+      + `<style>${appCss}</style><style>${wrapperCss}</style></head><body>`
+      + `<div class="rp-report">`
+      + `<header class="rp-head"><h1>Результаты проверки договоров</h1>`
+      + `<div class="rp-meta">Сформировано: <b>${dt}</b>${src !== '—' ? ` · файл-источник: <b>${src}</b>` : ''}`
+      + `${resDate ? ` · база ГБД ЮЛ от <b>${esc(resDate)}</b>` : ''} · сортировка: <b>${esc(sortsActive)}</b></div></header>`
+      + `<div class="rp-section-title">Сводка по строкам</div><div class="rp-summary">${summary}</div>`
+      + `<div class="rp-section-title">Резидентство сторон</div><div class="rp-summary">${resSummary}</div>`
+      + legend
+      + `<div class="rp-section-title">Все договоры (${c.total})</div>`
+      + `<div class="batch-table-wrap rp-table">${tableHtml}</div>`
+      + `<footer class="rp-foot">Отчёт сформирован приложением Underwriting Suite (Standard Life). Резидентство — по локальной копии реестра юр. лиц РК (ГБД ЮЛ, data.egov.kz): БИН есть в реестре → резидент, нет → нерезидент. Наведите курсор на цветную ячейку — во всплывающей подсказке причина.</footer>`
+      + `</div></body></html>`;
+  },
+
   // Открыть таблицу-превью в отдельной вкладке — полная ширина окна, все строки.
   // Окно ЖИВОЕ: пока открыто, отражает актуальную таблицу (обновляется по мере
   // проверки stat.gov.kz), а не статический снимок на момент открытия.
@@ -2000,6 +2215,13 @@ const BatchAR = {
       btnWarn.style.display = warnN ? '' : 'none';
       btnWarn.disabled = BatchAR._busy;
       btnWarn.textContent = `Выгрузить расхождения (жёлтые)${warnN ? ` · ${warnN}` : ''}`;
+    }
+    // Кнопка «Скачать результаты проверки (HTML)» — доступна всегда, когда есть
+    // строки (проверка stat.gov.kz не требуется).
+    const btnDl = document.getElementById('batch-download-html');
+    if (btnDl) {
+      btnDl.style.display = BatchAR.rows.length ? '' : 'none';
+      btnDl.disabled = BatchAR._busy;
     }
     // Чипы мультисортировки (по столбцам) — перерисовываем состояние ↑/↓/приоритет.
     BatchAR._renderSortChips();

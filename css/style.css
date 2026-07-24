@@ -2973,7 +2973,8 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 }
 .batch-controls .btn-generate,
 .batch-controls .btn-export-errors,
-.batch-controls .btn-export-warns {
+.batch-controls .btn-export-warns,
+.batch-controls .btn-download-html {
   height: 52px;
   display: inline-flex;
   align-items: center;
@@ -3089,6 +3090,27 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .btn-export-warns:active:not(:disabled) { transform: translateY(0); }
 .btn-export-warns:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.22); }
 .btn-export-warns:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+
+/* «Скачать результаты проверки (HTML)» — нейтрально-акцентная (индиго), стоит
+   особняком от красной/жёлтой выгрузок ошибок: это отчёт по ВСЕМ строкам. */
+.btn-download-html {
+  flex: 0 0 auto;
+  padding: 0 18px;
+  font-size: 0.9rem;
+  background: #fff;
+  border: 1px solid #c7d2fe;
+  color: #4338ca;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.btn-download-html:hover:not(:disabled) {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -8px rgba(67, 56, 202, 0.4);
+}
+.btn-download-html:active:not(:disabled) { transform: translateY(0); }
+.btn-download-html:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.22); }
+.btn-download-html:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
 
 @media (max-width: 720px) {
   .batch-controls { flex-wrap: wrap; }
