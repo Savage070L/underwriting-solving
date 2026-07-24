@@ -1,0 +1,110 @@
+name: Обновление индекса резидентства (ГБД ЮЛ)
+
+# Раз в неделю выкачивает свежий реестр юр. лиц РК (data.egov.kz, набор gbd_ul),
+# пересобирает локальный индекс БИН (data/gbd_ul_bins.bin), коммитит его и
+# передеплоивает сайт на GitHub Pages. По итогу шлёт письмо об успехе/ошибке.
+#
+# Всё в одном job: build → commit → deploy. Кросс-workflow триггер не нужен
+# (push из-под GITHUB_TOKEN всё равно не запустил бы pages.yml).
+
+on:
+  schedule:
+    # Воскресенье, 15:30 UTC = ~20:30 по Алматы (UTC+5) — воскресенье вечером.
+    # Минута не «:00», чтобы попасть в менее загруженное окно планировщика GitHub.
+    - cron: '30 15 * * 0'
+  workflow_dispatch:   # + запуск вручную (кнопка Run workflow) — для проверки
+
+permissions:
+  contents: write      # закоммитить обновлённый индекс
+  pages: write         # деплой на GitHub Pages
+  id-token: write
+
+concurrency:
+  group: "pages"       # тот же, что у pages.yml — деплои не столкнутся
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45   # полный обход ~16 мин; egov иногда тормозит — с запасом
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Скрипт на чистой стандартной библиотеке — pip install не нужен.
+      # При неполном обходе он вернёт ненулевой код и НЕ перезапишет индекс.
+      - name: Пересобрать индекс из data.egov.kz
+        id: build
+        run: |
+          python3 tools/build_gbd_index.py --refresh
+          echo "bins=$(python3 -c "import json;print(json.load(open('data/gbd_ul_meta.json'))['bins'])")" >> "$GITHUB_OUTPUT"
+          echo "generated=$(python3 -c "import json;print(json.load(open('data/gbd_ul_meta.json'))['generated'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Закоммитить обновлённый индекс
+        id: commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/gbd_ul_bins.bin data/gbd_ul_meta.json
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Индекс не изменился с прошлой недели — коммит не нужен."
+          else
+            git commit -m "chore: еженедельное обновление индекса ГБД ЮЛ (${{ steps.build.outputs.bins }} БИН, ${{ steps.build.outputs.generated }})"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Даже если индекс не изменился — передеплоиваем: сайт всегда отражает
+      # текущее содержимое репозитория (дёшево, пара секунд).
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      # Письмо по итогу — и при успехе, и при ошибке (if: always()).
+      # Требует двух секретов репозитория: MAIL_USERNAME (адрес Gmail) и
+      # MAIL_PASSWORD (пароль приложения Gmail, НЕ обычный пароль). Инструкция
+      # по настройке — в README, раздел «Автообновление индекса».
+      - name: Уведомить на почту
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: Индекс ГБД ЮЛ <${{ secrets.MAIL_USERNAME }}>
+          to: ${{ secrets.MAIL_USERNAME }}
+          subject: ${{ job.status == 'success' && '✅ Индекс ГБД ЮЛ обновлён' || '❌ Обновление индекса ГБД ЮЛ не удалось' }}
+          body: |
+            Плановое еженедельное обновление индекса резидентства (ГБД ЮЛ).
+
+            Итог:            ${{ job.status }}
+            Дата сборки:     ${{ steps.build.outputs.generated || '— (сборка не завершилась)' }}
+            БИН в индексе:   ${{ steps.build.outputs.bins || '—' }}
+            Индекс обновлён: ${{ steps.commit.outputs.changed || '—' }}
+
+            Если итог = failure: скорее всего data.egov.kz не ответил за отведённое
+            время. Прошлый индекс остался нетронутым — сайт продолжает работать на
+            нём. Можно перезапустить вручную: вкладка Actions → «Обновление индекса
+            резидентства (ГБД ЮЛ)» → Run workflow.
+
+            Полный лог запуска:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

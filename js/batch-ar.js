@@ -295,6 +295,8 @@ const BatchAR = {
         <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
         <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
         <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
+        <td class="batch-c-resident batch-c-resident-s">${BatchAR._residCellFor(BatchAR._insurerBin(r))}</td>
+        <td class="batch-c-resident batch-c-resident-k">${BatchAR._residCellFor(r.bin)}</td>
         <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
         <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
         <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
@@ -302,7 +304,15 @@ const BatchAR = {
     }).join('');
     BatchAR._tableVersion++;
     BatchAR._renderPagination(order.length, pageCount, pageStart, pageOrder.length);
+    // Индекс ГБД ЮЛ мог ещё не догрузиться к моменту первого рендера — тогда
+    // колонка «Резидент» показала бы «н/д». Перерисуем таблицу, когда он готов.
+    if (typeof ResidentCheck !== 'undefined' && !BatchAR._residHooked
+        && !ResidentCheck.ready() && !ResidentCheck.failed()) {
+      BatchAR._residHooked = true;
+      ResidentCheck.onReady(() => BatchAR.renderTable());
+    }
   },
+  _residHooked: false,
 
   // Панель пагинации под таблицей. Скрыта, если строк ≤ размера страницы.
   _renderPagination(total, pageCount, pageStart, shown) {
@@ -1172,6 +1182,38 @@ const BatchAR = {
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
 
+  // Признак резидентства одного БИН по ГБД ЮЛ (локальный индекс, js/resident-check.js).
+  // Сети не требует: индекс уже в памяти → считается синхронно при рендере,
+  // в отличие от stat.gov.kz / e-Qazyna, которые опрашиваются построчно.
+  //   ✓        — БИН найден в реестре юр. лиц РК → резидент
+  //   ✓ ликв.  — резидент, но самая свежая запись реестра «ликвидирован/реорганизован»
+  //   нерез.   — БИН не найден → нерезидент
+  //   ИП       — это ИИН: реестр юр. лиц неприменим (по умолчанию резидент)
+  //   н/д      — индекс не загружен / некорректный идентификатор
+  _residBadge(bin) {
+    if (typeof ResidentCheck === 'undefined') return { cls: 'na', txt: 'н/д', title: 'индекс ГБД ЮЛ не загружен' };
+    const res = ResidentCheck.check(bin);
+    switch (res.status) {
+      case 'resident':
+        return res.registryStatus
+          ? { cls: 'warn', txt: '✓ ' + (ResidentCheck.STATUS_LABELS[res.registryStatus] || '?').slice(0, 4) + '.', title: res.title }
+          : { cls: 'yes', txt: '✓', title: res.title };
+      case 'nonresident': return { cls: 'no', txt: 'нерез.', title: res.title };
+      case 'individual': return { cls: 'ip', txt: 'ИП', title: res.title };
+      case 'loading': return { cls: 'na', txt: '…', title: res.title };
+      default: return { cls: 'na', txt: 'н/д', title: res.title };
+    }
+  },
+
+  // Одна ячейка резидентства для конкретного БИН. Страхователь и Контрагент —
+  // РАЗНЫЕ столбцы (Резидент С / Резидент К), каждый проверяется по своему БИН:
+  // Страхователь = _insurerBin(r), Контрагент = r.bin. Проверка синхронная, по
+  // локальному индексу ГБД ЮЛ.
+  _residCellFor(bin) {
+    const b = BatchAR._residBadge(bin);
+    return `<span class="batch-res batch-res--${b.cls}" title="${ARForm._esc(b.title)}">${b.txt}</span>`;
+  },
+
   // Обновить одну строку таблицы (после statgov / e-Qazyna), не перерисовывая всю.
   _refreshRow(i) {
     const tr = document.querySelector(`#batch-tbody tr[data-idx="${i}"]`);
@@ -1182,6 +1224,8 @@ const BatchAR = {
     set('.batch-c-class', BatchAR._classCell(r));
     set('.batch-c-reg', BatchAR._regCell(r));
     set('.batch-c-gov', BatchAR._govCell(r));
+    set('.batch-c-resident-s', BatchAR._residCellFor(BatchAR._insurerBin(r)));
+    set('.batch-c-resident-k', BatchAR._residCellFor(r.bin));
     // СС/премия зависят от вычисленного класса/тарифа → обновляем после statgov.
     set('.batch-c-sum', BatchAR._sumCellHtml(r));
     set('.batch-c-prem', BatchAR._premiumCellHtml(r));

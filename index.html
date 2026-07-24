@@ -300,11 +300,11 @@
             <!-- Фиксированная раскладка: ширины колонок в % → таблица всегда = ширине
                  контейнера (без горизонтального скролла); содержимое переносится. -->
             <colgroup>
-              <col style="width:3.1%"><col style="width:6%"><col style="width:7.8%"><col style="width:7.8%">
-              <col style="width:4.3%"><col style="width:3.9%"><col style="width:3.9%"><col style="width:3%">
-              <col style="width:7%"><col style="width:7.4%"><col style="width:7.4%"><col style="width:2.6%">
-              <col style="width:6.9%"><col style="width:6.9%"><col style="width:6.5%"><col style="width:2.9%">
-              <col style="width:5.5%"><col style="width:3.5%"><col style="width:3.6%">
+              <col style="width:3%"><col style="width:5.6%"><col style="width:7%"><col style="width:7%">
+              <col style="width:4.2%"><col style="width:3.8%"><col style="width:3.8%"><col style="width:3%">
+              <col style="width:6.6%"><col style="width:6.7%"><col style="width:6.7%"><col style="width:2.5%">
+              <col style="width:6.4%"><col style="width:6.4%"><col style="width:6.3%"><col style="width:2.8%">
+              <col style="width:3.4%"><col style="width:3.4%"><col style="width:4.4%"><col style="width:3.4%"><col style="width:3.6%">
             </colgroup>
             <thead>
               <tr>
@@ -324,6 +324,8 @@
                 <th class="batch-c-num2" title="СП (контрагент) → СП (К). Страховая премия (взнос) по контрагенту (филиалу). Снизу: расчётная СС×тариф×ПК.">СП<br>(К)</th>
                 <th class="batch-c-reg" title="Дата регистрации (страхователь) → Дата рег. (С). Дата официальной регистрации компании-клиента (stat.gov.kz / kyc.kz).">Дата рег.<br>(С)</th>
                 <th class="batch-c-gov" title="Государственное участие / доля → Гос. доля. Процент владения компании государством. Сверху: из выгрузки; снизу: по реестру e-Qazyna.">Гос.<br>доля</th>
+                <th class="batch-c-resident" title="Признак резидентства Страхователя. Проверка БИН Страхователя по локальной копии ГБД ЮЛ (data.egov.kz, набор gbd_ul): БИН есть в реестре юр. лиц РК → резидент (✓), нет → нерезидент. ИИН (ИП/физлицо) в реестр юр. лиц не входит — помечается «ИП». «✓ ликв.» — резидент, но по самой свежей записи реестра ликвидирован/реорганизован.">Рези-<br>дент (С)</th>
+                <th class="batch-c-resident" title="Признак резидентства Контрагента. Проверка БИН Контрагента по локальной копии ГБД ЮЛ (data.egov.kz, набор gbd_ul): БИН есть в реестре юр. лиц РК → резидент (✓), нет → нерезидент. ИИН (ИП/физлицо) в реестр юр. лиц не входит — помечается «ИП». «✓ ликв.» — резидент, но по самой свежей записи реестра ликвидирован/реорганизован.">Рези-<br>дент (К)</th>
                 <th class="batch-c-author" title="Менеджер → Ответственный менеджер. Сотрудник страховой компании, который ввёл данную сделку (из выгрузки).">Менеджер</th>
                 <th class="batch-c-tranche" title="Транш оплаты. «—» — оплата единовременно; число — количество траншей рассрочки (по заполненным этапам оплаты из выгрузки).">Транш<br>оплаты</th>
                 <th class="batch-c-approve" title="Согласовано андеррайтером → Согл. андер. Отметка, что специалист по оценке рисков проверил и одобрил условия договора (галочка). Печать с исходными данными под его ответственность. Строка перестаёт считаться ошибочной, но подсветка ошибочных ячеек остаётся.">Согл.<br>андер.</th>
@@ -611,8 +613,12 @@
           <div class="oked-lookup-result" id="oked-result"></div>
         </div>
         <div class="checkbox-group form-group">
-          <input type="checkbox" id="nonResident">
+          <input type="checkbox" id="nonResident" onchange="App.onNonResidentToggle()">
           <label for="nonResident">Нерезидент</label>
+          <!-- Автопроверка по ГБД ЮЛ (data.egov.kz): БИН есть в реестре юр. лиц РК →
+               резидент, нет → нерезидент. Галочка ставится автоматически; ручное
+               переключение отключает автоподстановку для текущего кейса. -->
+          <span class="resident-badge" id="resident-status"></span>
         </div>
         <div class="form-group full-width">
           <label for="activitySelect" class="activity-label-row">
@@ -864,6 +870,7 @@
   <script src="js/protocol-generator.js"></script>
   <script src="js/sz-generator.js"></script>
   <script src="js/statgov-client.js"></script>
+  <script src="js/resident-check.js"></script>
   <script src="js/batch-reader.js"></script>
   <script src="js/ar-form.js"></script>
   <script src="js/batch-ar.js"></script>

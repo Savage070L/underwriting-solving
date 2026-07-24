@@ -17,3 +17,6 @@ test-data/
 .vscode/
 .idea/
 .claude/
+
+# Черновик обхода ГБД ЮЛ (tools/build_gbd_index.py)
+data/.gbd_ul_scan.tmp

@@ -276,7 +276,13 @@ const BatchReader = {
         coeff: coeff != null ? coeff : 1,
         premiumWithCoeff,
         decision: isDiscount ? 'discount' : 'standard',
-        nonResident: false,
+        // Признак резидентства по локальному индексу ГБД ЮЛ (js/resident-check.js):
+        // БИН есть в реестре юр. лиц РК → резидент. Если индекс ещё не догрузился,
+        // остаётся false — таблица и документ считают признак на лету (_residCell /
+        // ARForm._residencySuffix), так что расхождения не будет.
+        nonResident: (typeof ResidentCheck !== 'undefined' && ResidentCheck.ready())
+          ? ResidentCheck.check(bin).nonResident === true
+          : false,
         govParticipation: BatchReader._isYes(cell(row, 'govParticip')),
         affiliated: false,
         // Заполняется фоновым statgov-лукапом:

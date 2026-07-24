@@ -35,6 +35,11 @@ const App = {
     App.restoreCache();
     App._restoreCase();
     App.restoreVerdict();
+    // Индекс ГБД ЮЛ грузится асинхронно (~0,8 МБ). Когда готов — пересчитать
+    // признак резидентства: к этому моменту кейс уже восстановлен из кэша.
+    if (typeof ResidentCheck !== 'undefined') {
+      ResidentCheck.onReady(() => { App._applyResidency(); if (App.zayavka) App.showPreview(); });
+    }
     // Финальный прогон зависимостей: после восстановления справочников и
     // кейса убедимся, что превью, кнопки и аналитика отражают актуальное
     // состояние (включая возможные изменения справочников между сессиями).
@@ -601,6 +606,9 @@ const App = {
   // чтобы любая смена справочника или внешнего источника немедленно
   // отображалась в UI без перезагрузки страницы.
   _refreshDerivedData() {
+    // 0. Признак резидентства по БИН (локальный индекс ГБД ЮЛ) — до превью,
+    //    чтобы карточка профиля и галочка «Нерезидент» отрисовались уже с ним.
+    App._applyResidency();
     // 1. ОКЭД-chain (вызывает _autoSelectActivityByOked, _renderActivityHint,
     //    renderCompanyOkeds, _recalcManualPremium для manual-режима).
     App.onOkedChange();
@@ -1537,6 +1545,9 @@ const App = {
     set('paymentFrequency', 'month');
     const nr = document.getElementById('nonResident');
     if (nr) nr.checked = false;
+    // Новый кейс → снова доверяем автопроверке по ГБД ЮЛ (ручная правка была
+    // решением по предыдущей компании).
+    App._residencyManual = false;
     const verdictSel = document.getElementById('verdict');
     if (verdictSel) verdictSel.value = 'auto';
     localStorage.removeItem('manual_verdict');
@@ -2506,6 +2517,10 @@ const App = {
   showPreview() {
     const z = App.zayavka;
     if (!z) return;
+    // Признак резидентства считается по БИН текущего кейса (локальный индекс
+    // ГБД ЮЛ) — пересчитываем здесь, а не только в _refreshDerivedData, чтобы
+    // карточка профиля никогда не показывала результат от прошлой компании.
+    App._applyResidency();
     // Профиль компании рендерится в обе вкладки сразу (раздел «Проверка
     // контрагента» и раздел «Андеррайтинговое решение») — broadcast по классу.
     const panels = document.querySelectorAll('.js-preview-panel');
@@ -2612,6 +2627,10 @@ const App = {
       sg?.registrationDate ? ['Дата регистрации', sg.registrationDate] : null,
       ['Юридический адрес', legalAddress],
       ['Гос. участие', sgGov],
+      // Резидентство: Страхователь и Контрагент — отдельные строки (разные БИН).
+      // Метка «(страхователь)» появляется только когда есть отдельный контрагент.
+      [App._hasDistinctContragent() ? 'Признак резидентства (страхователь)' : 'Признак резидентства', App._residencyHtml()],
+      App._hasDistinctContragent() ? ['Признак резидентства (контрагент)', App._residencyContrHtml()] : null,
       ['Класс риска', effClass || '—'],
       ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
       ['Страховая сумма', Utils.fmtMoney(effFin.insuranceSum)],
@@ -2656,6 +2675,14 @@ const App = {
         return `<div class="preview-item preview-item--big preview-item--claims">
           <span class="pi-label">${l}</span>
           <div class="pi-claims-block">${display}</div>
+        </div>`;
+      }
+      // «Признак резидентства» (страхователь / контрагент) — готовый HTML
+      // (бейдж + источник), копировать нечего.
+      if (l.startsWith('Признак резидентства')) {
+        return `<div class="preview-item">
+          <span class="pi-label">${l}</span>
+          <span class="pi-value-row"><span class="pi-value">${display}</span></span>
         </div>`;
       }
       const canCopy = display !== '—' && display !== '(поиск...)';
@@ -2744,7 +2771,8 @@ const App = {
       // Первая строка — компактная тройка: БИН · Дата регистрации · Гос. участие.
       const rowKey = renderItems([['БИН', z.bin], ['Дата регистрации', regVal], ['Гос. участие', sgGov]]);
       const rowName = renderItems([['Наименование', insurerName], ['Юридический адрес', legalAddress]]);
-      const rowRisk = renderItems([['Класс риска', effClass || '—'], ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—']]);
+      const rowRisk = renderItems([['Класс риска', effClass || '—'], ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
+        ['Признак резидентства', App._residencyHtml()]]);
       // ИИ-советник: подобрать ОКЭД/класс для договора по ОКЭДам + должностям.
       const advisorHtml = App._okedAdvisorHtml();
       const contractorHtml =
@@ -2753,7 +2781,7 @@ const App = {
           <div class="preview-section-title">Информация о контрагенте</div>
           <div class="ci-grid ci-grid--3">${rowKey}</div>
           <div class="ci-grid ci-grid--1">${rowName}</div>
-          <div class="ci-grid ci-grid--2">${rowRisk}</div>
+          <div class="ci-grid ci-grid--3">${rowRisk}</div>
           ${okedsSubBlock}
           ${advisorHtml}
         </div>` +
@@ -3231,6 +3259,119 @@ const App = {
     }).join('');
   },
 
+  // ===== ПРИЗНАК РЕЗИДЕНТСТВА (ГБД ЮЛ, data.egov.kz) =====
+  // Проверка идёт по локальной копии реестра юр. лиц РК (js/resident-check.js):
+  // БИН есть в реестре → резидент, нет → нерезидент. Сети на строку НЕ требуется —
+  // индекс грузится один раз, поэтому проверка одинаково быстрая и для одной
+  // заявки, и для всей выгрузки договоров.
+  residency: null,          // последний результат ResidentCheck.check()
+  _residencyManual: false,  // андеррайтер переключил галочку руками → авто не перебиваем
+
+  // Пересчитать признак резидентства по БИН текущего кейса и синхронизировать
+  // галочку «Нерезидент». Вызывается из _refreshDerivedData (единая точка).
+  _applyResidency() {
+    const badge = document.getElementById('resident-status');
+    const cb = document.getElementById('nonResident');
+    const bin = App.zayavka?.bin || '';
+    if (typeof ResidentCheck === 'undefined' || !bin) {
+      App.residency = null;
+      if (badge) { badge.textContent = ''; badge.className = 'resident-badge'; }
+      return;
+    }
+    const res = ResidentCheck.check(bin);
+    App.residency = res;
+    // Автоподстановка галочки: только пока андеррайтер не переключил её сам.
+    if (cb && !App._residencyManual && res.nonResident !== null) cb.checked = res.nonResident;
+    if (!badge) return;
+    // registryStatus ≠ 0 — БИН в реестре есть (резидент), но самая свежая запись
+    // говорит «ликвидирован/реорганизован» → жёлтая пометка, а не зелёная.
+    const MOD = { resident: res.registryStatus ? 'warn' : 'ok', nonresident: 'no', individual: 'ip', invalid: 'na', unavailable: 'na', loading: 'na' };
+    // Ручная правка: показываем решение андеррайтера, а вердикт базы — справочно.
+    if (App._residencyManual) {
+      const manualNR = !!cb?.checked;
+      badge.className = `resident-badge resident-badge--${manualNR ? 'no' : 'ok'}`;
+      badge.title = `Выставлено вручную андеррайтером. Автопроверка: ${res.title}`;
+      badge.textContent = `${manualNR ? 'нерезидент' : 'резидент'} · вручную (по ГБД ЮЛ — ${res.label})`;
+      return;
+    }
+    badge.className = `resident-badge resident-badge--${MOD[res.status] || 'na'}`;
+    badge.title = res.title;
+    const src = res.status === 'resident' || res.status === 'nonresident'
+      ? ` · ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''}`
+      : '';
+    badge.textContent = `${res.label}${src}`;
+  },
+
+  // Ручное переключение галочки «Нерезидент» — отключает автоподстановку
+  // для текущего кейса (решение андеррайтера всегда важнее авто-проверки).
+  onNonResidentToggle() {
+    App._residencyManual = true;
+    App._applyResidency();
+    App.showPreview();
+  },
+
+  _residEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); },
+
+  // Бейдж резидентства из результата ResidentCheck.check() (без ручной правки).
+  // registryStatus ≠ 0 — БИН в реестре есть (резидент), но самая свежая запись
+  // говорит «ликвидирован/реорганизован» → жёлтая пометка, а не зелёная.
+  _residBadgeHtml(res) {
+    const MOD = { resident: res.registryStatus ? 'warn' : 'ok', nonresident: 'no', individual: 'ip', invalid: 'na', unavailable: 'na', loading: 'na' };
+    return `<span class="pi-resident pi-resident--${MOD[res.status] || 'na'}" title="${App._residEsc(res.title)}">${App._residEsc(res.label)}</span>`;
+  },
+
+  // Признак резидентства СТРАХОВАТЕЛЯ (App.zayavka.bin) — с учётом ручной правки
+  // галочки. Контрагент — отдельная строка профиля (_residencyContrHtml), т.к. это
+  // другие данные по другому БИН.
+  _residencyHtml() {
+    const res = App.residency;
+    if (!res) return '—';
+    const manualNR = document.getElementById('nonResident')?.checked;
+    const stManual = App._residencyManual;
+    const mod = stManual ? (manualNR ? 'no' : 'ok')
+      : ((res.registryStatus && res.status === 'resident') ? 'warn'
+        : ({ resident: 'ok', nonresident: 'no', individual: 'ip' }[res.status] || 'na'));
+    const label = stManual ? (manualNR ? 'нерезидент' : 'резидент') : res.label;
+    const title = stManual ? `Выставлено вручную андеррайтером. Автопроверка: ${res.title}` : res.title;
+    const src = stManual ? '(вручную)'
+      : ((res.status === 'resident' || res.status === 'nonresident')
+        ? `(ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''})` : '');
+    return `<span class="pi-resident pi-resident--${mod}" title="${App._residEsc(title)}">${App._residEsc(label)}</span>`
+      + (src ? ` <span class="pi-resident-src">${App._residEsc(src)}</span>` : '');
+  },
+
+  // Есть ли у кейса отдельный БИН Контрагента (реестровый кейс), отличный от
+  // Страхователя. Только тогда в профиль добавляется вторая строка резидентства.
+  _hasDistinctContragent() {
+    const cBin = App.zayavka?.binContragent;
+    return !!(cBin && String(cBin) !== String(App.zayavka?.bin) && typeof ResidentCheck !== 'undefined');
+  },
+
+  // Признак резидентства КОНТРАГЕНТА (App.zayavka.binContragent) — всегда авто
+  // (галочка «Нерезидент» относится к Страхователю).
+  _residencyContrHtml() {
+    if (!App._hasDistinctContragent()) return '—';
+    return App._residBadgeHtml(ResidentCheck.check(App.zayavka.binContragent))
+      + ` <span class="pi-resident-src">(ГБД ЮЛ${ResidentCheck.updatedText() ? ' от ' + ResidentCheck.updatedText() : ''})</span>`;
+  },
+
+  // Компактный признак резидентства для snapshot аналитики.
+  _residencySnap() {
+    const manualNR = document.getElementById('nonResident')?.checked;
+    if (App._residencyManual) {
+      return { status: manualNR ? 'nonresident' : 'resident',
+        label: manualNR ? 'нерезидент' : 'резидент', source: 'вручную' };
+    }
+    // Пока индекс грузится / не собран — в снапшот ничего не кладём, дашборд
+    // покажет прежнее значение по умолчанию.
+    if (!App.residency || !['resident', 'nonresident', 'individual'].includes(App.residency.status)) return null;
+    return { status: App.residency.status, label: App.residency.label,
+      registryStatus: App.residency.registryStatus || 0,
+      source: (App.residency.status === 'resident' || App.residency.status === 'nonresident')
+        ? `ГБД ЮЛ${(typeof ResidentCheck !== 'undefined' && ResidentCheck.updatedText()) ? ' от ' + ResidentCheck.updatedText() : ''}`
+        : '' };
+  },
+
   // ===== AUTO BIN LOOKUP via Cloudflare Worker proxy =====
   // Change this URL after deploying the worker
   WORKER_URL: 'https://bin-lookup.toibaev-kuanysh-617.workers.dev',
@@ -3329,6 +3470,8 @@ const App = {
         paymentOrder: z.paymentOrder || '',
         docDate: z.docDate ? new Date(z.docDate).toISOString() : null,
         govParticipation: App.binData.govParticipation || z.govParticipation || '',
+        // Признак резидентства по ГБД ЮЛ (или ручная правка андеррайтера).
+        residency: App._residencySnap(),
         legalAddress,
         // Источники активного ОКЭДа (manual / statgov-max-class / zayavka)
         okedSource: resolved.source || 'unknown',
@@ -3783,7 +3926,13 @@ const App = {
       legalAddress,
       headFullname,
       statgov: sg, // полный объект — для генераторов, которые захотят что-то ещё
+      // Признак резидентства: галочка — единственный источник для документов,
+      // но выставляется она автоматически по ГБД ЮЛ (см. _applyResidency).
+      // residency* — справочно: откуда взялось значение (для подсказок/аналитики).
       nonResident: document.getElementById('nonResident').checked,
+      residencyStatus: App.residency ? App.residency.status : null,
+      residencySource: App._residencyManual ? 'manual' : (App.residency ? 'gbd_ul' : null),
+      residencyNote: App.residency ? App.residency.title : null,
       isAffiliated,
       affiliatedName: affiliatedEntry ? affiliatedEntry.name : null,
       // Эффективные финансы (overrides для аффилированных): перетирают z.insuranceSum / premiumBase

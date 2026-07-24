@@ -67,6 +67,17 @@ const ARForm = {
     return (v * 100).toFixed(2).replace('.', ',') + '%';
   },
 
+  // « — резидент» / « — нерезидент» к БИН в документе. Источник — локальный
+  // индекс ГБД ЮЛ (js/resident-check.js). Если индекс не загружен или это ИИН
+  // (реестр юр. лиц неприменим) — суффикс пустой, форма остаётся как была.
+  _residencySuffix(bin) {
+    if (typeof ResidentCheck === 'undefined' || !ResidentCheck.ready()) return '';
+    const res = ResidentCheck.check(bin);
+    if (res.status === 'resident') return ' — резидент';
+    if (res.status === 'nonresident') return ' — нерезидент';
+    return '';
+  },
+
   _coeff(v) {
     if (v == null || isNaN(v)) return '1';
     return String(v).replace('.', ',');
@@ -210,6 +221,10 @@ const ARForm = {
       : ((sg && sg.legalAddress) || '');
     if (!addr && kyc && kyc.legalAddress) addr = String(kyc.legalAddress).trim();
     const nameCell = addr ? `${name}, ${addr}` : name;
+    // Признак резидентства — проверка БИН по локальному индексу ГБД ЮЛ
+    // (js/resident-check.js). Пишем в ту же строку, что и БИН, чтобы не добавлять
+    // строку в таблицу: форма подогнана ровно под одну страницу A4.
+    const binCell = `${row.bin}${ARForm._residencySuffix(row.bin)}`;
     const docNo = row.contractNumber || '';
     const docDate = ARForm._dateRu(row.dateContract);
     const period = `с ${ARForm._dateRu(row.periodFrom)} по ${ARForm._dateRu(row.periodTo)}`;
@@ -227,7 +242,7 @@ const ARForm = {
     // ===== СЕКЦИЯ 1: РЕКОМЕНДАЦИЯ ДАиП =====
     rows.push(sectionRow('РЕКОМЕНДАЦИЯ ДАиП', docNo, docDate));
     rows.push(labelRow('Страхователь', nameCell));
-    rows.push(labelRow('БИН/ИИН', row.bin));
+    rows.push(labelRow('БИН/ИИН', binCell));
     rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
     rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
     rows.push(finHeaderRow());
@@ -249,7 +264,7 @@ const ARForm = {
       rows.push(sectionRow('АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ', docNo, docDate));
       rows.push(labelRow('На основании Рекомендации', `№ ${docNo || '____'} от ${docDate}`));
       rows.push(labelRow('Страхователь', nameCell));
-      rows.push(labelRow('БИН/ИИН', row.bin));
+      rows.push(labelRow('БИН/ИИН', binCell));
       rows.push(labelRow('Вид страхования', ARForm.RISK_TEXT));
       rows.push(labelRow('Класс страхования', ARForm.CLASS_TEXT));
       rows.push(finHeaderRow());

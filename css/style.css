@@ -1331,6 +1331,34 @@ header.app-header {
   cursor: pointer;
 }
 
+/* Бейдж автопроверки резидентства по ГБД ЮЛ рядом с галочкой «Нерезидент». */
+.resident-badge {
+  font-size: 11.5px;
+  line-height: 1.3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: help;
+}
+.resident-badge:empty { display: none; }
+.resident-badge--ok { background: var(--c-success-50); color: var(--c-success-700); border-color: #a7f3d0; }
+.resident-badge--no { background: var(--c-danger-50); color: var(--c-danger-700); border-color: #fecaca; font-weight: 600; }
+.resident-badge--ip { background: var(--c-info-50); color: var(--c-info-700); border-color: #bfdbfe; }
+.resident-badge--warn { background: var(--c-warning-50); color: var(--c-warning-700); border-color: #fde68a; font-weight: 600; }
+.resident-badge--na { background: var(--c-surface-sunken); color: var(--c-text-tertiary); border-color: var(--c-border-subtle); }
+
+/* «Признак резидентства» в карточке профиля компании. */
+.pi-resident { font-weight: 600; cursor: help; }
+.pi-resident--ok { color: var(--c-success-700); }
+.pi-resident--no { color: var(--c-danger-700); }
+.pi-resident--ip { color: var(--c-info-700); }
+.pi-resident--warn { color: var(--c-warning-700); }
+.pi-resident--na { color: var(--c-text-tertiary); font-weight: 500; }
+.pi-resident-src { color: var(--c-text-tertiary); font-size: .85em; font-weight: 400; }
+/* Метка стороны договора (С:/К:) перед признаком резидентства в карточке профиля. */
+.pi-resident-party { color: var(--c-text-tertiary); font-weight: 700; font-size: .82em; margin-right: 2px; }
+
 /* === Preview panel — card-style layout === */
 .preview-panel {
   display: none;
@@ -3419,6 +3447,7 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-c-center { text-align: center; vertical-align: top; }
 .batch-c-reg  { text-align: left; vertical-align: top; }
 .batch-c-gov  { text-align: center; white-space: nowrap; vertical-align: top; line-height: 1.2; }
+.batch-c-resident { text-align: center; white-space: normal; vertical-align: top; line-height: 1.2; word-break: break-word; }
 .batch-c-author { text-align: left; vertical-align: top; color: #475467; white-space: normal; line-height: 1.25; word-break: break-word; }
 /* Страхователь и Контрагент: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче). */
 .batch-c-contr, .batch-c-insurer { text-align: left; vertical-align: top; }
@@ -3537,6 +3566,15 @@ tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn 
    гос. участия не ошибка. Подсвечиваем (красным) только РАСХОЖДЕНИЕ с e-Qazyna. */
 .batch-gov-yes { color: #1f2937; font-weight: 600; }
 .batch-gov-no { color: #cbd5e1; }
+
+/* Резидентство по ГБД ЮЛ: резидент — спокойная галочка, нерезидент — заметно
+   (это редкий случай и он меняет формулировку в документах), ИП — нейтрально. */
+.batch-res { cursor: help; font-size: 11px; }
+.batch-res--yes { color: #16a34a; font-weight: 700; font-size: 13px; }
+.batch-res--no { color: #b91c1c; font-weight: 700; }
+.batch-res--ip { color: #64748b; }
+.batch-res--warn { color: #b45309; font-weight: 700; }
+.batch-res--na { color: #cbd5e1; }
 
 .batch-alert {
   display: inline-block;

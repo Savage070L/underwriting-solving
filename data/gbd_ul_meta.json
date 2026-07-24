@@ -1,0 +1,17 @@
+{
+  "dataset": "gbd_ul",
+  "source": "https://data.egov.kz/datasets/view?index=gbd_ul",
+  "generated": "2026-07-24",
+  "bins": 757231,
+  "flagged": 9,
+  "file": "gbd_ul_bins.bin",
+  "bytes": 787051,
+  "format": "GBDB v2: uint32 count + uint32 flaggedCount + LEB128 delta streams + status bytes",
+  "records_expected": 936309,
+  "records_read": 936309,
+  "records_total_dataset": 986136,
+  "duplicate_records": 179078,
+  "tail_left": 0,
+  "complete": true,
+  "origin": "api"
+}

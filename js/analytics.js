@@ -1749,11 +1749,20 @@
           <div class="pi-bar"><div class="pi-bar-fill" style="width:${govPct}%;background:${govBarColor}"></div></div>
           <div class="pi-value">${govDisplay}</div>
         </div>
-        <div class="profile-item">
+        ${(() => {
+          // Признак резидентства — из snapshot (проверка БИН по ГБД ЮЛ в app.js).
+          // Старые snapshot без поля residency → прежнее значение «резидент РК».
+          const res = z.residency;
+          const nonRes = res && res.status === 'nonresident';
+          const label = res ? (res.status === 'resident' ? 'резидент РК' : res.label) : 'резидент РК';
+          const src = res && res.source
+            ? ` <span style="opacity:.6;font-size:.85em;font-weight:400">(${res.source})</span>` : '';
+          return `<div class="profile-item">
           <div class="pi-key">Признак резидентства</div>
-          <div class="pi-bar"><div class="pi-bar-fill" style="width:90%;background:var(--success)"></div></div>
-          <div class="pi-value">резидент РК</div>
-        </div>
+          <div class="pi-bar"><div class="pi-bar-fill" style="width:90%;background:var(--${nonRes ? 'danger' : 'success'})"></div></div>
+          <div class="pi-value">${label}${src}</div>
+        </div>`;
+        })()}
       </div>`;
   })();
 
