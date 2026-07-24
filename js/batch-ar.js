@@ -42,6 +42,14 @@ const BatchAR = {
   EGOV_CONCURRENCY: 8,
   KYC_CONCURRENCY: 5,   // fallback дат/адреса через kyc.kz (один GET ~250 КБ)
   EGOV_RESID_CONCURRENCY: 6,  // авторитетная проверка резидентства через egov P30.11
+  // Фаза авторитетной проверки резидентства (egov): пока 'pending' — в ячейках
+  // резидентства показываем ⏳, а не промежуточный локальный вердикт. 'unavailable'
+  // (нет моста) / 'done' (пул отработал) → показываем что есть (egov или локальный).
+  _egovResidPhase: 'idle',
+  // Дата регистрации приходит из statgov, а если там нет — из kyc (fallback ПОСЛЕ
+  // statgov). Пока kyc-фаза не завершена — в колонке «Дата рег.» тоже ⏳, а не
+  // промежуточная дата из БИН / «найдено без даты».
+  _kycFinished: false,
 
   _loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -75,6 +83,8 @@ const BatchAR = {
       const { rows, total, skipped, header, idx } = BatchReader.parse(buf);
       BatchAR.rows = rows;
       BatchAR._sourceFileName = file.name || '';  // для шапки HTML-отчёта
+      BatchAR._egovResidPhase = 'pending';  // резидентство ещё не проверяли egov → ⏳
+      BatchAR._kycFinished = false;         // дата рег. ещё может прийти из kyc → ⏳
       BatchAR._page = 0;                   // на первую страницу
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
@@ -1121,14 +1131,23 @@ const BatchAR = {
     const binDate = Utils.binRegistrationDate ? Utils.binRegistrationDate(BatchAR._insurerBin(r)) : null;
     const binUsable = binDate && !isNaN(binDate) && binDate <= new Date();
     if (!eff) {
-      // Нет даты из реестров, но БИН Страхователя даёт дату основания — показываем её.
+      // Даты из statgov нет. Но есть fallback на kyc.kz, который стартует ТОЛЬКО
+      // после того, как весь statgov-проход завершится. Пока kyc-фаза для этой
+      // строки не закрыта — показываем ⏳, а НЕ промежуточную дату из БИН /
+      // «найдено без даты»: иначе кажется, что дата уже финальная.
+      const kycMayRun = typeof StatGovClient !== 'undefined' && !!StatGovClient.lookupKyc && !BatchAR._kycFinished;
+      if (r.kycStatus === 'loading'
+          || (kycMayRun && r.kycStatus !== 'done' && r.kycStatus !== 'error')) {
+        return '<span class="batch-sg batch-sg--load">⏳ проверка…</span>';
+      }
+      // kyc завершён (или недоступен) → финал. Нет даты из реестров, но БИН
+      // Страхователя даёт дату основания — показываем её.
       if (binUsable) {
         const ds = ARForm._esc(Utils.fmtDateShort(binDate));
         let aRow = '';
         if (r.youngAlert) { const a = BatchAR._ageText(binDate); if (a) aRow = `<span class="batch-sub batch-young">(${ARForm._esc(a)})</span>`; }
         return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="дата основания из БИН Страхователя">${ds}<span class="batch-regsrc" title="из БИН Страхователя">БИН</span></span>${aRow ? `<span class="batch-stack-bot">${aRow}</span>` : ''}</div>`;
       }
-      if (r.kycStatus === 'loading') return '<span class="batch-sg batch-sg--load">⏳ kyc.kz…</span>';
       return '<span class="batch-sg batch-sg--ok">✓ найдено (без даты)</span>';
     }
     const dateStr = ARForm._esc(Utils.fmtDateShort(eff.raw));
@@ -1203,6 +1222,16 @@ const BatchAR = {
   //   …        — egov ещё проверяет (локального вердикта нет)
   _residBadge(bin) {
     if (typeof ResidentCheck === 'undefined') return { cls: 'na', txt: 'н/д', title: 'индекс ГБД ЮЛ не загружен' };
+    // Для БИН, пока авторитетная проверка egov не отработала (фаза 'pending') и
+    // ответа ещё нет — показываем ⏳, а НЕ промежуточный локальный вердикт: так
+    // видно, что резидентство этой строки ещё не проверяли. ИИН в egov не уходят —
+    // им ⏳ не нужен (сразу локальный «ИП»).
+    const kind = ResidentCheck.idKind ? ResidentCheck.idKind(bin) : 'bin';
+    const egResolved = ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin);
+    if (kind === 'bin' && !egResolved
+        && (BatchAR._egovResidPhase === 'pending' || BatchAR._egovResidPhase === 'idle')) {
+      return { cls: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.11)…' };
+    }
     const res = BatchAR._residVerdict(bin);
     // Источник — в подсказку (egov title сам содержит «egov (P30.11): …»).
     switch (res.status) {
@@ -1354,6 +1383,8 @@ const BatchAR = {
     // подключения документы не формируем).
     const markUnavailable = () => {
       BatchAR._statgovConnected = false;
+      BatchAR._egovResidPhase = 'unavailable'; // моста нет → egov не будет, показываем локальный вердикт
+      BatchAR._kycFinished = true;              // kyc тоже не побежит → дата рег. финальна (без ⏳)
       targets.forEach(i => { BatchAR.rows[i].statgovStatus = 'skip'; BatchAR._refreshRow(i); });
       BatchAR._updateVerify();
       BatchAR._updateControls();
@@ -1364,6 +1395,8 @@ const BatchAR = {
 
     BatchAR._statgovConnected = true;
     BatchAR._statgovPaused = false;
+    BatchAR._egovResidPhase = 'pending';  // мост есть → egov проверит; до ответа ⏳
+    BatchAR._kycFinished = false;         // дата рег. ещё может прийти из kyc → ⏳
     targets.forEach(i => {
       BatchAR.rows[i].statgovStatus = 'pending';
       BatchAR.rows[i].egov = { status: 'loading' };
@@ -1478,7 +1511,9 @@ const BatchAR = {
   // Не гейтит генерацию; идёт в фоне после основного прохода statgov.
   async _fillMissingViaKyc() {
     if (BatchAR._kycRunning) return;
-    if (typeof StatGovClient === 'undefined' || !StatGovClient.lookupKyc) return;
+    // kyc недоступен / нечего дозапрашивать → фаза kyc завершена (снимаем ⏳ с даты).
+    const finishKyc = () => { BatchAR._kycFinished = true; BatchAR.renderTable(); };
+    if (typeof StatGovClient === 'undefined' || !StatGovClient.lookupKyc) { finishKyc(); return; }
     const targets = BatchAR.rows
       .map((r, i) => i)
       .filter(i => {
@@ -1487,7 +1522,7 @@ const BatchAR = {
           && !(r.statgov && !r.statgov.error && r.statgov.registrationDate)
           && r.kycStatus !== 'done';
       });
-    if (!targets.length) return;
+    if (!targets.length) { finishKyc(); return; }
     BatchAR._kycRunning = true;
     const queue = targets.slice();
     const kycCache = new Map(); // БИН Страхователя → Promise (дедуп филиалов)
@@ -1519,6 +1554,8 @@ const BatchAR = {
     const c = Math.max(1, BatchAR.KYC_CONCURRENCY);
     await Promise.all(Array.from({ length: c }, worker));
     BatchAR._kycRunning = false;
+    BatchAR._kycFinished = true;   // дата рег. финальна → снять ⏳ с непокрытых строк
+    BatchAR.renderTable();
   },
 
   // Объединяет частые агрегатные обновления UI (статус проверки, кнопка)
@@ -1565,7 +1602,11 @@ const BatchAR = {
   // проверяет). Дедуп по БИН: страхователь и филиалы с одним БИН — один запрос.
   async _poolEgovResidency(targets) {
     if (typeof ResidentCheck === 'undefined'
-        || !ResidentCheck.bridgeAvailable || !ResidentCheck.bridgeAvailable()) return;
+        || !ResidentCheck.bridgeAvailable || !ResidentCheck.bridgeAvailable()) {
+      BatchAR._egovResidPhase = 'unavailable';  // мост недоступен → показываем локальный вердикт
+      BatchAR.renderTable();
+      return;
+    }
     // Уникальные БИН обеих сторон → какие строки их используют (для перерисовки).
     const binRows = new Map();
     const isBin = (b) => ResidentCheck.idKind && ResidentCheck.idKind(b) === 'bin';
@@ -1590,6 +1631,10 @@ const BatchAR = {
     };
     const n = Math.max(1, BatchAR.EGOV_RESID_CONCURRENCY);
     await Promise.all(Array.from({ length: n }, worker));
+    // Пул отработал: те БИН, что egov не смог подтвердить (сессия egov мертва и
+    // т.п.), больше не «⏳» — показываем локальный вердикт. Перерисуем страницу.
+    BatchAR._egovResidPhase = 'done';
+    BatchAR.renderTable();
   },
 
   // Повторить проверку для непройденных (error/skip/pending) БИН.

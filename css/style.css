@@ -3596,6 +3596,7 @@ tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn 
 .batch-res--no { color: #b91c1c; font-weight: 700; }
 .batch-res--ip { color: #64748b; }
 .batch-res--warn { color: #b45309; font-weight: 700; }
+.batch-res--wait { color: #94a3b8; }  /* ⏳ — резидентство ещё проверяется через egov */
 .batch-res--na { color: #cbd5e1; }
 
 .batch-alert {
