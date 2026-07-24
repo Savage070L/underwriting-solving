@@ -46,10 +46,14 @@ const BatchAR = {
   // резидентства показываем ⏳, а не промежуточный локальный вердикт. 'unavailable'
   // (нет моста) / 'done' (пул отработал) → показываем что есть (egov или локальный).
   _egovResidPhase: 'idle',
-  // Дата регистрации приходит из statgov, а если там нет — из kyc (fallback ПОСЛЕ
-  // statgov). Пока kyc-фаза не завершена — в колонке «Дата рег.» тоже ⏳, а не
-  // промежуточная дата из БИН / «найдено без даты».
+  // Дата регистрации приходит из statgov, а если там нет — из kyc. kyc теперь
+  // идёт ПАРАЛЛЕЛЬНО statgov: как только строка закрылась в statgov без даты —
+  // сразу ставим её в kyc-очередь (не ждём конца всего прохода statgov).
+  // _kycFinished=true → все kyc отработали, снимаем ⏳ с колонки «Дата рег.».
   _kycFinished: false,
+  _kycQueue: [],       // индексы строк, ждущих kyc
+  _kycActive: 0,       // kyc-запросов «в полёте» (ограничено KYC_CONCURRENCY)
+  _kycCacheP: null,    // БИН → Promise (дедуп филиалов)
 
   _loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -85,6 +89,7 @@ const BatchAR = {
       BatchAR._sourceFileName = file.name || '';  // для шапки HTML-отчёта
       BatchAR._egovResidPhase = 'pending';  // резидентство ещё не проверяли egov → ⏳
       BatchAR._kycFinished = false;         // дата рег. ещё может прийти из kyc → ⏳
+      BatchAR._kycQueue = []; BatchAR._kycActive = 0; BatchAR._kycCacheP = new Map();
       BatchAR._page = 0;                   // на первую страницу
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
@@ -706,25 +711,23 @@ const BatchAR = {
   // если K нет среди них; жёлтым, если K есть, но не максимальный.
   _contrClassTariffCell(r) {
     const k = r.riskClassContragent || '—';
-    const used = (r.tariffExport != null && r.tariffExport > 0) ? r.tariffExport : (r.tariff || null);
     let bottom = '';
     if (r.statgovStatus === 'loading') {
       bottom = '<span class="batch-sub batch-sub--load">⏳</span>';
     } else {
+      // Снизу — ТОЛЬКО классы по ОКЭД контрагента (это колонка класса, не тарифа).
+      // Тариф здесь больше не показываем. Подсветку несёт сама ЯЧЕЙКА
+      // (batch-cell--err/warn из renderTable), поэтому список нейтральный —
+      // без второй раскраски текста.
       const list = BatchAR._contrClassList(r);
       if (list.length) {
         const classes = list.map(c => c == null ? '?' : c);
         const wrong = BatchAR._contrClassWrongByBin(r);
         const diff = BatchAR._contrClassDiffByBin(r);
-        const subCls = wrong ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
         const title = wrong ? 'Класс из выгрузки отсутствует среди классов по ОКЭД контрагента (stat.gov.kz)'
           : (diff ? 'Класс из выгрузки есть среди возможных, но не максимальный по ОКЭД контрагента'
           : 'Классы по ОКЭД контрагента (stat.gov.kz)');
-        bottom = `<span class="batch-sub ${subCls}" title="${title}">(${classes.join(', ')})</span>`;
-      } else if (BatchAR._contrTariffClassError(r)) {
-        bottom = `<span class="batch-sub batch-sub--err" title="Тариф не соответствует классу по справочнику">${BatchAR._fmtPct(used)} → ${BatchAR._fmtPct(BatchAR._contrTariff(r))}</span>`;
-      } else if (used != null) {
-        bottom = `<span class="batch-sub">${BatchAR._fmtPct(used)}</span>`;
+        bottom = `<span class="batch-sub" title="${title}">(${classes.join(', ')})</span>`;
       }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${ARForm._esc(String(k))}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -1019,11 +1022,12 @@ const BatchAR = {
         const classes = list.map(o => { const c = BatchAR._classOf(o); return c == null ? '?' : c; });
         const diff = BatchAR._classDiff(r);
         const err = diff && BatchAR._okedError(r);
-        const subCls = err ? 'batch-sub--err' : (diff ? 'batch-sub--warn' : '');
         const title = err
           ? 'Класс ошибочный: ОКЭД из выгрузки отсутствует у компании по stat.gov.kz'
           : (diff ? 'Макс. класс по ОКЭД не совпадает с выгрузкой — выбран не тот ОКЭД из нескольких' : 'классы по каждому ОКЭД');
-        bottom = `<span class="batch-sub ${subCls}" title="${title}">(${classes.join(', ')})</span>`;
+        // Список классов нейтральный — подсветку несёт сама ЯЧЕЙКА
+        // (batch-cell--err/warn из renderTable), без второй раскраски текста.
+        bottom = `<span class="batch-sub" title="${title}">(${classes.join(', ')})</span>`;
       }
     }
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
@@ -1151,27 +1155,15 @@ const BatchAR = {
       return '<span class="batch-sg batch-sg--ok">✓ найдено (без даты)</span>';
     }
     const dateStr = ARForm._esc(Utils.fmtDateShort(eff.raw));
-    const srcTitle = eff.source === 'kyc' ? 'дата из kyc.kz' : 'дата из stat.gov.kz';
-    const srcMark = eff.source === 'kyc' ? '<span class="batch-regsrc" title="kyc.kz">kyc</span>' : '';
-    // Дата сверху — из stat.gov.kz. Если в БИН Страхователя зашит ДРУГОЙ год/месяц
-    // (перерегистрация) — показываем его снизу компактно как «(окт. 2016)», и только тогда.
-    let binNote = '';
-    if (binUsable) {
-      const topD = Utils.parseCompanyRegDate ? Utils.parseCompanyRegDate(eff.raw) : null;
-      const sameMonthYear = topD && !isNaN(topD)
-        && topD.getFullYear() === binDate.getFullYear()
-        && topD.getMonth() === binDate.getMonth();
-      if (!sameMonthYear) {
-        binNote = `<span class="batch-sub" title="В БИН Страхователя зашит другой год/месяц регистрации (перерегистрация)">(${ARForm._esc(BatchAR._monthYear(binDate))})</span>`;
-      }
-    }
+    // Видимую метку «kyc» и месяц/год из БИН не показываем (лишний шум); источник
+    // в подписи тоже не называем. Снизу — только возраст молодой компании.
+    const srcTitle = 'дата регистрации';
     let ageRow = '';
     if (r.youngAlert) {
       const age = BatchAR._ageText(r._foundingDate || eff.raw);
       if (age) ageRow = `<span class="batch-sub batch-young">(${ARForm._esc(age)})</span>`;
     }
-    const bottom = [binNote, ageRow].filter(Boolean).join(' ');
-    return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="${srcTitle}">${dateStr}${srcMark}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+    return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="${srcTitle}">${dateStr}</span>${ageRow ? `<span class="batch-stack-bot">${ageRow}</span>` : ''}</div>`;
   },
 
   // Гос. участие: сверху — из выгрузки, снизу в скобках — вывод по e-Qazyna.
@@ -1397,6 +1389,7 @@ const BatchAR = {
     BatchAR._statgovPaused = false;
     BatchAR._egovResidPhase = 'pending';  // мост есть → egov проверит; до ответа ⏳
     BatchAR._kycFinished = false;         // дата рег. ещё может прийти из kyc → ⏳
+    BatchAR._kycQueue = []; BatchAR._kycActive = 0; BatchAR._kycCacheP = new Map();
     targets.forEach(i => {
       BatchAR.rows[i].statgovStatus = 'pending';
       BatchAR.rows[i].egov = { status: 'loading' };
@@ -1470,6 +1463,9 @@ const BatchAR = {
         }
         BatchAR._refreshRow(i);
         BatchAR._scheduleAggregate();
+        // Строка закрылась в statgov без даты рег. → сразу в kyc-очередь,
+        // ПАРАЛЛЕЛЬНО остальным statgov-лукапам (не ждём конца всего прохода).
+        BatchAR._maybeQueueKyc(i);
       }
     };
     const n = Math.max(1, BatchAR.STATGOV_CONCURRENCY);
@@ -1477,10 +1473,11 @@ const BatchAR = {
     BatchAR._statgovRunning = false;
     BatchAR._updateVerify();
     BatchAR._updateControls();
-    // Остановились по паузе → остаток дочитаем по «Продолжить»; kyc-фоллбэк пока не запускаем.
+    // Весь statgov пройден (не пауза) → добираем kyc для оставшихся и проверяем,
+    // не завершилась ли kyc-фаза (снять ⏳ с даты, где kyc не нужен/недоступен).
     if (!BatchAR._statgovPaused && !sgQueue.length) {
-      // Fallback дат регистрации/адреса через kyc.kz — для тех, у кого stat.gov не дал даты.
-      BatchAR._fillMissingViaKyc();
+      BatchAR.rows.forEach((_, i) => BatchAR._maybeQueueKyc(i));
+      BatchAR._maybeFinishKyc();
     }
   },
 
@@ -1505,57 +1502,70 @@ const BatchAR = {
     else BatchAR.pauseStatgov();
   },
 
-  // ===== Fallback через kyc.kz =====
+  // ===== Fallback через kyc.kz (ПАРАЛЛЕЛЬНО statgov) =====
   // Для строк, где stat.gov.kz не вернул дату регистрации, тянем карточку с
-  // kyc.kz (быстрый GET, без ЭЦП) — берём оттуда дату регистрации и адрес.
-  // Не гейтит генерацию; идёт в фоне после основного прохода statgov.
-  async _fillMissingViaKyc() {
-    if (BatchAR._kycRunning) return;
-    // kyc недоступен / нечего дозапрашивать → фаза kyc завершена (снимаем ⏳ с даты).
-    const finishKyc = () => { BatchAR._kycFinished = true; BatchAR.renderTable(); };
-    if (typeof StatGovClient === 'undefined' || !StatGovClient.lookupKyc) { finishKyc(); return; }
-    const targets = BatchAR.rows
-      .map((r, i) => i)
-      .filter(i => {
-        const r = BatchAR.rows[i];
-        return r.statgovStatus === 'done'
-          && !(r.statgov && !r.statgov.error && r.statgov.registrationDate)
-          && r.kycStatus !== 'done';
-      });
-    if (!targets.length) { finishKyc(); return; }
-    BatchAR._kycRunning = true;
-    const queue = targets.slice();
-    const kycCache = new Map(); // БИН Страхователя → Promise (дедуп филиалов)
-    const worker = async () => {
-      while (queue.length) {
-        const i = queue.shift();
-        const r = BatchAR.rows[i];
-        r.kycStatus = 'loading';
-        BatchAR._refreshRow(i);
+  // kyc.kz (быстрый GET, без ЭЦП) — оттуда дата регистрации и адрес. Запросы
+  // идут по мере готовности строк в statgov (не одним пулом в конце), с лимитом
+  // KYC_CONCURRENCY и дедупом по БИН. Не гейтит генерацию.
+
+  // Поставить строку в kyc-очередь, если после statgov у неё нет даты регистрации.
+  _maybeQueueKyc(i) {
+    const r = BatchAR.rows[i];
+    if (!r || r.statgovStatus !== 'done') return;
+    if (r.statgov && !r.statgov.error && r.statgov.registrationDate) return; // дата уже есть
+    if (r._kycQueued || r.kycStatus === 'loading' || r.kycStatus === 'done') return;
+    if (typeof StatGovClient === 'undefined' || !StatGovClient.lookupKyc) return;
+    r._kycQueued = true;
+    BatchAR._kycQueue.push(i);
+    BatchAR._pumpKyc();
+  },
+
+  // Держим до KYC_CONCURRENCY kyc-запросов «в полёте», добирая из очереди.
+  _pumpKyc() {
+    if (!BatchAR._kycCacheP) BatchAR._kycCacheP = new Map();
+    const cache = BatchAR._kycCacheP;
+    const limit = Math.max(1, BatchAR.KYC_CONCURRENCY);
+    while (BatchAR._kycActive < limit && BatchAR._kycQueue.length) {
+      const i = BatchAR._kycQueue.shift();
+      const r = BatchAR.rows[i];
+      if (!r) continue;
+      BatchAR._kycActive++;
+      r.kycStatus = 'loading';
+      BatchAR._refreshRow(i);
+      (async () => {
         try {
           const lbin = BatchAR._insurerBin(r);
-          let p = kycCache.get(lbin);
-          if (!p) { p = StatGovClient.lookupKyc(lbin); kycCache.set(lbin, p); }
+          let p = cache.get(lbin);
+          if (!p) { p = StatGovClient.lookupKyc(lbin); cache.set(lbin, p); }
           const data = await p;
           r.kyc = data || {};
           r.kycStatus = 'done';
-          // kyc-имя — только если из stat.gov имени не было.
           if (r.kyc.found !== false && r.kyc.name && !(r.statgov && r.statgov.name)) {
-            r.insurerName = r.kyc.name;
+            r.insurerName = r.kyc.name;   // kyc-имя — только если у stat.gov имени не было
           }
           BatchAR._applyYoung(r);
         } catch (e) {
           r.kyc = { error: (e && e.message) || 'ошибка' };
           r.kycStatus = 'error';
         }
+        BatchAR._kycActive--;
         BatchAR._refreshRow(i);
-      }
-    };
-    const c = Math.max(1, BatchAR.KYC_CONCURRENCY);
-    await Promise.all(Array.from({ length: c }, worker));
-    BatchAR._kycRunning = false;
-    BatchAR._kycFinished = true;   // дата рег. финальна → снять ⏳ с непокрытых строк
-    BatchAR.renderTable();
+        BatchAR._pumpKyc();          // взять следующий из очереди
+        BatchAR._maybeFinishKyc();   // всё дочитано? → снять ⏳ с даты
+      })();
+    }
+  },
+
+  // kyc-фаза завершена, когда statgov полностью пройден, очередь kyc пуста и нет
+  // запросов «в полёте». Тогда снимаем ⏳ с даты (непокрытые падают на БИН-дату).
+  _maybeFinishKyc() {
+    const sgLeft = BatchAR._sgQueue && BatchAR._sgQueue.length;
+    if (!BatchAR._statgovRunning && !sgLeft
+        && !BatchAR._kycQueue.length && BatchAR._kycActive === 0
+        && !BatchAR._kycFinished) {
+      BatchAR._kycFinished = true;
+      BatchAR.renderTable();
+    }
   },
 
   // Объединяет частые агрегатные обновления UI (статус проверки, кнопка)
@@ -2333,7 +2343,8 @@ const BatchAR = {
     BatchAR._statgovPaused = false;
     BatchAR._sgQueue = null;
     BatchAR._statgovConnected = false;
-    BatchAR._kycRunning = false;
+    BatchAR._kycQueue = []; BatchAR._kycActive = 0; BatchAR._kycCacheP = null;
+    BatchAR._kycFinished = false; BatchAR._egovResidPhase = 'idle';
     const zone = document.getElementById('zone-batch');
     if (zone) zone.classList.remove('loaded');
     const input = document.getElementById('batch-file-input');
