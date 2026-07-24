@@ -304,8 +304,14 @@ const ResidentCheck = {
     return p;
   },
 
-  // Ответ egov P30.11 → verdict. resident:true → резидент; status 033 → ИП;
-  // 034/прочее при resident:false → нерезидент (с причиной из статуса).
+  // Ответ egov P30.11 → verdict. АВТОРИТЕТНЫЙ признак — булев `resident`:
+  //   resident:true  (статус 002)                    → резидент
+  //   resident:false (033/034/031/прочее)            → нерезидент
+  // ВАЖНО: статус 033 «является ИПс, а сведения предоставляются только по
+  // субъектам, зарегистрированным Минюстом РК» — это НЕ «это ИП», а «БИН не
+  // зарегистрирован Минюстом как юрлицо РК, данных нет» → нерезидент. Раньше 033
+  // ошибочно трактовался как ИП. Настоящие ИП/физлица (ИИН, 5-я цифра 0–3) в egov
+  // не уходят вообще (см. checkEgov guard) и остаются локальным «ИП (ХЗ)».
   _egovVerdict(d) {
     if (!d || d.resident == null) return null;
     const note = d.statusText || '';
@@ -317,19 +323,9 @@ const ResidentCheck = {
         title: `egov (P30.11): резидент${nm ? ' — ' + nm : ''}`,
       };
     }
-    if (d.statusCode === '033') {
-      // egov подтвердил, что БИН принадлежит ИП. Но резидентство ИП egov не
-      // определяет → «ИП (ХЗ)», галочку не трогаем (nonResident:null).
-      return {
-        status: 'individual', nonResident: null, source: 'egov', registryStatus: 0,
-        label: 'ИП (ХЗ)', badge: 'ИП',
-        title: 'egov (P30.11): БИН принадлежит индивидуальному предпринимателю (не юрлицо). '
-          + 'Резидентство ИП автоматически не определяется — уточните вручную.',
-      };
-    }
     return {
       status: 'nonresident', nonResident: true, source: 'egov', registryStatus: 0,
-      label: 'нерезидент', badge: 'нерезидент',
+      label: 'нерезидент', badge: 'нерезидент', egovStatusCode: d.statusCode || null,
       title: `egov (P30.11): нерезидент${note ? ' — ' + note : ''}`,
     };
   },
