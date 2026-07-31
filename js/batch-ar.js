@@ -2404,18 +2404,29 @@ const BatchAR = {
       }
     }
     const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-    // Прогресс проверки: обработано = всё, что уже не в очереди и не в работе
-    // (в т.ч. «не проверено» — по ним проверка закончилась ошибкой/без моста).
+    // Прогресс проверки: ПРОВЕРЕНО = строки с реальным вердиктом (корректна /
+    // расхождение / ошибка / согласована андеррайтером). «Не проверено» (skip —
+    // нет моста к stat.gov.kz, error — проверка упала) в прогресс НЕ идёт: иначе
+    // при отсутствии расширения бар показывал 100% при нуле реально проверенных.
     const total = BatchAR.rows.length;
-    const done = Math.max(0, total - checking - pending);
-    const pct = total ? Math.round((done / total) * 100) : 0;
+    const done = ok + warn + err + approved;
+    const pct = total ? Math.floor((done / total) * 100) : 0;
     set('bs-done', done);
     set('bs-total', total);
-    set('bs-progress-pct', pct + '%');
+    // 100% пишем только когда действительно все строки проверены (иначе floor
+    // даёт «100%» уже на 29 016 из 29 017).
+    set('bs-progress-pct', (done >= total && total > 0 ? 100 : Math.min(pct, 99)) + '%');
     const pbar = document.getElementById('bs-progress-bar');
-    if (pbar) pbar.style.width = pct + '%';
+    if (pbar) pbar.style.width = (total ? (done / total) * 100 : 0) + '%';
     const pwrap = document.getElementById('bs-progress-wrap');
-    if (pwrap) pwrap.classList.toggle('is-complete', total > 0 && done >= total);
+    if (pwrap) {
+      pwrap.classList.toggle('is-complete', total > 0 && done >= total);
+      // Проверка закончилась, но часть строк осталась непроверенной — не зелёный.
+      pwrap.classList.toggle('is-stalled', total > 0 && done < total && !checking && !pending);
+      pwrap.title = unchecked
+        ? `Проверено ${done} из ${total}. Не проверено: ${unchecked} (нет подключения к stat.gov.kz или ошибка проверки) — в прогресс не засчитываются.`
+        : `Проверено ${done} из ${total} строк реестра`;
+    }
     set('bs-ok', ok); set('bs-warn', warn); set('bs-err', err);
     set('bs-checking', checking); set('bs-pending', pending);
     set('bs-approved', approved); set('bs-unchecked', unchecked);
