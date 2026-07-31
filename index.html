@@ -32,10 +32,6 @@
           <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg></span>
           <span class="tab-btn-label">Проверка Договоров</span>
         </button>
-        <button class="tab-btn" id="tabbtn-daip" role="tab" aria-selected="false" aria-controls="tab-daip" onclick="App.switchTab('daip')">
-          <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
-          <span class="tab-btn-label">Печать рекомендации ДАиП</span>
-        </button>
         <button class="tab-btn" id="tabbtn-decision" role="tab" aria-selected="false" aria-controls="tab-decision" onclick="App.switchTab('decision')">
           <span class="tab-btn-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
           <span class="tab-btn-label">Андеррайтинговое решение</span>
@@ -275,13 +271,14 @@
           <input type="file" id="batch-file-input" accept=".xlsx,.xls" style="display:none" onchange="BatchAR.loadFile(this.files[0])">
         </div>
 
-        <div class="batch-toolbar" id="batch-toolbar" style="display:none">
-          <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
-        </div>
-
-        <!-- Статус-бар: сводка по строкам реестра (обновляется по мере проверки). -->
+        <!-- Статус-бар: прогресс проверки + сводка по строкам (обновляется по мере
+             проверки). Кнопка «Открыть в отдельной вкладке» живёт здесь же, справа. -->
         <div class="batch-statusbar" id="batch-statusbar" style="display:none">
-          <span class="batch-stat batch-stat--total"><b id="bs-total">0</b>&nbsp;строк</span>
+          <span class="batch-stat batch-stat--progress" id="bs-progress-wrap" title="Проверено договоров из общего числа строк реестра">
+            <span class="batch-stat-progress-nums"><b id="bs-done">0</b>&nbsp;/&nbsp;<b id="bs-total">0</b>&nbsp;проверено</span>
+            <span class="batch-stat-progress-bar"><i id="bs-progress-bar"></i></span>
+            <span class="batch-stat-progress-pct" id="bs-progress-pct">0%</span>
+          </span>
           <span class="batch-stat-sep"></span>
           <span class="batch-stat batch-stat--ok" title="Проверено, ошибок нет"><span class="batch-stat-dot"></span><b id="bs-ok">0</b>&nbsp;корректных</span>
           <span class="batch-stat batch-stat--warn" title="Расхождения — нужна доп. проверка"><span class="batch-stat-dot"></span><b id="bs-warn">0</b>&nbsp;расхождений</span>
@@ -290,6 +287,7 @@
           <span class="batch-stat batch-stat--pending" title="В очереди — ещё не дошло до проверки"><span class="batch-stat-dot"></span><b id="bs-pending">0</b>&nbsp;в очереди</span>
           <span class="batch-stat batch-stat--unchecked" title="Не проверено — нет подключения к stat.gov.kz или ошибка проверки"><span class="batch-stat-dot"></span><b id="bs-unchecked">0</b>&nbsp;не проверено</span>
           <span class="batch-stat batch-stat--approved" title="Согласовано андеррайтером"><span class="batch-stat-dot"></span><b id="bs-approved">0</b>&nbsp;согласовано</span>
+          <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
         <!-- Чипы мультисортировки (по столбцам) — под статус-баром. Рендерит
              BatchAR._renderSortChips(). Клик: выкл → ↓ по убыванию → ↑ по
@@ -334,9 +332,11 @@
             <tbody id="batch-tbody"></tbody>
           </table>
         </div>
-        <!-- Пагинация таблицы (BatchAR._renderPagination). В DOM держим только
-             одну страницу строк — большие реестры иначе вешают вкладку. -->
-        <div class="batch-pagination" id="batch-pagination" style="display:none"></div>
+        <!-- Постраничного режима нет: таблица одна, прокручивается. В DOM строки
+             добавляются порциями по мере прокрутки (BatchAR._appendChunk) — сразу
+             весь реестр (десятки тысяч строк) вешает вкладку. Здесь — счётчик
+             «показано N из M». -->
+        <div class="batch-scroll-info" id="batch-scroll-info" style="display:none"></div>
 
         <!-- Статус проверки stat.gov.kz — под таблицей. Генерация доступна только
              после того, как все БИН успешно проверены (без подключения — недоступна). -->
@@ -392,40 +392,39 @@
           <div class="batch-progress-track"><div class="batch-progress-bar" id="batch-progress-bar"></div></div>
           <div class="batch-progress-text" id="batch-progress-text"></div>
         </div>
-      </div>
-    </div>
-    </section>
 
-    <!-- ============ Раздел: Печать рекомендации ДАиП ============ -->
-    <section class="tab-panel" id="tab-daip" role="tabpanel" aria-labelledby="tabbtn-daip">
-    <div class="section">
-      <div class="section-title">Печать рекомендации ДАиП</div>
-      <p class="daip-hint">По каждому договору из реестра печатается полная форма — «Рекомендация ДАиП», «Заключение подразделения по управлению рисками» и «Андеррайтинговое решение» (один документ на договор, филиалы — внутри), все в один ZIP. В отличие от «Проверки договоров», печатаются <b>все</b> договоры, включая красные. Реестр берётся из вкладки «Проверка договоров». Проверка stat.gov.kz не требуется.</p>
+        <!-- ===== Печать рекомендаций ДАиП — в самом низу «Проверки договоров».
+             Отдельной вкладки нет: реестр общий, печать идёт по BatchAR.rows.
+             От генерации АР выше отличается тем, что печатает ВСЕ договоры
+             (включая красные) и подписант редактируемый. ===== -->
+        <div class="daip-block" id="daip-block">
+          <div class="daip-block-title">Печать рекомендаций ДАиП</div>
+          <p class="daip-hint">По каждому договору из реестра печатается полная форма — «Рекомендация ДАиП», «Заключение подразделения по управлению рисками» и «Андеррайтинговое решение» (один документ на договор, филиалы — внутри), все в один ZIP. В отличие от кнопки «Сгенерировать Рекомендации АР», печатаются <b>все</b> договоры, включая красные. Проверка stat.gov.kz не требуется.</p>
 
-      <!-- Подписант: должность и ФИО можно менять (они периодически меняются). -->
-      <div class="daip-signer">
-        <label class="daip-field">
-          <span class="daip-field-label">Должность подписанта</span>
-          <input type="text" id="daip-signer-role" value="Андеррайтер" placeholder="Например: Андеррайтер">
-        </label>
-        <label class="daip-field">
-          <span class="daip-field-label">ФИО подписанта</span>
-          <input type="text" id="daip-signer-name" value="Бурханов Д.К." placeholder="Например: Бурханов Д.К.">
-        </label>
-      </div>
+          <!-- Подписант: должность и ФИО можно менять (они периодически меняются). -->
+          <div class="daip-signer">
+            <label class="daip-field">
+              <span class="daip-field-label">Должность подписанта</span>
+              <input type="text" id="daip-signer-role" value="Андеррайтер" placeholder="Например: Андеррайтер">
+            </label>
+            <label class="daip-field">
+              <span class="daip-field-label">ФИО подписанта</span>
+              <input type="text" id="daip-signer-name" value="Бурханов Д.К." placeholder="Например: Бурханов Д.К.">
+            </label>
+          </div>
 
-      <!-- Реестр — общий с «Проверкой договоров». -->
-      <div class="daip-status" id="daip-status" style="display:none"></div>
-      <div class="daip-empty" id="daip-empty">
-        Реестр не загружен. Загрузите выгрузку договоров во вкладке
-        <button type="button" class="daip-link" onclick="App.switchTab('contracts')">«Проверка договоров»</button> — она появится здесь автоматически.
-      </div>
+          <div class="daip-status" id="daip-status" style="display:none"></div>
+          <div class="daip-empty" id="daip-empty">
+            Реестр не загружен — загрузите выгрузку договоров выше, и кнопка станет активна.
+          </div>
 
-      <button class="btn-generate daip-gen" id="daip-gen" onclick="DaipPrint.generateAll()" disabled>Печать рекомендаций ДАиП</button>
+          <button class="btn-generate daip-gen" id="daip-gen" onclick="DaipPrint.generateAll()" disabled>Печать рекомендаций ДАиП</button>
 
-      <div class="batch-progress" id="daip-progress" style="display:none">
-        <div class="batch-progress-track"><div class="batch-progress-bar" id="daip-progress-bar"></div></div>
-        <div class="batch-progress-text" id="daip-progress-text"></div>
+          <div class="batch-progress" id="daip-progress" style="display:none">
+            <div class="batch-progress-track"><div class="batch-progress-bar" id="daip-progress-bar"></div></div>
+            <div class="batch-progress-text" id="daip-progress-text"></div>
+          </div>
+        </div>
       </div>
     </div>
     </section>

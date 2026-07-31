@@ -84,7 +84,7 @@ const App = {
   // Страница разбита на разделы-вкладки. Состояние App общее и НЕ теряется
   // при переключении — мы лишь показываем/скрываем панели (.tab-panel).
   // Порядок в массиве — визуальный порядок вкладок в шапке.
-  TABS: ['contractor', 'contracts', 'daip', 'decision', 'refs'],
+  TABS: ['contractor', 'contracts', 'decision', 'refs'],
 
   switchTab(name, scroll = true) {
     if (!App.TABS.includes(name)) name = App.TABS[0];
@@ -99,9 +99,9 @@ const App = {
       }
     });
     try { localStorage.setItem('active_tab', name); } catch (e) {}
-    // Вкладка «Печать рекомендации ДАиП» берёт реестр из «Проверки договоров» —
-    // при открытии обновляем счётчик/кнопку по текущему BatchAR.rows.
-    if (name === 'daip' && typeof DaipPrint !== 'undefined') DaipPrint.refresh();
+    // Блок «Печать рекомендаций ДАиП» — внизу вкладки «Проверка договоров»
+    // (отдельной вкладки нет): при открытии обновляем счётчик/кнопку по BatchAR.rows.
+    if (name === 'contracts' && typeof DaipPrint !== 'undefined') DaipPrint.refresh();
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 

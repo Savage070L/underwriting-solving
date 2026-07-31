@@ -22,11 +22,17 @@ const BatchAR = {
   // 'filial' | 'tranche'). Приоритет применения — порядок _SORT_DEFS. Пусто — как в файле.
   _sorts: [],
 
-  // Пагинация таблицы: рендерим в DOM только одну страницу строк. Без этого при
-  // больших реестрах (десятки тысяч строк) сборка всей таблицы одной innerHTML
-  // подвешивала вкладку. Проверка/статус/выгрузка работают по всему массиву rows.
-  _page: 0,
-  _pageSize: 200,
+  // Постраничного режима НЕТ — таблица одна, пользователь просто прокручивает.
+  // Но сразу класть в DOM весь реестр нельзя: 16 тыс. строк × 21 колонка — это
+  // ~65 МБ разметки, и вкладка виснет на несколько десятков секунд (замерено).
+  // Поэтому строки добавляются ПОРЦИЯМИ по мере прокрутки к низу таблицы:
+  // _shown — сколько строк уже в DOM, _order — текущий порядок отображения.
+  CHUNK: 200,           // строк в порции (первый рендер и каждая подгрузка)
+  SCROLL_MARGIN: 900,   // за сколько px до низа подгружать следующую порцию
+  _shown: 0,
+  _order: [],
+  _rowEls: null,        // idx строки → <tr> (без querySelector по огромному DOM)
+  _scrollHooked: false,
 
   // JSZip грузим по требованию (для пакета). docx/FileSaver уже подключены.
   // ExcelJS — для выгрузки ошибок с заливкой ячеек (XLSX CE заливки не пишет).
@@ -90,7 +96,6 @@ const BatchAR = {
       BatchAR._egovResidPhase = 'pending';  // резидентство ещё не проверяли egov → ⏳
       BatchAR._kycFinished = false;         // дата рег. ещё может прийти из kyc → ⏳
       BatchAR._kycQueue = []; BatchAR._kycActive = 0; BatchAR._kycCacheP = new Map();
-      BatchAR._page = 0;                   // на первую страницу
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
       BatchAR._aggByContract = null;       // сбросить кэш агрегатов по договору (СС/СП/ФОТ контрагентов)
@@ -193,7 +198,8 @@ const BatchAR = {
     const i = BatchAR._sorts.indexOf(key);
     if (i >= 0) BatchAR._sorts.splice(i, 1);
     else BatchAR._sorts.push(key);
-    BatchAR._page = 0; // после смены сортировки — на первую страницу
+    const wrap = document.getElementById('batch-table-wrap');
+    if (wrap) wrap.scrollTop = 0;   // после смены сортировки — к началу таблицы
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
@@ -216,112 +222,24 @@ const BatchAR = {
   renderTable() {
     const wrap = document.getElementById('batch-table-wrap');
     const tbody = document.getElementById('batch-tbody');
-    const toolbar = document.getElementById('batch-toolbar');
     if (!wrap || !tbody) return;
     if (!BatchAR.rows.length) {
       wrap.style.display = 'none';
-      if (toolbar) toolbar.style.display = 'none';
-      const pg = document.getElementById('batch-pagination');
-      if (pg) { pg.style.display = 'none'; pg.innerHTML = ''; }
+      BatchAR._shown = 0; BatchAR._order = []; BatchAR._rowEls = null;
+      BatchAR._renderScrollInfo();
       tbody.innerHTML = '';
       return;
     }
     wrap.style.display = 'block';
-    if (toolbar) toolbar.style.display = '';
-    // Пагинация: порядок считаем по всем строкам, но в DOM рендерим только срез
-    // текущей страницы. Иначе сборка всей таблицы (десятки тысяч строк) одной
-    // innerHTML подвешивает вкладку. Проверка/статус/выгрузка идут по всему rows.
-    const order = BatchAR._displayOrder();
-    const pageCount = Math.max(1, Math.ceil(order.length / BatchAR._pageSize));
-    if (BatchAR._page >= pageCount) BatchAR._page = pageCount - 1;
-    if (BatchAR._page < 0) BatchAR._page = 0;
-    const pageStart = BatchAR._page * BatchAR._pageSize;
-    const pageOrder = order.slice(pageStart, pageStart + BatchAR._pageSize);
-    // Порядок столбцов: # · Договор · Наим.Страхователя · БИН Страхователя ·
-    // Контрагент(имя+БИН) · ОКЭД · Класс(страх) · Класс+тариф(контр) ·
-    // Кол-во(контр) · ФОТ(контр) · СС(контр) · СП(контр) · СС(страх) · ПК ·
-    // СПсПК(страх) · Дата рег. · Гос. участие · Менеджер.
-    tbody.innerHTML = pageOrder.map((i) => {
-      const r = BatchAR.rows[i];
-      const okedErr = BatchAR._okedError(r);
-      const cDiff = BatchAR._classDiff(r);
-      const cDiffWarn = BatchAR._classDiffWarn(r);
-      const classWrong = BatchAR._classWrongForOked(r);
-      const gDiff = BatchAR._govDiff(r);
-      const okedCls = okedErr ? ' batch-cell--err' : '';
-      const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiffWarn ? ' batch-cell--warn' : '');
-      const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"` : '';
-      const govCls = gDiff ? ' batch-cell--err' : '';
-      const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
-      // ===== КОНТРАГЕНТ (строка) =====
-      const contrSumLtFot = BatchAR._contrSumLtFotError(r);
-      const contrTarErr = BatchAR._contrTariffClassError(r);
-      const contrClassWrongBin = BatchAR._contrClassWrongByBin(r);
-      const contrClassDiffBin = BatchAR._contrClassDiffByBin(r);
-      const contrPremDiff = BatchAR._contrPremiumDiff(r);
-      const contrBinCls = BatchAR._binInvalid(r) ? ' batch-cell--err' : '';
-      const contrClassCls = (contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrClassDiffBin ? ' batch-cell--warn' : '');
-      const contrClassTitle = contrClassWrongBin
-        ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
-        : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})"`
-        : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
-      // СС контрагента красным: < ФОТ, или отличается от расчётной больше чем на ±100 ₸.
-      const contrSumDiff = BatchAR._contrSumDiff(r);
-      const contrSumCls = (contrSumLtFot || contrSumDiff) ? ' batch-cell--err' : '';
-      const contrSumTitle = contrSumLtFot ? ' title="СС контрагента меньше его ФОТ (должна быть ≥ ФОТ)"'
-        : (contrSumDiff ? ' title="СС контрагента отличается от расчётной больше чем на 100 ₸"' : '');
-      // СП контрагента красным, если премия ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸).
-      const contrPremCls = contrPremDiff ? ' batch-cell--err' : '';
-      const contrPremTitle = contrPremDiff ? ' title="СП контрагента ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸)"' : '';
-      // ===== СТРАХОВАТЕЛЬ (договор) =====
-      const sumLtPrem = BatchAR._sumLtPremiumError(r);
-      const sumLtFot = BatchAR._sumLtFotError(r);
-      const premBelowMin = BatchAR._premiumBelowMinError(r);
-      const insSumMis = BatchAR._insurerSumMismatch(r);
-      const insPremMis = BatchAR._insurerPremMismatch(r);
-      // СС/СП страхователя красным (допуск ±1 ₸): ≠ сумме контрагентов, СС < ФОТ/премии, премия < 1 МЗП.
-      const sumCls = (sumLtPrem || sumLtFot || premBelowMin || insSumMis) ? ' batch-cell--err' : '';
-      const premCls = (sumLtPrem || premBelowMin || insPremMis) ? ' batch-cell--err' : '';
-      const sumTitle = insSumMis ? ' title="СС страхователя ≠ сумме СС контрагентов (допуск ±1 ₸)"'
-        : (sumLtFot ? ' title="Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)"'
-        : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф"'
-        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '')));
-      const premTitle = insPremMis ? ' title="СП страхователя ≠ сумме СП контрагентов (допуск ±1 ₸)"'
-        : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000"'
-        : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : ''));
-      const binStReason = BatchAR._insurerBinInvalidReason(r);
-      const binStCls = binStReason ? ' batch-cell--err' : '';
-      const binStTitle = binStReason ? ` title="Некорректный ИИН/БИН Страхователя: ${ARForm._esc(binStReason)}"` : '';
-      // Класс строки = жизненный цикл проверки (серый/синий/зелёный) + ошибка (красный/жёлтый)
-      // + метка «согласовано андеррайтером».
-      const cls = BatchAR._rowClassList(r);
-      const rowCls = cls.length ? ` class="${cls.join(' ')}"` : '';
-      return `<tr data-idx="${i}"${rowCls}>
-        <td class="batch-c-num">${i + 1}</td>
-        <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
-        <td class="batch-c-insurer${binStCls}"${binStTitle}>${BatchAR._insurerIdentCell(r)}</td>
-        <td class="batch-c-contr${contrBinCls}">${BatchAR._contrIdentCell(r)}</td>
-        <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
-        <td class="batch-c-class${classCls}"${classTitle}>${BatchAR._classCell(r)}</td>
-        <td class="batch-c-contr-class${contrClassCls}"${contrClassTitle}>${BatchAR._contrClassTariffCell(r)}</td>
-        <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
-        <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
-        <td class="batch-c-num2 batch-c-sum${sumCls}"${sumTitle}>${BatchAR._sumCellHtml(r)}</td>
-        <td class="batch-c-num2 batch-c-contr-sum${contrSumCls}"${contrSumTitle}>${BatchAR._contrSumCell(r)}</td>
-        <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
-        <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
-        <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
-        <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
-        <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
-        <td class="batch-c-resident batch-c-resident-s">${BatchAR._residCellFor(BatchAR._insurerBin(r))}</td>
-        <td class="batch-c-resident batch-c-resident-k">${BatchAR._residCellFor(r.bin)}</td>
-        <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
-        <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
-        <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
-      </tr>`;
-    }).join('');
+    // Порядок считаем по ВСЕМ строкам, в DOM кладём первую порцию — остальные
+    // добавит _appendChunk при прокрутке. Проверка/статус/выгрузка идут по rows.
+    BatchAR._order = BatchAR._displayOrder();
+    BatchAR._shown = Math.min(BatchAR.CHUNK, BatchAR._order.length);
+    tbody.innerHTML = BatchAR._rowsHtml(BatchAR._order.slice(0, BatchAR._shown));
+    BatchAR._indexRows();
+    BatchAR._hookScroll();
     BatchAR._tableVersion++;
-    BatchAR._renderPagination(order.length, pageCount, pageStart, pageOrder.length);
+    BatchAR._renderScrollInfo();
     // Индекс ГБД ЮЛ мог ещё не догрузиться к моменту первого рендера — тогда
     // колонка «Резидент» показала бы «н/д». Перерисуем таблицу, когда он готов.
     if (typeof ResidentCheck !== 'undefined' && !BatchAR._residHooked
@@ -332,39 +250,150 @@ const BatchAR = {
   },
   _residHooked: false,
 
-  // Панель пагинации под таблицей. Скрыта, если строк ≤ размера страницы.
-  _renderPagination(total, pageCount, pageStart, shown) {
-    const host = document.getElementById('batch-pagination');
-    if (!host) return;
-    if (total <= BatchAR._pageSize) { host.style.display = 'none'; host.innerHTML = ''; return; }
-    host.style.display = '';
-    const page = BatchAR._page;
-    const first = total ? pageStart + 1 : 0;
-    const last = pageStart + shown;
-    const btn = (label, target, disabled) =>
-      `<button type="button" class="batch-pg-btn" ${disabled ? 'disabled' : `onclick="BatchAR.gotoPage(${target})"`}>${label}</button>`;
-    const opt = (v) => `<option value="${v}"${BatchAR._pageSize === v ? ' selected' : ''}>${v}</option>`;
-    host.innerHTML =
-      btn('« Первая', 0, page === 0) +
-      btn('‹ Назад', page - 1, page === 0) +
-      `<span class="batch-pg-info">Стр. <b>${page + 1}</b> из <b>${pageCount}</b> · строки <b>${first}–${last}</b> из <b>${total}</b></span>` +
-      btn('Вперёд ›', page + 1, page >= pageCount - 1) +
-      btn('Последняя »', pageCount - 1, page >= pageCount - 1) +
-      `<span class="batch-pg-size">по <select onchange="BatchAR.setPageSize(this.value)">${opt(100)}${opt(200)}${opt(500)}${opt(1000)}</select> на стр.</span>`;
+  // HTML набора строк по индексам (используется и для порций в таблице, и для
+  // HTML-отчёта, где нужны ВСЕ строки, но трогать живой DOM нельзя).
+  _rowsHtml(idxs) {
+    return idxs.map(BatchAR._rowHtml).join('');
   },
 
-  gotoPage(p) {
-    // Верхнюю границу страницы обрежет renderTable (там уже есть clamp по pageCount),
-    // поэтому не считаем порядок повторно — иначе _displayOrder гоняется дважды.
-    BatchAR._page = Math.max(0, p);
-    BatchAR.renderTable();
-    const wrap = document.getElementById('batch-table-wrap');
-    if (wrap) wrap.scrollTop = 0; // к началу страницы
+  // Разметка одной строки таблицы.
+  // Порядок столбцов: # · Договор · Наим.Страхователя · БИН Страхователя ·
+  // Контрагент(имя+БИН) · ОКЭД · Класс(страх) · Класс+тариф(контр) ·
+  // Кол-во(контр) · ФОТ(контр) · СС(контр) · СП(контр) · СС(страх) · ПК ·
+  // СПсПК(страх) · Дата рег. · Гос. участие · Менеджер.
+  _rowHtml(i) {
+    const r = BatchAR.rows[i];
+    const okedErr = BatchAR._okedError(r);
+    const cDiff = BatchAR._classDiff(r);
+    const cDiffWarn = BatchAR._classDiffWarn(r);
+    const classWrong = BatchAR._classWrongForOked(r);
+    const gDiff = BatchAR._govDiff(r);
+    const okedCls = okedErr ? ' batch-cell--err' : '';
+    const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiffWarn ? ' batch-cell--warn' : '');
+    const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"` : '';
+    const govCls = gDiff ? ' batch-cell--err' : '';
+    const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
+    // ===== КОНТРАГЕНТ (строка) =====
+    const contrSumLtFot = BatchAR._contrSumLtFotError(r);
+    const contrTarErr = BatchAR._contrTariffClassError(r);
+    const contrClassWrongBin = BatchAR._contrClassWrongByBin(r);
+    const contrClassDiffBin = BatchAR._contrClassDiffByBin(r);
+    const contrPremDiff = BatchAR._contrPremiumDiff(r);
+    const contrBinCls = BatchAR._binInvalid(r) ? ' batch-cell--err' : '';
+    const contrClassCls = (contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrClassDiffBin ? ' batch-cell--warn' : '');
+    const contrClassTitle = contrClassWrongBin
+      ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
+      : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})"`
+      : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
+    // СС контрагента красным: < ФОТ, или отличается от расчётной больше чем на ±100 ₸.
+    const contrSumDiff = BatchAR._contrSumDiff(r);
+    const contrSumCls = (contrSumLtFot || contrSumDiff) ? ' batch-cell--err' : '';
+    const contrSumTitle = contrSumLtFot ? ' title="СС контрагента меньше его ФОТ (должна быть ≥ ФОТ)"'
+      : (contrSumDiff ? ' title="СС контрагента отличается от расчётной больше чем на 100 ₸"' : '');
+    // СП контрагента красным, если премия ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸).
+    const contrPremCls = contrPremDiff ? ' batch-cell--err' : '';
+    const contrPremTitle = contrPremDiff ? ' title="СП контрагента ≠ СС(контр) × тариф(класс K) × ПК (допуск ±1 ₸)"' : '';
+    // ===== СТРАХОВАТЕЛЬ (договор) =====
+    const sumLtPrem = BatchAR._sumLtPremiumError(r);
+    const sumLtFot = BatchAR._sumLtFotError(r);
+    const premBelowMin = BatchAR._premiumBelowMinError(r);
+    const insSumMis = BatchAR._insurerSumMismatch(r);
+    const insPremMis = BatchAR._insurerPremMismatch(r);
+    // СС/СП страхователя красным (допуск ±1 ₸): ≠ сумме контрагентов, СС < ФОТ/премии, премия < 1 МЗП.
+    const sumCls = (sumLtPrem || sumLtFot || premBelowMin || insSumMis) ? ' batch-cell--err' : '';
+    const premCls = (sumLtPrem || premBelowMin || insPremMis) ? ' batch-cell--err' : '';
+    const sumTitle = insSumMis ? ' title="СС страхователя ≠ сумме СС контрагентов (допуск ±1 ₸)"'
+      : (sumLtFot ? ' title="Ошибка: страховая сумма меньше ФОТ (должна быть ≥ ФОТ)"'
+      : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) → СС должна быть = 85 000 / тариф"'
+      : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : '')));
+    const premTitle = insPremMis ? ' title="СП страхователя ≠ сумме СП контрагентов (допуск ±1 ₸)"'
+      : (premBelowMin ? ' title="Премия меньше 1 МЗП (85 000) — должна быть ≥ 85 000"'
+      : (sumLtPrem ? ' title="Ошибка: страховая сумма меньше страховой премии"' : ''));
+    const binStReason = BatchAR._insurerBinInvalidReason(r);
+    const binStCls = binStReason ? ' batch-cell--err' : '';
+    const binStTitle = binStReason ? ` title="Некорректный ИИН/БИН Страхователя: ${ARForm._esc(binStReason)}"` : '';
+    // Класс строки = жизненный цикл проверки (серый/синий/зелёный) + ошибка (красный/жёлтый)
+    // + метка «согласовано андеррайтером».
+    const cls = BatchAR._rowClassList(r);
+    const rowCls = cls.length ? ` class="${cls.join(' ')}"` : '';
+    return `<tr data-idx="${i}"${rowCls}>
+      <td class="batch-c-num">${i + 1}</td>
+      <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
+      <td class="batch-c-insurer${binStCls}"${binStTitle}>${BatchAR._insurerIdentCell(r)}</td>
+      <td class="batch-c-contr${contrBinCls}">${BatchAR._contrIdentCell(r)}</td>
+      <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
+      <td class="batch-c-class${classCls}"${classTitle}>${BatchAR._classCell(r)}</td>
+      <td class="batch-c-contr-class${contrClassCls}"${contrClassTitle}>${BatchAR._contrClassTariffCell(r)}</td>
+      <td class="batch-c-num2">${ARForm._int(r.workers)}</td>
+      <td class="batch-c-num2">${BatchAR._fmtMoney(r.gfot)}</td>
+      <td class="batch-c-num2 batch-c-sum${sumCls}"${sumTitle}>${BatchAR._sumCellHtml(r)}</td>
+      <td class="batch-c-num2 batch-c-contr-sum${contrSumCls}"${contrSumTitle}>${BatchAR._contrSumCell(r)}</td>
+      <td class="batch-c-center${pkCls}">${BatchAR._pkCell(r)}</td>
+      <td class="batch-c-num2 batch-c-prem${premCls}"${premTitle}>${BatchAR._premiumCellHtml(r)}</td>
+      <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
+      <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
+      <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
+      <td class="batch-c-resident batch-c-resident-s">${BatchAR._residCellFor(BatchAR._insurerBin(r))}</td>
+      <td class="batch-c-resident batch-c-resident-k">${BatchAR._residCellFor(r.bin)}</td>
+      <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
+      <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
+      <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
+    </tr>`;
   },
-  setPageSize(v) {
-    BatchAR._pageSize = Math.max(1, parseInt(v, 10) || 200);
-    BatchAR._page = 0;
-    BatchAR.renderTable();
+
+  // Карта idx → <tr>: _refreshRow иначе делает querySelector по таблице на
+  // тысячи строк (замерено ~0,7 мс на вызов — при 16 тыс. строк это заметно).
+  _indexRows() {
+    const tbody = document.getElementById('batch-tbody');
+    BatchAR._rowEls = new Map();
+    if (!tbody) return;
+    for (const tr of tbody.rows) BatchAR._rowEls.set(Number(tr.dataset.idx), tr);
+  },
+
+  // Подгрузка следующей порции строк при прокрутке к низу таблицы.
+  _hookScroll() {
+    if (BatchAR._scrollHooked) return;
+    const wrap = document.getElementById('batch-table-wrap');
+    if (!wrap) return;
+    BatchAR._scrollHooked = true;
+    let ticking = false;
+    wrap.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        if (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < BatchAR.SCROLL_MARGIN) {
+          BatchAR._appendChunk();
+        }
+      });
+    }, { passive: true });
+  },
+
+  _appendChunk() {
+    const tbody = document.getElementById('batch-tbody');
+    if (!tbody || BatchAR._shown >= BatchAR._order.length) return;
+    const next = BatchAR._order.slice(BatchAR._shown, BatchAR._shown + BatchAR.CHUNK);
+    tbody.insertAdjacentHTML('beforeend', BatchAR._rowsHtml(next));
+    // Дописываем в карту только новые строки (полный пересбор — лишняя работа).
+    if (!BatchAR._rowEls) BatchAR._rowEls = new Map();
+    for (let k = tbody.rows.length - next.length; k < tbody.rows.length; k++) {
+      const tr = tbody.rows[k];
+      if (tr) BatchAR._rowEls.set(Number(tr.dataset.idx), tr);
+    }
+    BatchAR._shown += next.length;
+    BatchAR._tableVersion++;
+    BatchAR._renderScrollInfo();
+  },
+
+  // «Показано N из M» под таблицей. Скрыто, когда показаны все строки.
+  _renderScrollInfo() {
+    const host = document.getElementById('batch-scroll-info');
+    if (!host) return;
+    const total = BatchAR._order.length;
+    if (!total || BatchAR._shown >= total) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.innerHTML = `Показано <b>${BatchAR._shown}</b> из <b>${total}</b> — прокрутите таблицу вниз, чтобы подгрузить ещё`
+      + ` <button type="button" class="batch-scroll-more" onclick="BatchAR._appendChunk()">Показать ещё ${Math.min(BatchAR.CHUNK, total - BatchAR._shown)}</button>`;
   },
 
   // Кол-во траншей рассрочки (по числу заполненных этапов «Этап{N}Сумма»).
@@ -1061,7 +1090,43 @@ const BatchAR = {
     return (ib && /^\d{12}$/.test(ib)) ? ib : r.bin;
   },
 
-  // Пересчитать возраст/флаг «моложе порога».
+  // Окно андеррайтера на проверку договора после его даты (дней). Возраст
+  // компании считаем на конец этого окна, а не строго на дату договора.
+  AGE_REF_GRACE_DAYS: 5,
+
+  // Дата, НА КОТОРУЮ считается возраст компании для ПК: дата договора + 5 дней
+  // (AGE_REF_GRACE_DAYS). Дата договора берётся из его номера — BatchReader.
+  // _contractDate, цифры [2..8) = ДД.ММ.ГГ; это же значение стоит в шапке
+  // «Рекомендации ДАиП»/АР как «от …». Сегодняшний день НЕ годится: право на
+  // скидку определяется при заключении договора, а выгрузку проверяют позже —
+  // иначе компания «дорастает» до 3 лет уже после подписания и ПК задним числом
+  // выглядит правомерным. Запас в 5 дней — окно, в течение которого андеррайтер
+  // проверяет договор. Номера без даты → откат на сегодня.
+  _ageRefDate(r) {
+    const d = r && r.dateContract;
+    if (!(d instanceof Date) || isNaN(d)) return new Date();
+    const ref = new Date(d);
+    ref.setDate(ref.getDate() + BatchAR.AGE_REF_GRACE_DAYS);
+    return ref;
+  },
+
+  // Дата, на которую ПОКАЗЫВАЕМ возраст в таблице — сама дата договора, без
+  // 5-дневного запаса (запас нужен только для решения по ПК, а в колонке
+  // «Дата рег.» андеррайтер хочет видеть возраст на дату договора).
+  _ageShownRef(r) {
+    const d = r && r.dateContract;
+    return (d instanceof Date && !isNaN(d)) ? d : new Date();
+  },
+
+  // Подпись к возрасту: на какую дату он посчитан (для title).
+  _ageShownTitle(r) {
+    const d = r && r.dateContract;
+    return (d instanceof Date && !isNaN(d))
+      ? `Возраст на дату договора ${Utils.fmtDateShort(d)} (право на ПК проверяется на +${BatchAR.AGE_REF_GRACE_DAYS} дней)`
+      : 'Возраст на сегодня — в номере договора нет даты';
+  },
+
+  // Пересчитать возраст/флаг «моложе порога» на дату договора + 5 дней (_ageRefDate).
   // Дата основания = САМАЯ РАННЯЯ (старшая) из доступных:
   //   • дата регистрации из stat.gov.kz / kyc.kz;
   //   • дата из первых 4 цифр БИН Страхователя (ГГ ММ) — учитывает перерегистрацию:
@@ -1070,6 +1135,7 @@ const BatchAR = {
   // Берём самую раннюю дату → компания не моложе этого. youngAlert — по порогу.
   _applyYoung(r) {
     const now = new Date();
+    const ref = BatchAR._ageRefDate(r);
     const candidates = [];
     let regSource = null;
     const insurerBin = BatchAR._insurerBin(r);
@@ -1081,10 +1147,12 @@ const BatchAR = {
       if (d && !isNaN(d)) { candidates.push(d); regSource = d; }
     }
     const binDate = Utils.binRegistrationDate ? Utils.binRegistrationDate(insurerBin) : null;
+    // Сверка с СЕГОДНЯ (а не с датой договора) — это защита от мусорного разбора
+    // БИН: дата основания в будущем невозможна. Сам возраст считается на ref.
     if (binDate && !isNaN(binDate) && binDate <= now) candidates.push(binDate);
     if (candidates.length) {
       const founding = candidates.reduce((a, b) => (a <= b ? a : b)); // самая ранняя
-      const age = Utils.companyAgeYears(founding, now);
+      const age = Utils.companyAgeYears(founding, ref);
       r.ageYears = age;
       r.youngAlert = (age != null && age < BatchAR._youngThreshold());
       r._foundingDate = founding;
@@ -1107,10 +1175,13 @@ const BatchAR = {
   },
 
   // Возраст компании «2 года 4 месяца» по дате регистрации (или null).
-  _ageText(regRaw) {
+  // refDate — момент, на который считаем (дата договора + 5 дней, см. _ageRefDate);
+  // без него — сегодня. Должен совпадать с базой расчёта youngAlert, иначе
+  // подпись под датой разойдётся с подсветкой.
+  _ageText(regRaw, refDate) {
     const reg = Utils.parseExcelDate(regRaw);
     if (!reg || isNaN(reg)) return null;
-    const now = new Date();
+    const now = (refDate instanceof Date && !isNaN(refDate)) ? refDate : new Date();
     let years = now.getFullYear() - reg.getFullYear();
     let months = now.getMonth() - reg.getMonth();
     if (now.getDate() < reg.getDate()) months--;
@@ -1149,7 +1220,7 @@ const BatchAR = {
       if (binUsable) {
         const ds = ARForm._esc(Utils.fmtDateShort(binDate));
         let aRow = '';
-        if (r.youngAlert) { const a = BatchAR._ageText(binDate); if (a) aRow = `<span class="batch-sub batch-young">(${ARForm._esc(a)})</span>`; }
+        if (r.youngAlert) { const a = BatchAR._ageText(binDate, BatchAR._ageShownRef(r)); if (a) aRow = `<span class="batch-sub batch-young" title="${ARForm._esc(BatchAR._ageShownTitle(r))}">(${ARForm._esc(a)})</span>`; }
         return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="дата основания из БИН Страхователя">${ds}<span class="batch-regsrc" title="из БИН Страхователя">БИН</span></span>${aRow ? `<span class="batch-stack-bot">${aRow}</span>` : ''}</div>`;
       }
       return '<span class="batch-sg batch-sg--ok">✓ найдено (без даты)</span>';
@@ -1160,8 +1231,8 @@ const BatchAR = {
     const srcTitle = 'дата регистрации';
     let ageRow = '';
     if (r.youngAlert) {
-      const age = BatchAR._ageText(r._foundingDate || eff.raw);
-      if (age) ageRow = `<span class="batch-sub batch-young">(${ARForm._esc(age)})</span>`;
+      const age = BatchAR._ageText(r._foundingDate || eff.raw, BatchAR._ageShownRef(r));
+      if (age) ageRow = `<span class="batch-sub batch-young" title="${ARForm._esc(BatchAR._ageShownTitle(r))}">(${ARForm._esc(age)})</span>`;
     }
     return `<div class="batch-stack"><span class="batch-stack-top batch-reg" title="${srcTitle}">${dateStr}</span>${ageRow ? `<span class="batch-stack-bot">${ageRow}</span>` : ''}</div>`;
   },
@@ -1261,9 +1332,11 @@ const BatchAR = {
   },
 
   // Обновить одну строку таблицы (после statgov / e-Qazyna), не перерисовывая всю.
+  // Обновляет одну строку по месту. Строки, ещё не добавленные в DOM (порции по
+  // прокрутке), просто пропускаем — они отрисуются актуальными.
   _refreshRow(i) {
-    const tr = document.querySelector(`#batch-tbody tr[data-idx="${i}"]`);
-    if (!tr) return;
+    const tr = BatchAR._rowEls ? BatchAR._rowEls.get(i) : null;
+    if (!tr || !tr.isConnected) return;
     const r = BatchAR.rows[i];
     const set = (sel, html) => { const c = tr.querySelector(sel); if (c) c.innerHTML = html; };
     set('.batch-c-oked', BatchAR._okedCell(r));
@@ -1721,8 +1794,19 @@ const BatchAR = {
     return ARForm.buildDocx(row, { printAlert: false });
   },
 
+  // Номер договора → безопасный кусок имени файла. Слеши (в номерах договоров
+  // они встречаются: «T04/290526/0002») заменяем на ДЕФИС, а не на «_»: так
+  // читается ближе к оригиналу, и внутри ZIP «/» не создаёт лишнюю папку.
+  // Остальные запрещённые в именах файлов символы → «_».
+  _safeName(s) {
+    return String(s == null ? '' : s)
+      .replace(/[\\/]/g, '-')
+      .replace(/[:*?"<>|]/g, '_')
+      .trim();
+  },
+
   _fileName(contractNumber, taken) {
-    const safe = String(contractNumber || 'без_номера').replace(/[\\/:*?"<>|]/g, '_');
+    const safe = BatchAR._safeName(contractNumber) || 'без_номера';
     const base = `АР ${safe}`;
     let name = `${base}.docx`;
     if (taken) {
@@ -1980,15 +2064,16 @@ const BatchAR = {
     const prev = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Готовлю HTML…'; }
     try {
-      // 1. Синхронно (без await до снятия разметки — иначе мелькнёт вся таблица):
-      //    отрисовать ВСЕ строки, снять HTML, вернуть пагинацию на место.
-      const savedSize = BatchAR._pageSize, savedPage = BatchAR._page;
-      BatchAR._pageSize = Math.max(BatchAR.rows.length, 1);
-      BatchAR._page = 0;
-      BatchAR.renderTable();
+      // 1. В отчёт идут ВСЕ строки, а в живой таблице их только часть (порции по
+      //    прокрутке). Поэтому собираем разметку из данных в строку и парсим её
+      //    отдельно — живой DOM не трогаем (иначе вкладка виснет на 16 тыс. строк).
       const wrap = document.getElementById('batch-table-wrap');
+      const table = wrap ? wrap.querySelector('table') : null;
+      const allRows = BatchAR._rowsHtml(BatchAR._displayOrder());
       const tmp = document.createElement('div');
-      tmp.innerHTML = wrap ? wrap.innerHTML : '';
+      tmp.innerHTML = table
+        ? table.outerHTML.replace(/<tbody[^>]*>[\s\S]*?<\/tbody>/, `<tbody>${allRows}</tbody>`)
+        : '';
       // Статичный отчёт: галочку «Согласовано» → текст ✓/—, снять все обработчики.
       tmp.querySelectorAll('.batch-c-approve').forEach((td) => {
         const cb = td.querySelector('input[type="checkbox"]');
@@ -1998,8 +2083,6 @@ const BatchAR = {
       tmp.querySelectorAll('[oninput]').forEach((el) => el.removeAttribute('oninput'));
       tmp.querySelectorAll('input, button').forEach((el) => el.setAttribute('disabled', 'disabled'));
       const tableHtml = tmp.innerHTML;
-      BatchAR._pageSize = savedSize; BatchAR._page = savedPage;
-      BatchAR.renderTable();
 
       // 2. Собрать документ (инлайн CSS приложения) и скачать.
       const html = await BatchAR._buildResultsHtml(tableHtml);
@@ -2043,12 +2126,10 @@ const BatchAR = {
       c.approved ? chip('согласовано андеррайтером', c.approved, '#2563eb') : '',
       notChecked ? chip('не проверено (stat.gov.kz)', notChecked, '#94a3b8') : '',
     ].filter(Boolean).join('');
-    const resSummary = [
-      chip('нерезидент — страхователь', c.nrS, '#dc2626'),
-      chip('нерезидент — контрагент', c.nrK, '#dc2626'),
-      chip('ИП — страхователь', c.ipS, '#64748b'),
-      chip('ИП — контрагент', c.ipK, '#64748b'),
-    ].join('');
+    // Сводки «Резидентство сторон» в отчёте НЕТ (убрана по просьбе бизнеса):
+    // признак виден в самих колонках «Рези-дент (С)/(К)», дублировать чипами не нужно.
+    // Счётчики c.nrS/c.nrK/c.ipS/c.ipK по-прежнему считаются в _resultCounts —
+    // они используются и на экране.
 
     const legend = `
       <div class="rp-section-title">Обозначения</div>
@@ -2085,11 +2166,10 @@ const BatchAR = {
       + `<div class="rp-meta">Сформировано: <b>${dt}</b>${src !== '—' ? ` · файл-источник: <b>${src}</b>` : ''}`
       + `${resDate ? ` · база ГБД ЮЛ от <b>${esc(resDate)}</b>` : ''} · сортировка: <b>${esc(sortsActive)}</b></div></header>`
       + `<div class="rp-section-title">Сводка по строкам</div><div class="rp-summary">${summary}</div>`
-      + `<div class="rp-section-title">Резидентство сторон</div><div class="rp-summary">${resSummary}</div>`
       + legend
       + `<div class="rp-section-title">Все договоры (${c.total})</div>`
       + `<div class="batch-table-wrap rp-table">${tableHtml}</div>`
-      + `<footer class="rp-foot">Отчёт сформирован приложением Underwriting Suite (Standard Life). Резидентство — по локальной копии реестра юр. лиц РК (ГБД ЮЛ, data.egov.kz): БИН есть в реестре → резидент, нет → нерезидент. Наведите курсор на цветную ячейку — во всплывающей подсказке причина.</footer>`
+      + `<footer class="rp-foot">Отчёт сформирован приложением Underwriting Suite (Standard Life).</footer>`
       + `</div></body></html>`;
   },
 
@@ -2219,6 +2299,9 @@ const BatchAR = {
   },
 
   _updateControls() {
+    // Блок «Печать рекомендаций ДАиП» живёт внизу этой же вкладки и работает по
+    // тому же реестру — обновляем его счётчик/кнопку вместе с остальным UI.
+    if (typeof DaipPrint !== 'undefined') DaipPrint.refresh();
     // Во время проверки stat.gov.kz (идёт/на паузе) вместо недоступной кнопки генерации
     // показываем кнопку Пауза/Продолжить.
     const inProgress = BatchAR._statgovRunning || BatchAR._statgovPaused;
@@ -2321,7 +2404,18 @@ const BatchAR = {
       }
     }
     const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-    set('bs-total', BatchAR.rows.length);
+    // Прогресс проверки: обработано = всё, что уже не в очереди и не в работе
+    // (в т.ч. «не проверено» — по ним проверка закончилась ошибкой/без моста).
+    const total = BatchAR.rows.length;
+    const done = Math.max(0, total - checking - pending);
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    set('bs-done', done);
+    set('bs-total', total);
+    set('bs-progress-pct', pct + '%');
+    const pbar = document.getElementById('bs-progress-bar');
+    if (pbar) pbar.style.width = pct + '%';
+    const pwrap = document.getElementById('bs-progress-wrap');
+    if (pwrap) pwrap.classList.toggle('is-complete', total > 0 && done >= total);
     set('bs-ok', ok); set('bs-warn', warn); set('bs-err', err);
     set('bs-checking', checking); set('bs-pending', pending);
     set('bs-approved', approved); set('bs-unchecked', unchecked);

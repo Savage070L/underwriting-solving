@@ -288,7 +288,7 @@ const BatchReader = {
         // Заполняется фоновым statgov-лукапом:
         statgov: null,           // { name, legalAddress, registrationDate, ... } | { error }
         statgovStatus: 'pending',// 'pending' | 'loading' | 'done' | 'error' | 'skip'
-        ageYears: null,          // возраст компании на сегодня (из даты регистрации)
+        ageYears: null,          // возраст на дату договора + 5 дней (BatchAR._applyYoung)
         youngAlert: false,       // компания моложе порога (по умолчанию 3 года)
       });
     }

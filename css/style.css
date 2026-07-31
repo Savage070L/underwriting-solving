@@ -3267,17 +3267,18 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   border: 1px solid var(--c-border-subtle, #e2e8f0);
   border-radius: 10px;
 }
-/* Пагинация таблицы «Проверка договоров». */
-.batch-pagination {
+/* Подгрузка строк таблицы по прокрутке (постраничного режима нет). */
+.batch-scroll-info {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 10px;
   font-size: 0.82rem;
   color: #475467;
 }
-.batch-pg-btn {
+.batch-scroll-info b { color: #1d2939; font-variant-numeric: tabular-nums; }
+.batch-scroll-more {
   padding: 5px 12px;
   border: 1px solid #d0d5dd;
   border-radius: 7px;
@@ -3288,20 +3289,8 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
   cursor: pointer;
   white-space: nowrap;
 }
-.batch-pg-btn:hover:not(:disabled) { background: #f8fafc; border-color: #98a2b3; }
-.batch-pg-btn:disabled { opacity: 0.45; cursor: default; }
-.batch-pg-info { margin: 0 6px; font-variant-numeric: tabular-nums; }
-.batch-pg-info b { color: #1d2939; }
-.batch-pg-size { margin-left: auto; white-space: nowrap; }
-.batch-pg-size select {
-  padding: 4px 6px;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
+.batch-scroll-more:hover { background: #f8fafc; border-color: #98a2b3; }
 
-/* ===== Вкладка «Печать рекомендации ДАиП» ===== */
 .daip-hint {
   margin: 4px 0 18px;
   font-size: 0.88rem;
@@ -3371,13 +3360,23 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .daip-link:hover { color: #4338ca; }
 .daip-gen { margin-top: 4px; }
 
-/* Панель над таблицей: кнопка «открыть в отдельной вкладке». */
-.batch-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+/* Блок «Печать рекомендаций ДАиП» — в самом низу вкладки «Проверка договоров»
+   (отдельной вкладки нет). Отделяем его от блоков проверки чертой. */
+.daip-block {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 2px dashed #e2e8f0;
 }
+.daip-block-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+
+/* Кнопка «открыть в отдельной вкладке» — справа в статус-баре. */
 .batch-open-tab {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3410,6 +3409,28 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-stat b { color: #1f2937; font-variant-numeric: tabular-nums; font-weight: 700; }
 .batch-stat--total { font-weight: 600; color: #344054; }
 .batch-stat--total b { font-size: 0.98rem; }
+/* Прогресс проверки: «N / M проверено» + полоса + проценты (в начале бара). */
+.batch-stat--progress { gap: 9px; font-weight: 600; color: #344054; }
+.batch-stat-progress-nums b { font-size: 0.98rem; }
+.batch-stat-progress-bar {
+  position: relative;
+  width: 108px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+.batch-stat-progress-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #4f46e5);
+  transition: width 0.25s ease;
+}
+.batch-stat--progress.is-complete .batch-stat-progress-bar i { background: linear-gradient(90deg, #22c55e, #16a34a); }
+.batch-stat-progress-pct { font-variant-numeric: tabular-nums; color: #4f46e5; }
+.batch-stat--progress.is-complete .batch-stat-progress-pct { color: #16a34a; }
 .batch-stat-sep { width: 1px; align-self: stretch; min-height: 16px; background: #e2e8f0; }
 .batch-stat-dot { width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(16, 24, 40, 0.12); flex-shrink: 0; }
 .batch-stat--ok .batch-stat-dot { background: #c4f5d3; }

@@ -62,8 +62,10 @@ const DaipPrint = {
     }
   },
 
+  // Санитайзер имени — общий с «Проверкой договоров» (BatchAR._safeName):
+  // «/» в номере договора → дефис, прочие запрещённые символы → «_».
   _fileName(cn, taken) {
-    const base = `Рекомендация ДАиП ${String(cn || 'без номера').replace(/[\\/:*?"<>|]/g, '_')}`;
+    const base = `Рекомендация ДАиП ${BatchAR._safeName(cn) || 'без номера'}`;
     let name = `${base}.docx`;
     let n = 2;
     while (taken.has(name)) name = `${base} (${n++}).docx`;
