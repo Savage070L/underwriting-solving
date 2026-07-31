@@ -208,7 +208,7 @@ const ZaklGenerator = {
     paragraphs.push(new Paragraph({
       children: [
         trB(`Активы ${Utils.COMPANY_FULL_NAME}`),
-        tr(` (далее – Компания) в страховых резервах на ${normativDate} составляют ${Utils.fmtMoneyThousands(fullAssetsThousands)}.`),
+        tr(` (далее – Компания) на ${normativDate} составляют ${Utils.fmtMoneyThousands(fullAssetsThousands)}.`),
       ],
       alignment: AlignmentType.JUSTIFIED,
     }));
