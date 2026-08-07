@@ -3622,6 +3622,10 @@ tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn 
 .batch-res--ip { color: #64748b; }
 .batch-res--warn { color: #b45309; font-weight: 700; }
 .batch-res--wait { color: #94a3b8; }  /* ⏳ — резидентство ещё проверяется через egov */
+/* Верхняя строка ячейки резидентства — ЗНАЧЕНИЕ ИЗ ВЫГРУЗКИ: чёрное, как все
+   «верхние» значения таблицы (соглашение: сверху база, снизу серым — egov). */
+.batch-res--reg { color: #1f2937; font-weight: 600; }
+.batch-res--absent { color: #94a3b8; font-size: 10px; }  /* в выгрузке не указано */
 .batch-res--na { color: #cbd5e1; }
 
 .batch-alert {

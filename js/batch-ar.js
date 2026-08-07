@@ -334,7 +334,6 @@ const BatchAR = {
       <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
       <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
       <td class="batch-c-resident batch-c-resident-s${BatchAR._residRegDiff(r) ? ' batch-cell--err' : ''}">${BatchAR._residCellInsurer(r)}</td>
-      <td class="batch-c-resident batch-c-resident-k">${BatchAR._residCellFor(r.bin)}</td>
       <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
       <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
       <td class="batch-c-approve">${BatchAR._approveCell(r, i)}</td>
@@ -930,6 +929,10 @@ const BatchAR = {
     const st = r.statgovStatus;
     if (st === 'loading') return 'checking';
     if (st === 'done') return BatchAR._rowLevel(r) || 'ok';  // level: null если согласовано
+    // Расхождение резидентства «выгрузка ↔ egov» от statgov НЕ зависит (сравниваем
+    // колонку выгрузки с ответом egov), поэтому красим строку красной сразу, не
+    // дожидаясь statgov — иначе серый «в очереди» маскировал бы ошибку.
+    if (!r._approved && BatchAR._residRegDiff(r)) return 'err';
     return 'pending';                                         // undefined/pending/skip/error → серый
   },
   // Набор классов <tr>: состояние + метка «согласовано» (для гашения подсветки ячеек в CSS).
@@ -1267,57 +1270,6 @@ const BatchAR = {
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
   },
 
-  // Вердикт резидентства по одному БИН: приоритет — АВТОРИТЕТНЫЙ egov P30.11
-  // (если мост уже вернул ответ, лежит в ResidentCheck.egovResolved), иначе —
-  // мгновенный локальный индекс ГБД ЮЛ. Фоновый пул _poolEgovResidency наполняет
-  // egovResolved и перерисовывает строки по мере ответов.
-  _residVerdict(bin) {
-    if (typeof ResidentCheck === 'undefined') return null;
-    return (ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin)) || ResidentCheck.check(bin);
-  },
-
-  // Признак резидентства одного БИН. Источник — egov (если есть) → локальный индекс.
-  //   ✓        — резидент
-  //   ✓ ликв.  — резидент, но по gbd_ul ликвидирован/реорганизован
-  //   нерез.   — нерезидент
-  //   ИП       — ИП/физлицо (резидентство не определяется)
-  //   н/д      — нет данных / некорректный идентификатор
-  //   …        — egov ещё проверяет (локального вердикта нет)
-  _residBadge(bin) {
-    if (typeof ResidentCheck === 'undefined') return { cls: 'na', txt: 'н/д', title: 'индекс ГБД ЮЛ не загружен' };
-    // Для БИН, пока авторитетная проверка egov не отработала (фаза 'pending') и
-    // ответа ещё нет — показываем ⏳, а НЕ промежуточный локальный вердикт: так
-    // видно, что резидентство этой строки ещё не проверяли. ИИН в egov не уходят —
-    // им ⏳ не нужен (сразу локальный «ИП»).
-    const kind = ResidentCheck.idKind ? ResidentCheck.idKind(bin) : 'bin';
-    const egResolved = ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin);
-    if (kind === 'bin' && !egResolved
-        && (BatchAR._egovResidPhase === 'pending' || BatchAR._egovResidPhase === 'idle')) {
-      return { cls: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.11)…' };
-    }
-    const res = BatchAR._residVerdict(bin);
-    // Источник — в подсказку (egov title сам содержит «egov (P30.11): …»).
-    switch (res.status) {
-      case 'resident':
-        return res.registryStatus
-          ? { cls: 'warn', txt: '✓ ' + (ResidentCheck.STATUS_LABELS[res.registryStatus] || '?').slice(0, 4) + '.', title: res.title }
-          : { cls: 'yes', txt: '✓', title: res.title };
-      case 'nonresident': return { cls: 'no', txt: 'нерез.', title: res.title };
-      case 'individual': return { cls: 'ip', txt: 'ИП', title: res.title };
-      case 'loading': return { cls: 'na', txt: '…', title: res.title };
-      default: return { cls: 'na', txt: 'н/д', title: res.title };
-    }
-  },
-
-  // Одна ячейка резидентства для конкретного БИН. Страхователь и Контрагент —
-  // РАЗНЫЕ столбцы (Резидент С / Резидент К), каждый проверяется по своему БИН:
-  // Страхователь = _insurerBin(r), Контрагент = r.bin. Проверка синхронная, по
-  // локальному индексу ГБД ЮЛ.
-  _residCellFor(bin) {
-    const b = BatchAR._residBadge(bin);
-    return `<span class="batch-res batch-res--${b.cls}" title="${ARForm._esc(b.title)}">${b.txt}</span>`;
-  },
-
   // Резидентство Страхователя ПО ВЫГРУЗКЕ (колонка «СтранаРезидентстваСтрахователя»):
   // «Казахстан» → резидент, любая другая непустая страна → нерезидент, пусто → нет данных.
   _residRegistryStatus(r) {
@@ -1339,36 +1291,71 @@ const BatchAR = {
     return eg.status !== reg;
   },
 
-  // Ячейка резидентства СТРАХОВАТЕЛЯ: сверху — из выгрузки (страна), снизу —
-  // вердикт проверки (egov/локальный). Подсветку расхождения несёт сама ячейка.
+  // Вердикт egov по БИН для таблицы. В таблице снизу показываем ТОЛЬКО egov —
+  // локальный индекс ГБД ЮЛ здесь не подставляем (он отстаёт → ложные нерезиденты).
+  //   {kind:'off'}   — моста/сессии egov нет: проверка не делалась → «отключен»
+  //   {kind:'wait'}  — проверка ещё идёт → ⏳
+  //   {kind:'ip'}    — ИИН: резидентство ИП не вычисляется → «ИП»
+  //   {kind:'res'|'non'} — авторитетный ответ egov
+  //   {kind:'na'}    — egov не ответил по этому БИН
+  _residEgov(bin) {
+    if (typeof ResidentCheck === 'undefined') return { kind: 'off', txt: 'отключен', title: 'Проверка резидентства недоступна' };
+    if (BatchAR._egovResidPhase === 'unavailable') {
+      return { kind: 'off', txt: 'отключен', title: 'Нет подключения к egov — проверка резидентства не выполнялась' };
+    }
+    if (ResidentCheck.idKind && ResidentCheck.idKind(bin) !== 'bin') {
+      return { kind: 'ip', txt: 'ИП', title: 'ИИН (ИП/физлицо) — резидентство автоматически не определяется' };
+    }
+    const eg = ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin);
+    if (eg) {
+      return eg.status === 'resident'
+        ? { kind: 'res', txt: '✓', title: eg.title }
+        : { kind: 'non', txt: 'нерез.', title: eg.title };
+    }
+    if (BatchAR._egovResidPhase === 'pending' || BatchAR._egovResidPhase === 'idle') {
+      return { kind: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.11)…' };
+    }
+    return { kind: 'na', txt: 'н/д', title: 'egov не вернул данные по этому БИН' };
+  },
+
+  // Ячейка резидентства СТРАХОВАТЕЛЯ. Соглашение таблицы: СВЕРХУ ЧЁРНЫМ — значение
+  // из выгрузки (база), СНИЗУ СЕРЫМ в скобках — из реестра egov.
+  //   верх:  ✓ (Казахстан) · нерез. (другая страна) · «отсутствует» (в выгрузке пусто)
+  //   низ:   (✓) · (нерез.) · (ИП) · (отключен) · (⏳) · (н/д)
+  // Если в выгрузке пусто — сверять не с чем, правильным считаем значение egov.
   _residCellInsurer(r) {
     const reg = BatchAR._residRegistryStatus(r);
     const country = String((r && r.residencyCountry) || '').trim();
     const top = reg === null
-      ? '<span class="batch-res batch-res--na" title="В выгрузке страна резидентства не указана">—</span>'
+      ? '<span class="batch-res batch-res--absent" title="В выгрузке страна резидентства не указана — правильным считается значение egov (снизу)">отсутствует</span>'
       : (reg === 'resident'
-        ? `<span class="batch-res batch-res--yes" title="В выгрузке: ${ARForm._esc(country)} → резидент">✓</span>`
-        : `<span class="batch-res batch-res--no" title="В выгрузке: ${ARForm._esc(country)} → нерезидент">нерез.</span>`);
-    const b = BatchAR._residBadge(BatchAR._insurerBin(r));
+        ? `<span class="batch-res batch-res--reg" title="В выгрузке: ${ARForm._esc(country)} → резидент">✓</span>`
+        : `<span class="batch-res batch-res--reg" title="В выгрузке: ${ARForm._esc(country)} → нерезидент">нерез.</span>`);
+    const eg = BatchAR._residEgov(BatchAR._insurerBin(r));
     const diff = BatchAR._residRegDiff(r);
     const subTitle = diff
-      ? `Расхождение: в выгрузке «${reg === 'resident' ? 'резидент' : 'нерезидент'}» (${ARForm._esc(country)}), по проверке — «${ARForm._esc(b.txt)}»`
-      : ARForm._esc(b.title);
-    const bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${subTitle}">(${b.txt})</span>`;
+      ? `Расхождение: в выгрузке «${reg === 'resident' ? 'резидент' : 'нерезидент'}» (${ARForm._esc(country)}), по egov — «${ARForm._esc(eg.txt)}»`
+      : ARForm._esc(eg.title);
+    const bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${subTitle}">(${eg.txt})</span>`;
     return `<div class="batch-stack"><span class="batch-stack-top">${top}</span><span class="batch-stack-bot">${bottom}</span></div>`;
   },
 
-  // Ранг резидентства одного БИН для сортировки «Сначала нерезиденты»:
-  // нерезидент(3) > ИП(2) > резидент(1) > нет данных(0). Чем больше — тем выше.
-  _residStatusRank(bin) {
-    const v = BatchAR._residVerdict(bin);
-    const s = v ? v.status : '';
-    return s === 'nonresident' ? 3 : (s === 'individual' ? 2 : (s === 'resident' ? 1 : 0));
+  // Эффективный статус резидентства Страхователя для сортировки/счётчиков:
+  // приоритет у egov, если он ответил; иначе — значение из выгрузки.
+  // 'nonresident' | 'individual' | 'resident' | null.
+  _residEffStatus(r) {
+    const eg = BatchAR._residEgov(BatchAR._insurerBin(r));
+    if (eg.kind === 'non') return 'nonresident';
+    if (eg.kind === 'res') return 'resident';
+    if (eg.kind === 'ip') return 'individual';
+    return BatchAR._residRegistryStatus(r);   // egov отключён/не ответил → выгрузка
   },
-  // Ранг строки = «худшая» сторона договора: если ЛЮБАЯ из сторон
-  // (Страхователь / Контрагент) нерезидент — строка поднимается наверх.
+
+  // Ранг строки для сортировки «Сначала нерезиденты»:
+  // нерезидент(3) > ИП(2) > резидент(1) > нет данных(0). Больше — выше.
   _residRowRank(r) {
-    return Math.max(BatchAR._residStatusRank(BatchAR._insurerBin(r)), BatchAR._residStatusRank(r.bin));
+    const s = BatchAR._residEffStatus(r);
+    return s === 'nonresident' ? 3 : (s === 'individual' ? 2 : (s === 'resident' ? 1 : 0));
   },
 
   // Обновить одну строку таблицы (после statgov / e-Qazyna), не перерисовывая всю.
@@ -1384,7 +1371,6 @@ const BatchAR = {
     set('.batch-c-reg', BatchAR._regCell(r));
     set('.batch-c-gov', BatchAR._govCell(r));
     set('.batch-c-resident-s', BatchAR._residCellInsurer(r));
-    set('.batch-c-resident-k', BatchAR._residCellFor(r.bin));
     // Подсветка расхождения «выгрузка ↔ egov» по резидентству Страхователя.
     const tdRs = tr.querySelector('.batch-c-resident-s');
     if (tdRs) tdRs.classList.toggle('batch-cell--err', BatchAR._residRegDiff(r));
@@ -1729,22 +1715,23 @@ const BatchAR = {
   async _poolEgovResidency(targets) {
     if (typeof ResidentCheck === 'undefined'
         || !ResidentCheck.bridgeAvailable || !ResidentCheck.bridgeAvailable()) {
-      BatchAR._egovResidPhase = 'unavailable';  // мост недоступен → показываем локальный вердикт
+      // Нет моста/сессии egov → проверку НЕ делаем вовсе, в колонке «отключен».
+      BatchAR._egovResidPhase = 'unavailable';
       BatchAR.renderTable();
       return;
     }
-    // Уникальные БИН обеих сторон → какие строки их используют (для перерисовки).
+    // Уникальные БИН СТРАХОВАТЕЛЯ (единственная колонка резидентства) → строки,
+    // которые их используют (для точечной перерисовки).
     const binRows = new Map();
     const isBin = (b) => ResidentCheck.idKind && ResidentCheck.idKind(b) === 'bin';
     for (const i of targets) {
       const r = BatchAR.rows[i];
       if (!r) continue;
-      for (const bin of [BatchAR._insurerBin(r), r.bin]) {
-        if (!isBin(bin)) continue;                       // ИИН/некорректные — не в egov
-        if (ResidentCheck.egovResolved(bin)) continue;   // уже получен — не перезапрашиваем
-        if (!binRows.has(bin)) binRows.set(bin, new Set());
-        binRows.get(bin).add(i);
-      }
+      const bin = BatchAR._insurerBin(r);
+      if (!isBin(bin)) continue;                       // ИИН/некорректные — не в egov
+      if (ResidentCheck.egovResolved(bin)) continue;   // уже получен — не перезапрашиваем
+      if (!binRows.has(bin)) binRows.set(bin, new Set());
+      binRows.get(bin).add(i);
     }
     const queue = [...binRows.keys()];
     const worker = async () => {
@@ -2075,8 +2062,8 @@ const BatchAR = {
   // Сводные счётчики для шапки HTML-отчёта: статусы строк + резидентство сторон.
   _resultCounts() {
     let ok = 0, warn = 0, err = 0, checking = 0, pending = 0, approved = 0, unchecked = 0;
-    let nrS = 0, nrK = 0, ipS = 0, ipK = 0;  // нерезиденты/ИП по сторонам договора
-    const rc = (typeof ResidentCheck !== 'undefined') ? ResidentCheck : null;
+    // Резидентство Страхователя (единственная колонка) + расхождения с egov.
+    let nrS = 0, ipS = 0, residDiff = 0;
     for (const r of BatchAR.rows) {
       if (r._approved) approved++;
       else {
@@ -2087,17 +2074,12 @@ const BatchAR = {
         else if (s === 'ok') ok++;
         else { const st = r.statgovStatus; if (st === 'skip' || st === 'error') unchecked++; else pending++; }
       }
-      if (rc) {
-        // Приоритет egov (если получен), иначе локальный индекс — как в таблице.
-        const vS = BatchAR._residVerdict(BatchAR._insurerBin(r));
-        const vK = BatchAR._residVerdict(r.bin);
-        const sS = vS ? vS.status : '';
-        const sK = vK ? vK.status : '';
-        if (sS === 'nonresident') nrS++; else if (sS === 'individual') ipS++;
-        if (sK === 'nonresident') nrK++; else if (sK === 'individual') ipK++;
-      }
+      const sS = BatchAR._residEffStatus(r);
+      if (sS === 'nonresident') nrS++; else if (sS === 'individual') ipS++;
+      if (BatchAR._residRegDiff(r)) residDiff++;
     }
-    return { total: BatchAR.rows.length, ok, warn, err, checking, pending, approved, unchecked, nrS, nrK, ipS, ipK };
+    return { total: BatchAR.rows.length, ok, warn, err, checking, pending, approved, unchecked,
+      nrS, ipS, residDiff, egovOff: BatchAR._egovResidPhase === 'unavailable' };
   },
 
   // Кнопка «Скачать результаты проверки (HTML)»: единый самодостаточный HTML со
@@ -2171,10 +2153,9 @@ const BatchAR = {
       c.approved ? chip('согласовано андеррайтером', c.approved, '#2563eb') : '',
       notChecked ? chip('не проверено (stat.gov.kz)', notChecked, '#94a3b8') : '',
     ].filter(Boolean).join('');
-    // Сводки «Резидентство сторон» в отчёте НЕТ (убрана по просьбе бизнеса):
-    // признак виден в самих колонках «Рези-дент (С)/(К)», дублировать чипами не нужно.
-    // Счётчики c.nrS/c.nrK/c.ipS/c.ipK по-прежнему считаются в _resultCounts —
-    // они используются и на экране.
+    // Сводки «Резидентство» чипами в отчёте НЕТ: признак виден в самой колонке
+    // «Резидент». Счётчики (c.nrS/c.ipS/c.residDiff) считаются в _resultCounts и
+    // используются на экране.
 
     const legend = `
       <div class="rp-section-title">Обозначения</div>
@@ -2183,7 +2164,7 @@ const BatchAR = {
         <span><i style="background:#fde68a"></i>жёлтый — расхождения, нужна доп. проверка</span>
         <span><i style="background:#dcfce7"></i>зелёный — корректно</span>
         <span><i style="background:#e0e7ff"></i>синий — согласовано андеррайтером</span>
-        <span class="rp-legend-res"><b style="color:#16a34a">✓</b> резидент&nbsp;·&nbsp;<b style="color:#b91c1c">нерез.</b> нерезидент&nbsp;·&nbsp;<b style="color:#64748b">ИП</b> ИИН/физлицо&nbsp;·&nbsp;<b style="color:#b45309">✓ ликв.</b> резидент, но ликвидирован/реорганизован</span>
+        <span class="rp-legend-res">Колонка «Резидент»: сверху — из выгрузки (<b>✓</b> Казахстан · <b>нерез.</b> иная страна · <b>отсутствует</b> — не указана), снизу в скобках — из реестра egov (<b>(✓)</b> резидент · <b>(нерез.)</b> нерезидент · <b>(ИП)</b> ИП/физлицо, не определяется · <b>(отключен)</b> нет связи с egov). Красная ячейка — расхождение выгрузки с egov.</span>
       </div>`;
 
     const wrapperCss = `
