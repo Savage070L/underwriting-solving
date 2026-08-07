@@ -2410,7 +2410,11 @@ const App = {
     const insurerName = row.insurerNameSt || row.insurerName || '';
     const from = row.periodFrom || null;
     const to = row.periodTo || null;
-    const docDate = from || row.dateContract || new Date();
+    // Дата документов = ДАТА ДОГОВОРА из выгрузки (колонка «ДатаДоговора»).
+    // Она идёт во ВСЕ пакеты (АР, Заключение, Протокол, СЗ) — в т.ч. в места,
+    // где дата пишется прописью. Раньше приоритет был у начала периода, но
+    // корректная дата документа — именно дата договора.
+    const docDate = row.dateContract || from || new Date();
     App.zayavka = {
       _manual: true, _manualPrimary: 'fot', _fromRegistry: true,
       insurerName, bin,

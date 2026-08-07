@@ -333,7 +333,7 @@ const BatchAR = {
       <td class="batch-c-num2 batch-c-contr-prem${contrPremCls}"${contrPremTitle}>${BatchAR._contrPremCell(r)}</td>
       <td class="batch-c-reg">${BatchAR._regCell(r)}</td>
       <td class="batch-c-gov${govCls}">${BatchAR._govCell(r)}</td>
-      <td class="batch-c-resident batch-c-resident-s">${BatchAR._residCellFor(BatchAR._insurerBin(r))}</td>
+      <td class="batch-c-resident batch-c-resident-s${BatchAR._residRegDiff(r) ? ' batch-cell--err' : ''}">${BatchAR._residCellInsurer(r)}</td>
       <td class="batch-c-resident batch-c-resident-k">${BatchAR._residCellFor(r.bin)}</td>
       <td class="batch-c-author" title="${ARForm._esc(r.author || '')}">${r.author ? ARForm._esc(r.author).replace(/\s+/g, '<br>') : '—'}</td>
       <td class="batch-c-tranche">${BatchAR._trancheCell(r)}</td>
@@ -900,7 +900,7 @@ const BatchAR = {
   //   null             — расхождений нет.
   // «Сырой» уровень — РЕАЛЬНЫЙ результат валидации, без учёта согласования андеррайтером.
   _rawRowLevel(r) {
-    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._pkYoungError(r)
+    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._residRegDiff(r) || BatchAR._pkYoungError(r)
         || BatchAR._sumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._binInvalid(r)
         || BatchAR._insurerBinInvalidReason(r) || BatchAR._classWrongForOked(r)
         || BatchAR._contrSumLtFotError(r) || BatchAR._contrTariffClassError(r)
@@ -1318,6 +1318,46 @@ const BatchAR = {
     return `<span class="batch-res batch-res--${b.cls}" title="${ARForm._esc(b.title)}">${b.txt}</span>`;
   },
 
+  // Резидентство Страхователя ПО ВЫГРУЗКЕ (колонка «СтранаРезидентстваСтрахователя»):
+  // «Казахстан» → резидент, любая другая непустая страна → нерезидент, пусто → нет данных.
+  _residRegistryStatus(r) {
+    const c = String((r && r.residencyCountry) || '').trim();
+    if (!c) return null;
+    return /казахстан|kazakhstan|қазақстан/i.test(c) ? 'resident' : 'nonresident';
+  },
+
+  // Расхождение «выгрузка ↔ egov» по резидентству Страхователя. Сравниваем только
+  // когда ОБА известны и вердикт авторитетный (egov): локальный индекс ГБД ЮЛ
+  // отстаёт, по нему расхождения не выставляем — иначе ложные ошибки.
+  _residRegDiff(r) {
+    const reg = BatchAR._residRegistryStatus(r);
+    if (!reg) return false;
+    const bin = BatchAR._insurerBin(r);
+    const eg = (typeof ResidentCheck !== 'undefined' && ResidentCheck.egovResolved)
+      ? ResidentCheck.egovResolved(bin) : null;
+    if (!eg || (eg.status !== 'resident' && eg.status !== 'nonresident')) return false;
+    return eg.status !== reg;
+  },
+
+  // Ячейка резидентства СТРАХОВАТЕЛЯ: сверху — из выгрузки (страна), снизу —
+  // вердикт проверки (egov/локальный). Подсветку расхождения несёт сама ячейка.
+  _residCellInsurer(r) {
+    const reg = BatchAR._residRegistryStatus(r);
+    const country = String((r && r.residencyCountry) || '').trim();
+    const top = reg === null
+      ? '<span class="batch-res batch-res--na" title="В выгрузке страна резидентства не указана">—</span>'
+      : (reg === 'resident'
+        ? `<span class="batch-res batch-res--yes" title="В выгрузке: ${ARForm._esc(country)} → резидент">✓</span>`
+        : `<span class="batch-res batch-res--no" title="В выгрузке: ${ARForm._esc(country)} → нерезидент">нерез.</span>`);
+    const b = BatchAR._residBadge(BatchAR._insurerBin(r));
+    const diff = BatchAR._residRegDiff(r);
+    const subTitle = diff
+      ? `Расхождение: в выгрузке «${reg === 'resident' ? 'резидент' : 'нерезидент'}» (${ARForm._esc(country)}), по проверке — «${ARForm._esc(b.txt)}»`
+      : ARForm._esc(b.title);
+    const bottom = `<span class="batch-sub ${diff ? 'batch-sub--err' : ''}" title="${subTitle}">(${b.txt})</span>`;
+    return `<div class="batch-stack"><span class="batch-stack-top">${top}</span><span class="batch-stack-bot">${bottom}</span></div>`;
+  },
+
   // Ранг резидентства одного БИН для сортировки «Сначала нерезиденты»:
   // нерезидент(3) > ИП(2) > резидент(1) > нет данных(0). Чем больше — тем выше.
   _residStatusRank(bin) {
@@ -1343,8 +1383,11 @@ const BatchAR = {
     set('.batch-c-class', BatchAR._classCell(r));
     set('.batch-c-reg', BatchAR._regCell(r));
     set('.batch-c-gov', BatchAR._govCell(r));
-    set('.batch-c-resident-s', BatchAR._residCellFor(BatchAR._insurerBin(r)));
+    set('.batch-c-resident-s', BatchAR._residCellInsurer(r));
     set('.batch-c-resident-k', BatchAR._residCellFor(r.bin));
+    // Подсветка расхождения «выгрузка ↔ egov» по резидентству Страхователя.
+    const tdRs = tr.querySelector('.batch-c-resident-s');
+    if (tdRs) tdRs.classList.toggle('batch-cell--err', BatchAR._residRegDiff(r));
     // СС/премия зависят от вычисленного класса/тарифа → обновляем после statgov.
     set('.batch-c-sum', BatchAR._sumCellHtml(r));
     set('.batch-c-prem', BatchAR._premiumCellHtml(r));
@@ -1924,6 +1967,8 @@ const BatchAR = {
     if (BatchAR._classWrongForOked(r) || (okedErr && BatchAR._classDiff(r))) out.push(['riskClass', RED]);
     else if (BatchAR._classDiff(r)) out.push(['riskClass', YEL]);
     if (BatchAR._govDiff(r)) out.push(['govParticip', RED]);
+    // Расхождение резидентства «выгрузка ↔ egov» — подсветить страну в выгрузке.
+    if (BatchAR._residRegDiff(r)) out.push(['residencyCountry', RED]);
     return out;
   },
 
