@@ -1624,6 +1624,14 @@ table.company-okeds .muted { color: #98a2b3; font-style: italic; }
 .btn-protocol:hover:not(:disabled) {
   filter: brightness(1.1);
 }
+/* СЗ на АС — в одной гамме с Протоколом (оба идут в пакете органа «АС»). */
+.btn-sz-as {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%);
+  color: #fff;
+}
+.btn-sz-as:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
 .btn-sz {
   background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
   color: #fff;

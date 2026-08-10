@@ -76,7 +76,7 @@ Four generators in `js/`, all consume the same `data` object produced by `App._c
 - `ar-generator.js` — Андеррайтинговое Решение (АР)
 - `zakl-generator.js` — Заключение департамента
 - `protocol-generator.js` — Протокол заседания АС / Правления
-- `sz-generator.js` — Служебная записка (`mode: 'pravlenie' | 'sd'`)
+- `sz-generator.js` — Служебная записка (`mode: 'pravlenie' | 'sd' | 'as'`)
 
 To add a field to documents, edit `_collectData()` in `js/app.js` (single source of truth for document inputs), then reference `data.<field>` in the generator(s).
 
@@ -126,6 +126,18 @@ A separate workflow from the single-case form: upload the daily contracts export
 File names: contract numbers contain slashes (`T04/290526/0002`), so **`BatchAR._safeName()` maps `/` and `\` to a hyphen** (not `_`: closer to the original, and inside a ZIP a `/` would silently create a folder), other Windows-forbidden chars (`:*?"<>|`) to `_`. Both `BatchAR._fileName` («АР {номер}.docx») and `DaipPrint._fileName` («Рекомендация ДАиП {номер}.docx») go through it — don't re-implement the sanitizer.
 
 `.docx` chosen over raster PDF: editable, ~10 KB/doc, ~45 ms/doc (115-doc batch ≈ 5 s + ~1.2 MB ZIP). Duplicate БИНs get `(2)`, `(3)` suffixes. To verify layout/one-page: `docx.Packer.toBuffer(ARForm._buildDoc(row))` in Node + `soffice --headless --convert-to pdf`.
+
+### СЗ на Андеррайтинговый совет (`mode: 'as'`)
+
+`SZGenerator.generate(data, 'as')` dispatches to **`generateAs()`** — a separate builder, because the АС blank is a different form from the Правление/СД one. Reproduced from the company's own archive (`СЗ для АС/2026/СЗ на АС {БИН}.docx`), so **match that file, not the other СЗ**:
+
+- header right-aligned bold («Председателю Андеррайтингового Совета» / «Амерходжаеву Г.Т.» — `Utils.AS_CHAIR_ROLE`/`AS_CHAIR_NAME`, dative like `SD_CHAIR_NAME`), 4 blank lines, centred «Служебная записка», right-aligned date `DD.MM.YYYYг.`;
+- then a **2×4 table with visible borders** (Word «Table Grid», `sz: 4` = 0.5 pt): left column = the blank's prompts («Укажите формулировку вопроса…», «Коротко дайте пояснения…», «Укажите проект решения…», «Докладчик:»), right column = the answers. **The prompts stay in the finished document** — that is how the company prints it, they are part of the form. Geometry is copied from the sample and must stay: `tblW 9923`, `tblInd −572` (the table sticks out left of the text margin), columns `4111 + 5812`, page margins top/bottom 1134, left 1701, right 850, Times New Roman 12;
+- details cell: Страхователь · Класс риска · Страховая сумма · Количество работников · Страховая премия · **Страховая премия с ПК** (= `Utils.acceptedConditions(data).finalPremium`, so it equals the base premium under a standard verdict and the discounted one under `accept_adjusted`) · Оплата. Missing money prints «—», not «- тенге»;
+- project-decision cell follows the verdict (reject → «Отказать…в связи со степенью риска», defer → «Отложить…на определенный срок», otherwise «Рассмотреть и утвердить Андеррайтинговым советом…»), **without** the `conditionText` clause — the archive samples don't carry it, the ПК is visible in the premium line;
+- signature «Директор ДАиП» + right tab stop at 9351 → `Utils.DAIP_DIRECTOR_NAME`. The archive files are signed «Джелкобаев Т.К.»; the app prints the currently configured director (Бурханов Д.К.) so all documents stay consistent.
+
+Wiring: `Utils.determineDocPackage('as')` → `['ar','zakl','protocol','sz_as']`, button `#btnSzAs` (`App.generateSzAs()`, shown/enabled by `updateButtons` exactly like the other СЗ buttons), file name **`СЗ на АС {БИН}.docx`** (matching the archive; falls back to the company name when there is no БИН).
 
 ## BIN lookup architecture (CORS-critical)
 

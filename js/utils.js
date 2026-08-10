@@ -23,6 +23,11 @@ const Utils = {
   SD_CHAIR_ROLE: 'Председатель Совета директоров',
   SD_CHAIR_NAME: 'М.К. Альжанову',
 
+  // Андеррайтинговый совет (адресат СЗ на АС) — обращение в дательном падеже,
+  // как в бланке. Председатель АС = первый в AS_MEMBERS (Амерходжаев Г.Т.).
+  AS_CHAIR_ROLE: 'Председателю Андеррайтингового Совета',
+  AS_CHAIR_NAME: 'Амерходжаеву Г.Т.',
+
   // Кто подписывает СЗ
   DAIP_DIRECTOR_ROLE: 'Директор ДАиП',
   DAIP_DIRECTOR_NAME: 'Бурханов Д.К.',
@@ -484,7 +489,7 @@ const Utils = {
     switch (organ) {
       case 'sd':        return ['ar', 'zakl', 'sz_pravlenie', 'sz_sd'];
       case 'pravlenie': return ['ar', 'zakl', 'sz_pravlenie'];
-      case 'as':        return ['ar', 'zakl', 'protocol'];
+      case 'as':        return ['ar', 'zakl', 'protocol', 'sz_as'];
       default:          return ['ar', 'zakl'];
     }
   },

@@ -8,11 +8,128 @@ const SZGenerator = {
     'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
   ],
 
+  // ===== СЗ на Андеррайтинговый совет =====
+  // Бланк АС (образцы «СЗ на АС {БИН}.docx»): шапка → «Служебная записка» → дата →
+  // ТАБЛИЦА 2×4 со видимыми границами (стиль Word «Table Grid»): слева подсказки
+  // бланка («Укажите формулировку вопроса…», «Коротко дайте пояснения…», «Укажите
+  // проект решения…», «Докладчик:»), справа ответы. Подсказки остаются в готовом
+  // документе — это часть формы, а не мусор. Ширины колонок и отрицательный отступ
+  // таблицы — как в образце (4111 + 5812 = 9923 при отступе −572).
+  // Поля страницы: левое 3 см, правое 1,5 см; Times New Roman 12.
+  async generateAs(data) {
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, TabStopType,
+            Table, TableRow, TableCell, WidthType, BorderStyle,
+            TableLayoutType, VerticalAlign } = docx;
+
+    const FONT = 'Times New Roman';
+    const SIZE = 24; // 12pt
+    const tr = (text, opts = {}) => new TextRun({ text, font: FONT, size: SIZE, ...opts });
+    const trB = (text, opts = {}) => tr(text, { bold: true, ...opts });
+    const p = (children, alignment) => new Paragraph({
+      children: Array.isArray(children) ? children : [children],
+      ...(alignment ? { alignment } : {}),
+    });
+    const emptyP = () => p(tr(''));
+
+    const docDate = data.docDate ? new Date(data.docDate) : new Date();
+    const dateDot = `${String(docDate.getDate()).padStart(2, '0')}.${String(docDate.getMonth() + 1).padStart(2, '0')}.${docDate.getFullYear()}г.`;
+    const companyName = Utils.formatCompanyName(data.insurerName);
+
+    // Решение по риску — единый источник (вердикт андеррайтера главнее алгоритма).
+    // «Страховая премия с ПК» = финальная премия оттуда же: при стандартном решении
+    // она равна базовой (в образцах обе строки совпадают), при скидке — со скидкой.
+    const { verdict, finalPremium } = Utils.acceptedConditions(data);
+
+    const ctrGen = 'договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
+    let projectDecision;
+    if (verdict === 'reject') {
+      projectDecision = `Отказать в заключении ${ctrGen} сделки с компанией – ${companyName} в связи со степенью риска.`;
+    } else if (verdict === 'defer') {
+      projectDecision = `Отложить заключение ${ctrGen} сделки с компанией – ${companyName} на определенный срок.`;
+    } else {
+      projectDecision = `Рассмотреть и утвердить Андеррайтинговым советом заключение ${ctrGen} сделки с компанией – ${companyName}`;
+    }
+
+    // Строка «Ярлык: значение» — ярлык жирный, значение обычным. Деньги без
+    // значения печатаем прочерком, а не «- тенге».
+    const line = (label, value) => p([trB(label), tr(value)]);
+    const money = (v) => (v == null || isNaN(v)) ? '—' : Utils.fmtMoney(v);
+
+    // ===== Таблица бланка: слева подсказки, справа ответы =====
+    const COL_L = 4111, COL_R = 5812;          // как в образце
+    const thin = { style: BorderStyle.SINGLE, size: 4, color: '000000' };
+    const borders = { top: thin, bottom: thin, left: thin, right: thin };
+    const cell = (children, width) => new TableCell({
+      children: Array.isArray(children) ? children : [children],
+      width: { size: width, type: WidthType.DXA },
+      borders,
+      verticalAlign: VerticalAlign.TOP,
+      margins: { top: 40, bottom: 40, left: 108, right: 108 },
+    });
+    const row = (hint, answer) => new TableRow({
+      children: [cell(p(tr(hint), AlignmentType.JUSTIFIED), COL_L), cell(answer, COL_R)],
+    });
+
+    const formTable = new Table({
+      rows: [
+        row('Укажите формулировку вопроса включаемого в повестку дня заседания. ',
+            p(tr('О вынесении на рассмотрение Андеррайтингового совета решения о заключении сделки'), AlignmentType.JUSTIFIED)),
+        row('Коротко дайте пояснения по предлагаемому вопросу повестки дня. ', [
+          line('Страхователь: ', companyName),
+          line('Класс риска ', `– ${data.riskClass || '—'}`),
+          line('Страховая сумма: ', money(data.insuranceSum)),
+          line('Количество работников: ', Utils.fmtInteger(data.workers)),
+          line('Страховая премия: ', money(data.premiumBase)),
+          line('Страховая премия с ПК: ', money(finalPremium != null ? finalPremium : data.premiumBase)),
+          line('Оплата: ', data.paymentOrder || '—'),
+        ]),
+        row('Укажите проект решения по вопросу повестки. ',
+            p(tr(projectDecision), AlignmentType.JUSTIFIED)),
+        row('Докладчик:', p(tr(Utils.DAIP_DIRECTOR_NAME), AlignmentType.JUSTIFIED)),
+      ],
+      width: { size: COL_L + COL_R, type: WidthType.DXA },
+      indent: { size: -572, type: WidthType.DXA },   // как в образце — чуть левее поля
+      columnWidths: [COL_L, COL_R],
+      layout: TableLayoutType.FIXED,
+    });
+
+    const paragraphs = [
+      p(trB(Utils.AS_CHAIR_ROLE), AlignmentType.RIGHT),
+      p(trB(Utils.AS_CHAIR_NAME), AlignmentType.RIGHT),
+      emptyP(), emptyP(), emptyP(), emptyP(),
+      p(trB('Служебная записка'), AlignmentType.CENTER),
+      p(tr(dateDot), AlignmentType.RIGHT),
+
+      formTable,
+
+      emptyP(), emptyP(), emptyP(), emptyP(), emptyP(),
+
+      // Подпись: «Директор ДАиП» слева, ФИО прижато к правому краю табуляцией.
+      new Paragraph({
+        tabStops: [{ type: TabStopType.RIGHT, position: 9351 }],
+        children: [trB(Utils.DAIP_DIRECTOR_ROLE), trB('\t'), trB(Utils.DAIP_DIRECTOR_NAME)],
+      }),
+    ];
+
+    const doc = new Document({
+      sections: [{
+        properties: {
+          page: { margin: { top: 1134, bottom: 1134, left: 1701, right: 850 } },
+        },
+        children: paragraphs,
+      }],
+    });
+
+    return await Packer.toBlob(doc);
+  },
+
   /**
    * @param {Object} data — common data object (same shape as for AR/Zakl)
-   * @param {'pravlenie'|'sd'} mode — recipient: chair of Правление or Совет директоров
+   * @param {'pravlenie'|'sd'|'as'} mode — адресат: Правление, Совет директоров
+   *        или Андеррайтинговый совет ('as' → отдельный бланк, см. generateAs)
    */
   async generate(data, mode) {
+    if (mode === 'as') return SZGenerator.generateAs(data);
     const { Document, Packer, Paragraph, TextRun, AlignmentType,
             Table, TableRow, TableCell, WidthType, BorderStyle,
             TableLayoutType, VerticalAlign, TabStopType } = docx;

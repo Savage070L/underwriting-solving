@@ -785,6 +785,11 @@
         <button class="btn-generate btn-protocol" id="btnProtocol" onclick="App.generateProtocol()" disabled>
           Сформировать Протокол
         </button>
+        <!-- СЗ на Андеррайтинговый совет — вместе с Протоколом входит в пакет
+             для органа «АС» (см. Utils.determineDocPackage). -->
+        <button class="btn-generate btn-sz-as" id="btnSzAs" onclick="App.generateSzAs()" style="display:none" disabled>
+          СЗ на АС
+        </button>
         <button class="btn-generate btn-sz" id="btnSzPravlenie" onclick="App.generateSzPravlenie()" style="display:none" disabled>
           СЗ на Правление
         </button>

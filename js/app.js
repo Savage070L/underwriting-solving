@@ -3714,6 +3714,24 @@ const App = {
     }
   },
 
+  // ===== GENERATE СЗ на АС =====
+  // Имя файла — по БИН («СЗ на АС 861240000017.docx»), как в архиве компании;
+  // без БИН откатываемся на название страхователя.
+  async generateSzAs() {
+    try {
+      const data = App._collectData();
+      if (!data) return;
+      const blob = await SZGenerator.generate(data, 'as');
+      const bin = String(data.bin || '').replace(/\s/g, '');
+      const fileName = `СЗ на АС ${bin || Utils.formatCompanyName(data.insurerName)}.docx`;
+      saveAs(blob, fileName);
+      App.showMsg(`${fileName} сформирован!`, 'success');
+    } catch (e) {
+      console.error('СЗ на АС generation error:', e);
+      App.showMsg(`Ошибка генерации СЗ на АС: ${e.message}`, 'error');
+    }
+  },
+
   // ===== GENERATE СЗ на СД =====
   async generateSzSd() {
     try {
@@ -4040,6 +4058,7 @@ const App = {
     document.getElementById('btnAR').disabled = !canGen;
     document.getElementById('btnZakl').disabled = !canGen;
     const btnProto = document.getElementById('btnProtocol');
+    const btnSzAs = document.getElementById('btnSzAs');
     const btnSzPr = document.getElementById('btnSzPravlenie');
     const btnSzSd = document.getElementById('btnSzSd');
 
@@ -4055,12 +4074,14 @@ const App = {
     }
 
     if (btnProto) btnProto.disabled = !canGen || !pkg.includes('protocol');
+    if (btnSzAs) btnSzAs.disabled = !canGen || !pkg.includes('sz_as');
     if (btnSzPr) btnSzPr.disabled = !canGen || !pkg.includes('sz_pravlenie');
     if (btnSzSd) btnSzSd.disabled = !canGen || !pkg.includes('sz_sd');
 
     // Show/hide buttons depending on package
     const setHidden = (el, hide) => { if (el) el.style.display = hide ? 'none' : ''; };
     setHidden(btnProto, !pkg.includes('protocol'));
+    setHidden(btnSzAs, !pkg.includes('sz_as'));
     setHidden(btnSzPr, !pkg.includes('sz_pravlenie'));
     setHidden(btnSzSd, !pkg.includes('sz_sd'));
 
