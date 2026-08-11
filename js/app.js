@@ -1094,6 +1094,13 @@ const App = {
     if (inp) inp.classList.toggle('ovr-active', App.refData.limits[name] != null);
     App._updateLimitsStatus();
     App._refreshDerivedData();
+    // Пороги АС считает и «Проверка Договоров» (фиолетовая обводка строк, фильтр
+    // «АС лимиты», счётчик в статус-баре) — там они кэшируются по договорам,
+    // поэтому кэш надо сбросить и перерисовать таблицу.
+    if ((name === 'limitAsLowCls1_15' || name === 'limitAsLowCls16_22')
+        && typeof BatchAR !== 'undefined' && BatchAR.invalidateAsLimits) {
+      BatchAR.invalidateAsLimits();
+    }
   },
 
   // Мутирует Utils.LIMIT_* и App.AVG_SALARY_THRESHOLD в соответствии с

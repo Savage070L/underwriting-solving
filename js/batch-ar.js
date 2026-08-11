@@ -18,9 +18,9 @@ const BatchAR = {
   _sgQueue: null,             // очередь оставшихся индексов statgov (для возобновления после паузы)
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
-  // Активные переключатели сортировки «Сначала …» (массив ключей: 'errors' |
-  // 'filial' | 'tranche'). Приоритет применения — порядок _SORT_DEFS. Пусто — как в файле.
-  _sorts: [],
+  // Активные ФИЛЬТРЫ (массив ключей: 'errors' | 'filial' | 'tranche' |
+  // 'nonresident' | 'aslimit'). Пусто — показываем все строки, как в файле.
+  _filters: [],
 
   // Постраничного режима НЕТ — таблица одна, пользователь просто прокручивает.
   // Но сразу класть в DOM весь реестр нельзя: 16 тыс. строк × 21 колонка — это
@@ -99,6 +99,7 @@ const BatchAR = {
       BatchAR._filialContracts = null;     // сбросить кэш филиалов (пересоберётся по новым строкам)
       BatchAR._fotByContract = null;       // сбросить кэш суммарного ФОТ по договорам
       BatchAR._aggByContract = null;       // сбросить кэш агрегатов по договору (СС/СП/ФОТ контрагентов)
+      BatchAR._asLimitContracts = null;    // сбросить кэш «свыше лимитов АС»
       BatchAR._rawHeader = header || [];   // исходный заголовок (для выгрузки превышений)
       BatchAR._fieldIdx = idx || {};       // поле→индекс колонки (для подсветки ошибок)
       const zone = document.getElementById('zone-batch');
@@ -153,53 +154,121 @@ const BatchAR = {
     }
   },
 
-  // ===== СОРТИРОВКА «Сначала …» =====
-  // Три переключателя: показать сверху строки с ошибками / с траншами рассрочки /
-  // с дублирующимися номерами договора (несколько филиалов на один договор).
-  // Каждый — вкл/выкл; можно включить несколько сразу (не сбрасывают друг друга),
-  // применяются в фиксированном приоритете — порядок _SORT_DEFS.
-  _SORT_DEFS: [
-    { key: 'errors',  icon: '⚑', off: 'Сначала ошибки',  on: 'Ошибки сверху',  title: 'Показать сначала строки с ошибками (красные), затем жёлтые', rank: (r) => { const l = BatchAR._rowLevel(r); return l === 'err' ? 2 : (l === 'warn' ? 1 : 0); } },
-    { key: 'filial',  icon: '🏢', off: 'Сначала филиалы', on: 'Филиалы сверху', title: 'Договоры с несколькими филиалами (дублирующиеся номера договора) — наверх и рядом друг с другом', dup: true },
-    { key: 'tranche', icon: '⏳', off: 'Сначала транши',  on: 'Транши сверху',  title: 'Показать сначала договоры с наибольшим числом траншей рассрочки', rank: (r) => BatchAR._trancheCount(r) || 0 },
-    { key: 'nonresident', icon: '🌐', off: 'Сначала нерезиденты', on: 'Нерезиденты сверху', title: 'Показать сначала нерезидентов, затем ИП, затем резидентов. Учитывается любая из сторон договора (Страхователь или Контрагент).', rank: (r) => BatchAR._residRowRank(r) },
+  // ===== ФИЛЬТРЫ по строкам =====
+  // Кнопки-чипы над таблицей: «Ошибки», «Филиалы», «Транши», «Нерезиденты»,
+  // «АС лимиты». Это именно ФИЛЬТРЫ, а не сортировка: включённый чип оставляет в
+  // таблице ТОЛЬКО подходящие строки. Несколько чипов сужают выборку (И, а не ИЛИ)
+  // — каждый следующий чип это отдельный признак, а не ещё одна категория.
+  _FILTER_DEFS: [
+    { key: 'errors', icon: '⚑', label: 'Ошибки',
+      title: 'Только строки с проблемами: сначала красные (некорректные данные), затем жёлтые (расхождения)',
+      match: (r) => !!BatchAR._rowLevel(r) },
+    { key: 'filial', icon: '🏢', label: 'Филиалы',
+      title: 'Только договоры с несколькими филиалами (номер договора встречается больше одного раза); строки одного договора идут подряд',
+      match: (r) => BatchAR._isFilial(r), group: true },
+    { key: 'tranche', icon: '⏳', label: 'Транши',
+      title: 'Только договоры с рассрочкой (есть заполненные этапы оплаты)',
+      match: (r) => (BatchAR._trancheCount(r) || 0) > 0 },
+    { key: 'nonresident', icon: '🌐', label: 'Нерезиденты',
+      title: 'Только нерезиденты и ИП (резидентство ИП автоматически не определяется). Учитывается любая из сторон договора — Страхователь или Контрагент.',
+      match: (r) => BatchAR._residRowRank(r) >= 2 },
+    { key: 'aslimit', icon: '🟪', label: 'АС лимиты',
+      title: 'Только договоры свыше лимитов АС из «Справочников»: класс 1–15 и страховая сумма выше лимита АС 1–15, либо класс 16–22 выше лимита АС 16–22. Такие строки обведены фиолетовым.',
+      match: (r) => BatchAR._overAsLimit(r) },
   ],
 
-  // Порядок строк для отрисовки. По умолчанию — как в файле. Активные переключатели
-  // применяются в фиксированном приоритете (порядок _SORT_DEFS), все — «сверху»
-  // (по убыванию ранга). Возвращает массив ОРИГИНАЛЬНЫХ индексов («#» и data-idx
-  // остаются исходными).
-  _displayOrder() {
-    const idxs = BatchAR.rows.map((_, i) => i);
-    if (!BatchAR._sorts.length) return idxs;
-    const active = new Set(BatchAR._sorts);
-    // Значения считаем ОДИН раз на строку (не на каждое сравнение) — при тысячах строк важно.
-    const cols = BatchAR._SORT_DEFS.filter((d) => active.has(d.key)).map((d) => {
-      if (d.dup) {
-        const counts = {};
-        for (const r of BatchAR.rows) { const c = String(r.contractNumber || ''); counts[c] = (counts[c] || 0) + 1; }
-        return { dup: true, val: BatchAR.rows.map((r) => counts[String(r.contractNumber || '')] || 1), cn: BatchAR.rows.map((r) => String(r.contractNumber || '')) };
+  // Строка относится к договору свыше лимитов АС (см. _exceedsAsLimit — считает
+  // по всему договору, а не по строке). Кэш по номеру договора: при 16 тыс. строк
+  // пересчитывать группы на каждый рендер дорого. Сбрасывается вместе с остальными
+  // кэшами при загрузке нового реестра (_asLimitContracts = null).
+  _overAsLimit(r) {
+    if (!BatchAR._asLimitContracts) {
+      const m = new Set();
+      for (const [cn, group] of BatchAR._groupByContract()) {
+        if (BatchAR._exceedsAsLimit(group)) m.add(String(cn));
       }
-      return { val: BatchAR.rows.map(d.rank) };
-    });
-    return idxs.sort((ia, ib) => {
-      for (const c of cols) {
-        const a = c.val[ia], b = c.val[ib];
-        if (b !== a) return b - a;   // больший ранг (ошибочнее / больше траншей / дублируемее) — выше
-        // Одинаковый ранг у филиалов → всегда по номеру договора, чтобы одинаковые шли подряд.
-        if (c.dup) { const t = String(c.cn[ia]).localeCompare(String(c.cn[ib]), 'ru'); if (t !== 0) return t; }
-      }
-      return 0; // стабильно — при равенстве сохраняется порядок файла
-    });
+      BatchAR._asLimitContracts = m;
+    }
+    const key = r.contractNumber || '';
+    return BatchAR._asLimitContracts.has(String(key));
+  },
+  _asLimitContracts: null,
+
+  // Пороги лимитов АС редактируются в «Справочниках» — при их изменении кэш
+  // договоров «свыше лимитов» устаревает (обводка строк, фильтр «АС лимиты» и
+  // счётчик в статус-баре). Вызывается из App.onLimitOverride; ввод идёт по
+  // oninput (посимвольно), поэтому перерисовку откладываем.
+  _asLimitRefreshT: null,
+  invalidateAsLimits() {
+    BatchAR._asLimitContracts = null;
+    if (!BatchAR.rows.length) return;
+    clearTimeout(BatchAR._asLimitRefreshT);
+    BatchAR._asLimitRefreshT = setTimeout(() => {
+      BatchAR._asLimitContracts = null;
+      BatchAR.renderTable();
+      BatchAR._updateControls();
+    }, 350);
   },
 
-  // Вкл/выкл переключателя «Сначала …». Несколько можно держать активными сразу.
-  toggleSort(key) {
-    const i = BatchAR._sorts.indexOf(key);
-    if (i >= 0) BatchAR._sorts.splice(i, 1);
-    else BatchAR._sorts.push(key);
+  // Индексы строк для отрисовки. Без активных фильтров — все строки в порядке
+  // файла. С фильтрами — только те, что подходят под ВСЕ активные чипы; при
+  // активном фильтре «Ошибки» сверху идут красные, затем жёлтые, а при «Филиалах»
+  // строки дополнительно группируются по номеру договора, чтобы филиалы шли
+  // подряд. Возвращает ОРИГИНАЛЬНЫЕ индексы («#» и data-idx остаются исходными).
+  _displayOrder() {
+    const idxs = BatchAR.rows.map((_, i) => i);
+    if (!BatchAR._filters.length) return idxs;
+    const active = BatchAR._FILTER_DEFS.filter((d) => BatchAR._filters.includes(d.key));
+    const out = idxs.filter((i) => {
+      const r = BatchAR.rows[i];
+      return active.every((d) => d.match(r));
+    });
+    const byErrors = BatchAR._filters.includes('errors');
+    const byGroup = active.some((d) => d.group);
+    if (!byErrors && !byGroup) return out;
+    // «Ошибки»: сначала КРАСНЫЕ (грубые ошибки), потом ЖЁЛТЫЕ (расхождения) —
+    // андеррайтер разбирает список сверху вниз по убыванию критичности. Ранги
+    // считаем ОДИН раз в Map: вызывать _rowLevel из компаратора — это O(n log n)
+    // прогонов всех проверок строки, на 16 тыс. строк заметно.
+    const rank = new Map();
+    if (byErrors) {
+      // Вместе с «Филиалами» ранг берём по ДОГОВОРУ (_groupLevel), иначе строки
+      // одного договора разъехались бы между красным и жёлтым блоками.
+      const lvlOfRow = new WeakMap();
+      if (byGroup) {
+        for (const [, g] of BatchAR._groupByContract()) {
+          const l = BatchAR._groupLevel(g);
+          for (const r of g) lvlOfRow.set(r, l);
+        }
+      }
+      for (const i of out) {
+        const r = BatchAR.rows[i];
+        const l = byGroup ? lvlOfRow.get(r) : BatchAR._rowLevel(r);
+        rank.set(i, l === 'err' ? 0 : (l === 'warn' ? 1 : 2));
+      }
+    }
+    out.sort((ia, ib) => {
+      if (byErrors) {
+        const d = rank.get(ia) - rank.get(ib);
+        if (d !== 0) return d;
+      }
+      // «Филиалы» — строки одного договора рядом (в выгрузке они могут быть врозь).
+      if (byGroup) {
+        const t = String(BatchAR.rows[ia].contractNumber || '').localeCompare(String(BatchAR.rows[ib].contractNumber || ''), 'ru');
+        if (t !== 0) return t;
+      }
+      return ia - ib;   // внутри одного ранга — исходный порядок файла
+    });
+    return out;
+  },
+
+  // Вкл/выкл фильтра. Несколько можно держать активными сразу (условия И).
+  toggleFilter(key) {
+    const i = BatchAR._filters.indexOf(key);
+    if (i >= 0) BatchAR._filters.splice(i, 1);
+    else BatchAR._filters.push(key);
     const wrap = document.getElementById('batch-table-wrap');
-    if (wrap) wrap.scrollTop = 0;   // после смены сортировки — к началу таблицы
+    if (wrap) wrap.scrollTop = 0;   // после смены фильтра — к началу таблицы
     BatchAR.renderTable();
     BatchAR._updateControls();
   },
@@ -213,7 +282,7 @@ const BatchAR = {
     const r = BatchAR.rows[i];
     if (!r) return;
     r._approved = !!(el && el.checked);
-    if (BatchAR._sorts.length) BatchAR.renderTable();
+    if (BatchAR._filters.length) BatchAR.renderTable();
     else BatchAR._refreshRow(i);
     BatchAR._updateControls();
   },
@@ -388,10 +457,26 @@ const BatchAR = {
   _renderScrollInfo() {
     const host = document.getElementById('batch-scroll-info');
     if (!host) return;
-    const total = BatchAR._order.length;
-    if (!total || BatchAR._shown >= total) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const total = BatchAR._order.length;          // строк ПОСЛЕ фильтров
+    const all = BatchAR.rows.length;              // всего строк в реестре
+    const filtered = BatchAR._filters.length ? ` (отфильтровано из <b>${all}</b>)` : '';
+    // Фильтр не оставил ни одной строки — говорим об этом прямо, иначе пустая
+    // таблица выглядит как поломка.
+    if (!total && all && BatchAR._filters.length) {
+      host.style.display = '';
+      const names = BatchAR._FILTER_DEFS.filter((d) => BatchAR._filters.includes(d.key)).map((d) => d.label).join(' + ');
+      host.innerHTML = `Под фильтр <b>${ARForm._esc(names)}</b> не подошла ни одна строка из <b>${all}</b>`;
+      return;
+    }
+    if (!total || BatchAR._shown >= total) {
+      // Всё показано. При активных фильтрах всё равно пишем, сколько из скольких.
+      if (!total || !BatchAR._filters.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+      host.style.display = '';
+      host.innerHTML = `Показано <b>${total}</b> строк${filtered}`;
+      return;
+    }
     host.style.display = '';
-    host.innerHTML = `Показано <b>${BatchAR._shown}</b> из <b>${total}</b> — прокрутите таблицу вниз, чтобы подгрузить ещё`
+    host.innerHTML = `Показано <b>${BatchAR._shown}</b> из <b>${total}</b>${filtered} — прокрутите таблицу вниз, чтобы подгрузить ещё`
       + ` <button type="button" class="batch-scroll-more" onclick="BatchAR._appendChunk()">Показать ещё ${Math.min(BatchAR.CHUNK, total - BatchAR._shown)}</button>`;
   },
 
@@ -941,6 +1026,9 @@ const BatchAR = {
     const s = BatchAR._rowState(r);
     if (s) out.push('batch-row--' + s);
     if (r._approved) out.push('batch-row--approved');
+    // Договор свыше лимитов АС — фиолетовая ОБВОДКА строки (заливку не трогаем:
+    // цвет фона занят статусом проверки/ошибками, а лимит — отдельный признак).
+    if (BatchAR._overAsLimit(r)) out.push('batch-row--aslimit');
     return out;
   },
   // Ячейка «Согласовано андеррайтером»: галочка. Подсказка зависит от реального уровня строки.
@@ -1889,10 +1977,17 @@ const BatchAR = {
     return n;
   },
 
-  // Договор превышает лимиты АС: класс 1–15 и СС свыше 2 млрд, либо
-  // класс 16–22 и СС свыше 1,5 млрд (СС = сумма по всем филиалам договора).
-  // Класс берём ВЫЧИСЛЕННЫЙ по ОКЭД из stat.gov.kz (а не из выгрузки); макс. по
-  // филиалам. Если вычислить нельзя (нет классификатора/ОКЭД) — fallback на выгрузку.
+  // Пороги лимитов АС из «Справочников» (класс 1–15 / 16–22). Одно место чтения:
+  // ими считают и обводку строк, и фильтр «АС лимиты», и счётчик статус-бара.
+  _asLimits() {
+    const get = (name, def) => ((typeof App !== 'undefined' && App._getLimit) ? App._getLimit(name) : def);
+    return { low1_15: get('limitAsLowCls1_15', 2000000000), low16_22: get('limitAsLowCls16_22', 1500000000) };
+  },
+
+  // Договор превышает лимиты АС: класс 1–15 и СС от 2 млрд, либо
+  // класс 16–22 и СС от 1,5 млрд (СС = сумма по всем филиалам договора).
+  // Класс берём из ВЫГРУЗКИ (КлассПрофРиска), максимальный по филиалам — см.
+  // комментарий внутри: превышение считаем по данным самой таблицы-источника.
   _exceedsAsLimit(group) {
     // СС договора — это ОбщаяСтраховаяСумма (одинакова во всех строках договора),
     // поэтому берём её ОДИН раз (max), а не суммируем по филиалам.
@@ -1900,10 +1995,11 @@ const BatchAR = {
     // Класс — из ИСХОДНОЙ выгрузки (КлассПрофРиска), а НЕ вычисленный по stat.gov.kz:
     // превышение лимитов АС определяем по данным самой таблицы-источника.
     const cls = Math.max(0, ...group.map(r => parseInt(r.riskClass, 10) || 0));
-    const low1_15 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls1_15') : 2000000000;
-    const low16_22 = (typeof App !== 'undefined' && App._getLimit) ? App._getLimit('limitAsLowCls16_22') : 1500000000;
-    if (cls >= 1 && cls <= 15 && totalSum > low1_15) return true;
-    if (cls >= 16 && cls <= 22 && totalSum > low16_22) return true;
+    // Сравнение НЕ строгое (≥) — как в «Справочниках» («сумма ≥ этого → АС») и в
+    // Utils.determineOrgan для одиночного дела: ровно 2 000 000 000 ₸ идёт на АС.
+    const { low1_15, low16_22 } = BatchAR._asLimits();
+    if (cls >= 1 && cls <= 15 && totalSum >= low1_15) return true;
+    if (cls >= 16 && cls <= 22 && totalSum >= low16_22) return true;
     return false;
   },
 
@@ -2064,7 +2160,11 @@ const BatchAR = {
     let ok = 0, warn = 0, err = 0, checking = 0, pending = 0, approved = 0, unchecked = 0;
     // Резидентство Страхователя (единственная колонка) + расхождения с egov.
     let nrS = 0, ipS = 0, residDiff = 0;
+    // Свыше лимитов АС — отдельная ось поверх статусов (см. _updateStatusBar).
+    let asLimit = 0;
+    const asContracts = new Set();
     for (const r of BatchAR.rows) {
+      if (BatchAR._overAsLimit(r)) { asLimit++; asContracts.add(String(r.contractNumber || '')); }
       if (r._approved) approved++;
       else {
         const s = BatchAR._rowState(r);
@@ -2079,6 +2179,7 @@ const BatchAR = {
       if (BatchAR._residRegDiff(r)) residDiff++;
     }
     return { total: BatchAR.rows.length, ok, warn, err, checking, pending, approved, unchecked,
+      asLimit, asLimitContracts: asContracts.size,
       nrS, ipS, residDiff, egovOff: BatchAR._egovResidPhase === 'unavailable' };
   },
 
@@ -2134,9 +2235,9 @@ const BatchAR = {
     const dt = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
     const src = BatchAR._sourceFileName ? esc(BatchAR._sourceFileName) : '—';
     const resDate = (typeof ResidentCheck !== 'undefined' && ResidentCheck.updatedText) ? ResidentCheck.updatedText() : '';
-    const sortsActive = BatchAR._sorts.length
-      ? BatchAR._SORT_DEFS.filter((d) => BatchAR._sorts.includes(d.key)).map((d) => d.on).join(', ')
-      : 'как в файле';
+    const filtersActive = BatchAR._filters.length
+      ? BatchAR._FILTER_DEFS.filter((d) => BatchAR._filters.includes(d.key)).map((d) => d.label).join(' + ')
+      : 'нет (все строки)';
 
     // CSS приложения — инлайним для точной вёрстки; при неудаче отчёт всё равно
     // читаем (базовые wrapper-стили ниже дают таблицу без цветов).
@@ -2152,6 +2253,9 @@ const BatchAR = {
       chip('ошибок', c.err, '#dc2626'),
       c.approved ? chip('согласовано андеррайтером', c.approved, '#2563eb') : '',
       notChecked ? chip('не проверено (stat.gov.kz)', notChecked, '#94a3b8') : '',
+      // Свыше лимитов АС — не статус строки, а отдельный признак (строки обведены
+      // фиолетовым), поэтому в сумму остальных чипов не входит.
+      c.asLimit ? chip(`свыше лимитов АС (договоров: ${c.asLimitContracts})`, c.asLimit, '#7c3aed') : '',
     ].filter(Boolean).join('');
     // Сводки «Резидентство» чипами в отчёте НЕТ: признак виден в самой колонке
     // «Резидент». Счётчики (c.nrS/c.ipS/c.residDiff) считаются в _resultCounts и
@@ -2164,6 +2268,7 @@ const BatchAR = {
         <span><i style="background:#fde68a"></i>жёлтый — расхождения, нужна доп. проверка</span>
         <span><i style="background:#dcfce7"></i>зелёный — корректно</span>
         <span><i style="background:#e0e7ff"></i>синий — согласовано андеррайтером</span>
+        <span><i style="background:#fff;box-shadow:inset 0 0 0 2px #7c3aed"></i>фиолетовая обводка — договор свыше лимитов АС</span>
         <span class="rp-legend-res">Колонка «Резидент»: сверху — из выгрузки (<b>✓</b> Казахстан · <b>нерез.</b> иная страна · <b>отсутствует</b> — не указана), снизу в скобках — из реестра egov (<b>(✓)</b> резидент · <b>(нерез.)</b> нерезидент · <b>(ИП)</b> ИП/физлицо, не определяется · <b>(отключен)</b> нет связи с egov). Красная ячейка — расхождение выгрузки с egov.</span>
       </div>`;
 
@@ -2190,7 +2295,7 @@ const BatchAR = {
       + `<div class="rp-report">`
       + `<header class="rp-head"><h1>Результаты проверки договоров</h1>`
       + `<div class="rp-meta">Сформировано: <b>${dt}</b>${src !== '—' ? ` · файл-источник: <b>${src}</b>` : ''}`
-      + `${resDate ? ` · база ГБД ЮЛ от <b>${esc(resDate)}</b>` : ''} · сортировка: <b>${esc(sortsActive)}</b></div></header>`
+      + `${resDate ? ` · база ГБД ЮЛ от <b>${esc(resDate)}</b>` : ''} · фильтры: <b>${esc(filtersActive)}</b></div></header>`
       + `<div class="rp-section-title">Сводка по строкам</div><div class="rp-summary">${summary}</div>`
       + legend
       + `<div class="rp-section-title">Все договоры (${c.total})</div>`
@@ -2401,10 +2506,9 @@ const BatchAR = {
     if (!host) return;
     if (!BatchAR.rows.length) { host.innerHTML = ''; host.style.display = 'none'; return; }
     host.style.display = '';
-    host.innerHTML = BatchAR._SORT_DEFS.map((d) => {
-      const on = BatchAR._sorts.includes(d.key);
-      const text = on ? `${d.icon} ${d.on} ✓` : `${d.icon} ${d.off}`;
-      return `<button type="button" class="batch-sort-btn batch-sort-btn--${d.key}${on ? ' is-active' : ''}" onclick="BatchAR.toggleSort('${d.key}')" title="${ARForm._esc(d.title)}">${text}</button>`;
+    host.innerHTML = BatchAR._FILTER_DEFS.map((d) => {
+      const on = BatchAR._filters.includes(d.key);
+      return `<button type="button" class="batch-sort-btn batch-sort-btn--${d.key}${on ? ' is-active' : ''}" onclick="BatchAR.toggleFilter('${d.key}')" title="${ARForm._esc(d.title)}">${d.icon} ${d.label}${on ? ' ✓' : ''}</button>`;
     }).join('');
   },
 
@@ -2416,7 +2520,13 @@ const BatchAR = {
     if (!BatchAR.rows.length) { bar.style.display = 'none'; return; }
     bar.style.display = '';
     let ok = 0, warn = 0, err = 0, checking = 0, pending = 0, approved = 0, unchecked = 0;
+    // «АС лимиты» — признак ОТДЕЛЬНОЙ оси (не состояние проверки): строка свыше
+    // порогов из «Справочников» может быть и зелёной, и красной. Поэтому в сумму
+    // остальных чипов не входит и считается по строкам (как они) + по договорам.
+    let asRows = 0;
+    const asContracts = new Set();
     for (const r of BatchAR.rows) {
+      if (BatchAR._overAsLimit(r)) { asRows++; asContracts.add(String(r.contractNumber || '')); }
       if (r._approved) { approved++; continue; }
       const s = BatchAR._rowState(r);
       if (s === 'err') err++;
@@ -2456,6 +2566,19 @@ const BatchAR = {
     set('bs-ok', ok); set('bs-warn', warn); set('bs-err', err);
     set('bs-checking', checking); set('bs-pending', pending);
     set('bs-approved', approved); set('bs-unchecked', unchecked);
+    // «АС лимиты» (фиолетовый): сколько строк ушло за пороги «Справочников».
+    // В подсказке — сколько это договоров и сами пороги (они редактируемые).
+    set('bs-aslimit', asRows);
+    const asEl = bar.querySelector('.batch-stat--aslimit');
+    if (asEl) {
+      const { low1_15, low16_22 } = BatchAR._asLimits();
+      const thresholds = `Пороги из «Справочников»: класс 1–15 — от ${BatchAR._fmtMoney(low1_15)} ₸, класс 16–22 — от ${BatchAR._fmtMoney(low16_22)} ₸.`;
+      asEl.title = asRows
+        ? `Свыше лимитов АС: ${asRows} ${Utils.plural(asRows, 'строка', 'строки', 'строк')} `
+          + `(${asContracts.size} ${Utils.plural(asContracts.size, 'договор', 'договора', 'договоров')}). ${thresholds} `
+          + 'Такие строки обведены фиолетовым; чип «🟪 АС лимиты» оставит в таблице только их.'
+        : `Договоров свыше лимитов АС нет. ${thresholds}`;
+    }
     // Скрываем нулевые «проверяется/в очереди/не проверено/согласовано» — чтобы бар не шумел.
     const toggle = (cls, n) => { const el = bar.querySelector('.' + cls); if (el) el.style.display = n ? '' : 'none'; };
     toggle('batch-stat--checking', checking);

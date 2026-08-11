@@ -287,6 +287,12 @@
           <span class="batch-stat batch-stat--pending" title="В очереди — ещё не дошло до проверки"><span class="batch-stat-dot"></span><b id="bs-pending">0</b>&nbsp;в очереди</span>
           <span class="batch-stat batch-stat--unchecked" title="Не проверено — нет подключения к stat.gov.kz или ошибка проверки"><span class="batch-stat-dot"></span><b id="bs-unchecked">0</b>&nbsp;не проверено</span>
           <span class="batch-stat batch-stat--approved" title="Согласовано андеррайтером"><span class="batch-stat-dot"></span><b id="bs-approved">0</b>&nbsp;согласовано</span>
+          <span class="batch-stat-sep"></span>
+          <!-- «АС лимиты» — ОТДЕЛЬНАЯ ось (не состояние проверки): строки договоров
+               свыше порогов из «Справочников». Поэтому за разделителем и фиолетовым,
+               как обводка таких строк в таблице и чип-фильтр. Текст подсказки
+               (пороги + число договоров) пишет BatchAR._updateStatusBar. -->
+          <span class="batch-stat batch-stat--aslimit" title="Строки договоров свыше лимитов АС"><span class="batch-stat-dot"></span><b id="bs-aslimit">0</b>&nbsp;АС лимиты</span>
           <button class="batch-open-tab" type="button" onclick="BatchAR.openInNewTab()" title="Открыть таблицу в отдельной вкладке — больше места для просмотра">↗ Открыть в отдельной вкладке</button>
         </div>
         <!-- Чипы мультисортировки (по столбцам) — под статус-баром. Рендерит
