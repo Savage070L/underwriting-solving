@@ -338,8 +338,12 @@ const BatchAR = {
     const classWrong = BatchAR._classWrongForOked(r);
     const gDiff = BatchAR._govDiff(r);
     const okedCls = okedErr ? ' batch-cell--err' : '';
+    // ПК ≠ 1 → строка не жёлтая, но ячейка класса остаётся помеченной; поясняем
+    // это в подсказке, иначе жёлтая ячейка в зелёной строке выглядит нелогично.
+    const pkAdj = BatchAR._pkAdjusted(r);
     const classCls = (classWrong || (okedErr && cDiff)) ? ' batch-cell--err' : (cDiffWarn ? ' batch-cell--warn' : '');
-    const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"` : '';
+    const classTitle = classWrong ? ` title="Класс не соответствует ОКЭД: по классификатору ${ARForm._esc(r.oked)} → класс ${BatchAR._classOf(r.oked)}, а в выгрузке ${ARForm._esc(r.riskClass)}"`
+      : ((cDiffWarn && pkAdj) ? ` title="${ARForm._esc(BatchAR._pkWarnNote(r))}"` : '');
     const govCls = gDiff ? ' batch-cell--err' : '';
     const pkCls = BatchAR._pkYoungError(r) ? ' batch-cell--err' : '';
     // ===== КОНТРАГЕНТ (строка) =====
@@ -352,7 +356,7 @@ const BatchAR = {
     const contrClassCls = (contrTarErr || contrClassWrongBin) ? ' batch-cell--err' : (contrClassDiffBin ? ' batch-cell--warn' : '');
     const contrClassTitle = contrClassWrongBin
       ? ` title="Класс контрагента в выгрузке (${ARForm._esc(String(BatchAR._contrClass(r)))}) отсутствует среди классов по его ОКЭД из stat.gov.kz"`
-      : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})"`
+      : (contrClassDiffBin ? ` title="Класс контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} есть среди классов по ОКЭД, но не с наибольшим тарифом (нужен класс ${BatchAR._contrComputedClass(r)})${pkAdj ? ' — ' + ARForm._esc(BatchAR._pkWarnNote(r)) : ''}"`
       : (contrTarErr ? ` title="Тариф из выгрузки не соответствует классу контрагента ${ARForm._esc(String(BatchAR._contrClass(r)))} по справочнику (должен быть ${BatchAR._fmtPct(BatchAR._contrTariff(r))})"` : ''));
     // СС контрагента красным: < ФОТ, или отличается от расчётной больше чем на ±100 ₸.
     const contrSumDiff = BatchAR._contrSumDiff(r);
@@ -511,6 +515,21 @@ const BatchAR = {
   // должна → ошибка, подсвечиваем ячейку ПК (и строку) красным.
   _pkYoungError(r) {
     return !!r.youngAlert && r.coeff != null && r.coeff < 1;
+  },
+
+  // ПК отличается от 1 (в любую сторону: 0,9 — скидка, >1 — надбавка). Такой
+  // договор андеррайтер уже смотрел вручную и согласовал, поэтому МЯГКОЕ
+  // расхождение класса по ОКЭД для него не считается расхождением — строка не
+  // жёлтая (см. _rawRowLevel). На КРАСНЫЕ ошибки это не влияет: ошибочные данные
+  // остаются ошибочными независимо от ПК.
+  _pkAdjusted(r) {
+    if (r.coeff == null) return false;          // ПК нет — Number(null) дал бы 0 и «≠1»
+    const v = Number(r.coeff);
+    return Number.isFinite(v) && v > 0 && Math.abs(v - 1) > 1e-9;   // 0 — мусор, не ПК
+  },
+  // Подсказка к ячейке класса, которая осталась помеченной, но строку не красит.
+  _pkWarnNote(r) {
+    return `Расхождение класса по ОКЭД не считается расхождением: применён ПК ${String(r.coeff).replace('.', ',')} — договор уже согласован андеррайтером.`;
   },
 
   // ===== Проверка страховой суммы и премии (методология) =====
@@ -992,7 +1011,12 @@ const BatchAR = {
         || BatchAR._insurerSumMismatch(r) || BatchAR._insurerPremMismatch(r)) return 'err';
     // Жёлтым остаются только мягкие расхождения класса (СС/СП-расхождения теперь
     // красные), и только для высоких классов (≥13) — см. _classDiffWarn.
-    if (BatchAR._classDiffWarn(r) || BatchAR._contrClassDiffByBin(r)) return 'warn';
+    // ПК ≠ 1 снимает жёлтый: такой договор андеррайтер уже разбирал вручную
+    // (скидка/надбавка проставлена осознанно), расхождение класса по ОКЭД для
+    // него — известная и принятая история, в работу по расхождениям не идёт.
+    // Сами ячейки класса остаются помеченными (видно, что расхождение есть).
+    if (!BatchAR._pkAdjusted(r)
+        && (BatchAR._classDiffWarn(r) || BatchAR._contrClassDiffByBin(r))) return 'warn';
     return null;
   },
   // Эффективный уровень строки для ВСЕЙ логики (печать/счётчики/сортировка/цвет).
