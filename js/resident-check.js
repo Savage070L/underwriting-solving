@@ -262,14 +262,33 @@ const ResidentCheck = {
   // Проверка списка (индекс уже в памяти — это просто map, без сети).
   checkMany(ids) { return (ids || []).map((id) => ResidentCheck.check(id)); },
 
-  // ===== АВТОРИТЕТНАЯ ПРОВЕРКА ЧЕРЕЗ egov (P30.11, мост-расширение) =====
+  // ===== АВТОРИТЕТНАЯ ПРОВЕРКА ЧЕРЕЗ egov (P3011, мост-расширение) =====
   // Локальный индекс gbd_ul отстаёт (нет свежих регистраций) → даёт ложных
-  // нерезидентов. egov P30.11 — источник резидентства (налоговый) и актуальнее.
+  // нерезидентов. egov P3011 — источник резидентства (налоговый) и актуальнее.
   // Схема гибридная: локальный индекс = мгновенный ответ (оффлайн, без сети),
-  // egov через мост = АВТОРИТЕТНОЕ уточнение (по одному запросу на БИН, только
-  // когда мост доступен). Кэшируем по БИН, чтобы не дёргать повторно.
-  _egovCache: new Map(),     // bin → Promise (дедуп запросов «в полёте»)
+  // egov через мост = АВТОРИТЕТНОЕ уточнение.
+  //
+  // БЮДЖЕТ ЗАПРОСОВ. P3011 — именной запрос госуслуги под аккаунтом пользователя
+  // (каждый вызов остаётся в истории egov), поэтому запросов должно быть МИНИМУМ:
+  //   • fetchEgovRaw — ЕДИНСТВЕННАЯ точка сетевого запроса: checkEgov, досье и
+  //     пакетный пул делят один кэш сырых ответов (_egovRaw) → один БИН = один
+  //     запрос на всё приложение;
+  //   • определённые ответы сохраняются в localStorage на EGOV_TTL_MS —
+  //     перезагрузка страницы / повторный прогон того же реестра в сеть не ходят;
+  //   • ЛЮБАЯ ошибка (нет сессии, 5xx, таймаут) включает общую паузу
+  //     _egovPauseUntil на EGOV_PAUSE_MS: раньше неудача не кэшировалась, и
+  //     каждый перерендер превью повторял запрос — к egov летел бесконечный
+  //     поток обращений, что пугало пользователей.
+  _egovInFlight: new Map(),  // bin → Promise<raw|null> (дедуп «в полёте»)
+  _egovRaw: new Map(),       // bin → сырой ответ P3011 (его же показывает досье)
   _egovResolved: new Map(),  // bin → verdict (синхронно доступный результат)
+  _egovPauseUntil: 0,        // до этого момента новые запросы не отправляем
+  _egovLastOkAt: 0,          // ts последнего УСПЕШНОГО ответа egov (для индикатора)
+  _egovStore: null,          // содержимое localStorage (лениво), null = не загружено
+  _egovStoreT: null,         // таймер отложенной записи
+  EGOV_TTL_MS: 12 * 60 * 60 * 1000,  // срок жизни сохранённого ответа (полсуток)
+  EGOV_PAUSE_MS: 5 * 60 * 1000,      // пауза после ошибки
+  EGOV_STORE_KEY: 'egov_resid_v1',
 
   bridgeAvailable() {
     return typeof StatGovClient !== 'undefined'
@@ -277,31 +296,100 @@ const ResidentCheck = {
       && StatGovClient.isAvailable();
   },
 
+  // Ленивая загрузка сохранённых ответов: протухшие выбрасываем, живые
+  // раскладываем по кэшам (raw + verdict).
+  _egovStoreInit() {
+    if (ResidentCheck._egovStore) return;
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(ResidentCheck.EGOV_STORE_KEY) || '{}') || {}; }
+    catch (e) { all = {}; }
+    const now = Date.now();
+    for (const bin of Object.keys(all)) {
+      const rec = all[bin];
+      if (!rec || !rec.d || now - (rec.ts || 0) > ResidentCheck.EGOV_TTL_MS) { delete all[bin]; continue; }
+      ResidentCheck._egovRaw.set(bin, rec.d);
+      const v = ResidentCheck._egovVerdict(rec.d);
+      if (v) ResidentCheck._egovResolved.set(bin, v);
+    }
+    ResidentCheck._egovStore = all;
+  },
+
+  // Отложенная запись (пакетная проверка кладёт сотни БИН подряд — пишем раз в секунду).
+  _egovStorePut(bin, d) {
+    ResidentCheck._egovStore[bin] = { d, ts: Date.now() };
+    if (ResidentCheck._egovStoreT) return;
+    ResidentCheck._egovStoreT = setTimeout(() => {
+      ResidentCheck._egovStoreT = null;
+      try { localStorage.setItem(ResidentCheck.EGOV_STORE_KEY, JSON.stringify(ResidentCheck._egovStore)); }
+      catch (e) { /* quota/приватный режим — живём без персиста */ }
+    }, 1000);
+  },
+
   // Готовый (уже полученный) авторитетный вердикт egov по БИН — синхронно, без сети.
   egovResolved(id) {
+    ResidentCheck._egovStoreInit();
     return ResidentCheck._egovResolved.get(ResidentCheck._norm(id)) || null;
   },
 
-  // Авторитетная проверка. Возвращает verdict той же формы, что check(), но с
-  // source:'egov'. null — мост недоступен или запрос не удался (тогда вызывающий
-  // остаётся на локальном вердикте). Промис кэшируется (в т.ч. на время полёта).
-  checkEgov(id) {
+  // Сырой ответ P3011 по БИН (для досье) — синхронно из кэша, без сети.
+  egovRawFor(id) {
+    ResidentCheck._egovStoreInit();
+    return ResidentCheck._egovRaw.get(ResidentCheck._norm(id)) || null;
+  },
+
+  // ЕДИНСТВЕННАЯ точка сетевого запроса P3011. Promise<raw|null>: null — ИИН,
+  // мост недоступен, действует пауза после ошибки или запрос не удался.
+  fetchEgovRaw(id) {
+    ResidentCheck._egovStoreInit();
     const s = ResidentCheck._norm(id);
     if (s.length !== 12) return Promise.resolve(null);
-    // Эндпоинт P30.11 /organizations/ — ТОЛЬКО для БИН юрлиц. Для ИИН (ИП/физлицо,
+    // Эндпоинт P3011 /organizations — ТОЛЬКО для БИН юрлиц. Для ИИН (ИП/физлицо,
     // 5-я цифра 0–3) он отдаёт «не является БИН» / статус 031 «не зарегистрирован»
     // с resident:false — что для ИИН стало бы ложным «нерезидентом». Поэтому для
     // ИИН egov НЕ дёргаем — остаётся локальный вердикт 'individual' (ИП, резидент
     // по умолчанию). БИН типа 6 (5-я цифра 6) — это тоже ИП, но egov его принимает
     // и сам вернёт статус 033 «является ИП», поэтому для БИН всех типов запрос идёт.
     if (ResidentCheck.idKind(s) !== 'bin') return Promise.resolve(null);
+    if (ResidentCheck._egovRaw.has(s)) return Promise.resolve(ResidentCheck._egovRaw.get(s));
     if (!ResidentCheck.bridgeAvailable()) return Promise.resolve(null);
-    if (ResidentCheck._egovCache.has(s)) return ResidentCheck._egovCache.get(s);
+    if (Date.now() < ResidentCheck._egovPauseUntil) return Promise.resolve(null);
+    if (ResidentCheck._egovInFlight.has(s)) return ResidentCheck._egovInFlight.get(s);
     const p = StatGovClient.lookupEgovResidency(s)
-      .then((d) => { const v = ResidentCheck._egovVerdict(d); if (v) ResidentCheck._egovResolved.set(s, v); return v; })
-      .catch(() => { ResidentCheck._egovCache.delete(s); return null; }); // ошибку не кэшируем
-    ResidentCheck._egovCache.set(s, p);
+      .then((d) => {
+        ResidentCheck._egovInFlight.delete(s);
+        ResidentCheck._egovRaw.set(s, d);
+        // Реальный ответ egov — самый достоверный признак живой сессии
+        // (достовернее пассивной пробы токена): сообщаем индикатору.
+        ResidentCheck._egovLastOkAt = Date.now();
+        if (typeof App !== 'undefined' && App.EGOV) App.EGOV.noteLookup(true);
+        const v = ResidentCheck._egovVerdict(d);
+        // Персистим только определённые ответы: «пустой» ответ — не знание.
+        if (v) { ResidentCheck._egovResolved.set(s, v); ResidentCheck._egovStorePut(s, d); }
+        return d;
+      })
+      .catch((err) => {
+        ResidentCheck._egovInFlight.delete(s);
+        ResidentCheck._egovPauseUntil = Date.now() + ResidentCheck.EGOV_PAUSE_MS;
+        if (typeof App !== 'undefined' && App.EGOV) App.EGOV.noteLookup(false, err && err.message);
+        return null;
+      });
+    ResidentCheck._egovInFlight.set(s, p);
     return p;
+  },
+
+  // Авторитетная проверка (вердикт). Контракт прежний: verdict той же формы, что
+  // check(), но с source:'egov'; null — нет данных (вызывающий остаётся на
+  // локальном вердикте). Вся дедупликация/кэши/пауза — в fetchEgovRaw.
+  checkEgov(id) {
+    return ResidentCheck.fetchEgovRaw(id)
+      .then((d) => (d ? ResidentCheck.egovResolved(id) : null));
+  },
+
+  // Снять паузу после ошибки. Зовётся при ЯВНОМ действии пользователя («Повторить
+  // проверку», новый ввод БИН): он мог только что войти на egov.kz — не заставляем
+  // ждать до 5 минут.
+  egovRetryNow() {
+    ResidentCheck._egovPauseUntil = 0;
   },
 
   // Ответ egov P30.11 → verdict. АВТОРИТЕТНЫЙ признак — булев `resident`:
@@ -317,6 +405,16 @@ const ResidentCheck = {
     const note = d.statusText || '';
     const nm = d.shortName || d.fullName || '';
     if (d.resident === true) {
+      // Новый портал (fgw.egov.kz, услуга P3011) отдельным кодом сообщает, что
+      // юрлицо ЛИКВИДИРОВАНО. Резидентства это не отменяет (компания РК), но
+      // андеррайтеру важно — помечаем так же, как локальный индекс ГБД ЮЛ.
+      if (d.liquidated) {
+        return {
+          status: 'resident', nonResident: false, source: 'egov', registryStatus: 1,
+          label: 'резидент · ликвидирован', badge: 'резидент!', egovName: nm || null,
+          title: `egov (P3011): организация найдена, но ЛИКВИДИРОВАНА${nm ? ' — ' + nm : ''}`,
+        };
+      }
       return {
         status: 'resident', nonResident: false, source: 'egov', registryStatus: 0,
         label: 'резидент', badge: 'резидент', egovName: nm || null,

@@ -188,11 +188,102 @@ async function fetchGovParticipation(bin) {
       const name = decodeHtmlEntities(cells[2] || '');
       const share = cells[7] || '';
       const status = cells[8] || '';
-      return { found: true, share: share ? share + '%' : null, name, status };
+      // В строке результата есть ссылка на карточку объекта («Действия» →
+      // teaser-view/{id}). По ней доступен блок «Дополнительные сведения»:
+      // РНН, ОКПО, ОПФ, КФС, № и даты госрегистрации, блокировка, орган гос.
+      // управления, собственник, отрасли. Это и есть полное досье e-Qazyna.
+      const idMatch = row.match(/teaser-view\/(\d+)/);
+      const objectId = idMatch ? idMatch[1] : null;
+      let extra = null;
+      if (objectId) {
+        extra = await fetchGovExtra(objectId, cookieHeader).catch(() => null);
+      }
+      return { found: true, share: share ? share + '%' : null, name, status, objectId, extra };
     }
   }
 
   return { found: true, share: null, name: null, status: null };
+}
+
+// «Дополнительные сведения» карточки объекта e-Qazyna — см. комментарии ниже.
+const EQAZYNA_EXTRA_LABELS = [
+  'Идентификатор', 'БИН', 'РНН', 'ОКПО',
+  'Наименование (рус. яз)', 'Наименование (каз. яз)',
+  'ОПФ', 'КФС (уровень 4)', 'КФС',
+  '№ госрегистрации', 'Дата госрегистрации', 'Дата первичной госрегистрации',
+  'Статус', 'Блокировка', 'Орган гос.управления', 'Собственник',
+  'Отрасль (уровень 1)', 'Отрасль (уровень 4)',
+];
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// html → плоский текст с сохранением переводов строк (br и блочные теги).
+function htmlToText(html) {
+  return decodeHtmlEntities(
+    String(html)
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|tr|li|dd|dt|td|th|h\d)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+  )
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(l => l.replace(/[ \t ]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Разбор карточки: значение поля — всё до следующего известного ярлыка.
+// Так переживают многострочные значения («Орган гос.управления» несёт РНН, БИН,
+// адрес и контакты), а смена вёрстки блока (таблица ↔ div'ы) ничего не ломает.
+function parseGovExtraText(text) {
+  const hits = [];
+  const seen = [];
+  const labels = EQAZYNA_EXTRA_LABELS.slice().sort((a, b) => b.length - a.length);
+  for (const label of labels) {
+    // Ярлык — отдельная «ячейка»: с начала строки либо сразу после переноса.
+    const re = new RegExp('(^|\\n)[ \\t]*' + escapeRe(label) + '[ \\t]*:?[ \\t]*', 'g');
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const labelStart = m.index + (m[1] ? m[1].length : 0);
+      // Длинные ярлыки разбираются первыми, поэтому короткий («КФС», «БИН») не
+      // должен попадать внутрь уже занятого куска.
+      if (seen.some(([a, b]) => labelStart >= a && labelStart < b)) continue;
+      seen.push([labelStart, m.index + m[0].length]);
+      hits.push({ label, labelStart, valueStart: m.index + m[0].length });
+      break;   // карточка не повторяет поля — берём первое вхождение
+    }
+  }
+  if (hits.length < 3) return null;   // не похоже на карточку — лучше ничего
+  hits.sort((a, b) => a.labelStart - b.labelStart);
+
+  const pairs = [];
+  for (let i = 0; i < hits.length; i++) {
+    const to = i + 1 < hits.length ? hits[i + 1].labelStart : text.length;
+    let value = text.slice(hits[i].valueStart, to).trim();
+    value = value.replace(/\n?ДОПОЛНИТЕЛЬНЫЕ СВЕДЕНИЯ\n?/i, '\n').trim();
+    if (value) pairs.push([hits[i].label, value]);
+  }
+  return pairs.length ? pairs : null;
+}
+
+async function fetchGovExtra(objectId, cookieHeader) {
+  const url = 'https://gr5.e-qazyna.kz/p/ru/GrObjects/objects/teaser-view/'
+    + objectId + '?OptionName=BlockGrObjectsExtraInformation';
+  const resp = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Referer': 'https://gr5.e-qazyna.kz/p/ru/gr-search/search-objects',
+      'Cookie': cookieHeader || '',
+    },
+    redirect: 'follow',
+  });
+  if (!resp.ok) return null;
+  return parseGovExtraText(htmlToText(await resp.text()));
 }
 
 function decodeHtmlEntities(str) {

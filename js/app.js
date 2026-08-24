@@ -32,6 +32,10 @@ const App = {
         : null,
       { onUnavailable: () => App.showMsg('Сначала загрузите историю убытков.', 'error') }
     );
+    App._renderSourceLinks();
+    // Индикаторы подключения на карточках-ссылках (обе проверки пассивные).
+    App.STATGOV.init();
+    App.EGOV.init();
     App.restoreCache();
     App._restoreCase();
     App.restoreVerdict();
@@ -80,6 +84,17 @@ const App = {
     section.classList.toggle('is-open', !section.classList.contains('is-open'));
   },
 
+  // Ссылки на источники (egov P30.11 / stat.gov.kz) в шапке вкладок. Разметка
+  // лежит ОДИН раз в <template id="tpl-src-links">, отсюда клонируется в каждый
+  // маунт .js-src-links — чтобы три копии не разъезжались при правках текста.
+  _renderSourceLinks() {
+    const tpl = document.getElementById('tpl-src-links');
+    if (!tpl) return;
+    document.querySelectorAll('.js-src-links').forEach((host) => {
+      host.replaceChildren(tpl.content.cloneNode(true));
+    });
+  },
+
   // ===== РАЗДЕЛЫ (ВКЛАДКИ) =====
   // Страница разбита на разделы-вкладки. Состояние App общее и НЕ теряется
   // при переключении — мы лишь показываем/скрываем панели (.tab-panel).
@@ -102,6 +117,11 @@ const App = {
     // Блок «Печать рекомендаций ДАиП» — внизу вкладки «Проверка договоров»
     // (отдельной вкладки нет): при открытии обновляем счётчик/кнопку по BatchAR.rows.
     if (name === 'contracts' && typeof DaipPrint !== 'undefined') DaipPrint.refresh();
+    // Досье, отрисованное в скрытой вкладке, намеряло нулевые высоты карточек —
+    // пересчитать masonry теперь, когда вкладка видима.
+    if (typeof Dossier !== 'undefined' && Dossier.relayoutMounts) {
+      requestAnimationFrame(() => Dossier.relayoutMounts());
+    }
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 
@@ -149,11 +169,7 @@ const App = {
     init() {
       // Handshake расширения означает лишь «мост установлен» — не статус stat.gov.
       // Поэтому на него запускаем РЕАЛЬНУЮ проверку, а не зеленим индикатор.
-      document.addEventListener('sl:bridge-ready', () => App.STATGOV.check());
-      App.STATGOV.check();
-      // Периодический опрос (редкий, чтобы не долбить stat.gov) + при возврате на вкладку.
-      App.STATGOV._timer = setInterval(() => App.STATGOV.check(), 300000);
-      window.addEventListener('focus', () => App.STATGOV.check());
+      App._wireSourceChecks(App.STATGOV, 300000);
     },
     // Вызывается из autoLookupStatGov с результатом РЕАЛЬНОГО запроса по БИН —
     // это самый достоверный сигнал: если данные пришли, stat.gov точно работает.
@@ -165,31 +181,36 @@ const App = {
         App.STATGOV._set('nologin');
       }
     },
-    async check(manual) {
-      if (App.STATGOV._busy) return;
-      App.STATGOV._busy = true;
-      try {
-        if (typeof StatGovClient === 'undefined') { App.STATGOV._set('offline'); return; }
-        if (manual || App.STATGOV.state === 'checking') App.STATGOV._set('checking');
-        const h = await StatGovClient.health(6000).catch(() => ({ bridge: false }));
-        let state;
-        if (!h.bridge) state = 'offline';
-        else if (h.session) state = 'online';
+    check(manual) { return App._runSourceCheck(App.STATGOV, manual); },
+    // Одна попытка. Возвращает состояние; 'offline' говорит движку, что ответа
+    // от моста не было — он повторит (MV3 service worker мог просто спать).
+    async _probe() {
+      if (typeof StatGovClient === 'undefined') return 'offline';
+      const h = await StatGovClient.health(8000).catch(() => ({ bridge: false }));
+      let state;
+      if (h.bridge) {
+        if (h.session) state = 'online';
         else if (h.reachable) state = 'nologin';
         else state = 'unreachable';
-        // Окно доверия: недавно прошёл реальный лукап → не понижаем статус из-за
-        // пассивной проверки (кроме явного «расширение пропало» = offline).
-        if (state !== 'online' && state !== 'offline'
-            && (Date.now() - App.STATGOV._lastLookupOk) < App.STATGOV._TRUST_MS) {
-          state = 'online';
-        }
-        App.STATGOV._set(state);
-      } finally {
-        App.STATGOV._busy = false;
+      } else {
+        // Health не ответил. Это может быть и «нет расширения», и «stat.gov.kz
+        // висит дольше нашего таймаута». Различаем дешёвым локальным PING:
+        // мост ответил → проблема в самом stat.gov, а не в расширении.
+        const ping = await StatGovClient.ping(1500).catch(() => ({ ok: false }));
+        state = ping.ok ? 'unreachable' : 'offline';
       }
+      // Окно доверия: недавно прошёл реальный лукап → не понижаем статус из-за
+      // пассивной проверки (кроме явного «расширение пропало» = offline).
+      if (state !== 'online' && state !== 'offline'
+          && (Date.now() - App.STATGOV._lastLookupOk) < App.STATGOV._TRUST_MS) {
+        state = 'online';
+      }
+      return state;
     },
     _set(state) {
       App.STATGOV.state = state;
+      // Карточки-ссылки на источники красятся по этому состоянию.
+      App._paintSourceLinks();
       const pill = document.getElementById('statgov-pill');
       const text = document.getElementById('statgov-text');
       if (!pill || !text) return;
@@ -198,6 +219,173 @@ const App = {
       text.textContent = App.STATGOV._LABELS[state] || '';
       pill.title = App.STATGOV._TITLES[state] || '';
     },
+  },
+
+  // ===== СТАТУС СЕССИИ egov =====
+  // Зеркало App.STATGOV для второго источника. Проба СТРОГО ПАССИВНАЯ
+  // (EGOV_HEALTH читает кэш токенов, в сеть не ходит и одноразовый refresh не
+  // тратит), поэтому индикатор не добавляет ни одного обращения к egov.kz.
+  EGOV: {
+    // checking | online | nologin | unknown | offline
+    state: 'checking',
+    _timer: null,
+    _busy: false,
+    _STATES: ['checking', 'online', 'nologin', 'unknown', 'offline'],
+    _LABELS: {
+      checking: 'проверка подключения…',
+      online: 'подключено',
+      nologin: 'нужен вход на egov.kz',
+      unknown: 'откройте egov.kz',
+      offline: 'нет расширения-моста',
+    },
+    _TITLES: {
+      checking: 'Проверяем сессию egov…',
+      online: 'Сессия egov активна — проверка резидентства работает.',
+      nologin: 'Портал egov.kz открыт, но активной сессии в нём нет. Войдите — проверка резидентства заработает сама.',
+      unknown: 'Состояние сессии egov сейчас не видно: у расширения нет сохранённой пары токенов и не открыта ни одна вкладка egov.kz — прочитать портал неоткуда, поэтому ни «подключено», ни «нужен вход» писать честно нельзя. Откройте egov.kz по этой ссылке (достаточно одного раза) — статус определится сам и дальше будет держаться.',
+      offline: 'Расширение «Standard Life — мост к stat.gov.kz» не установлено или выключено. Без него резидентство проверяется только по локальному индексу ГБД ЮЛ.',
+    },
+    // Окно доверия — как у stat.gov: недавний РЕАЛЬНЫЙ ответ egov важнее
+    // пассивной пробы (access мог протухнуть между запросами, но пара жива и
+    // обновится сама). Иначе индикатор врал бы «нет сессии» на рабочем мосте.
+    _lastLookupOk: 0,
+    _TRUST_MS: 600000, // 10 минут
+    init() {
+      App._wireSourceChecks(App.EGOV, 300000);
+    },
+    // Результат РЕАЛЬНОГО запроса резидентства (из ResidentCheck.fetchEgovRaw).
+    noteLookup(ok, errorMsg) {
+      if (ok) {
+        App.EGOV._lastLookupOk = Date.now();
+        App.EGOV._set('online');
+      } else if (errorMsg && /сесси|войдите|egov\.kz|истекла|401|403/i.test(errorMsg)) {
+        App.EGOV._lastLookupOk = 0;   // сессия точно мертва — доверие сбрасываем
+        App.EGOV._set('nologin');
+      }
+    },
+    check(manual) { return App._runSourceCheck(App.EGOV, manual); },
+    async _probe() {
+      if (typeof StatGovClient === 'undefined' || !StatGovClient.egovHealth) return 'offline';
+      const h = await StatGovClient.egovHealth(5000).catch(() => ({ bridge: false }));
+      let state;
+      if (!h.bridge) state = 'offline';
+      else if (h.token) state = 'online';
+      // Пара есть, но access протух — он обновится сам при первом же запросе,
+      // это рабочее состояние, а не «нет сессии». Красным пугать не за что.
+      else if (h.hasPair && !h.paused) state = 'online';
+      // Красный — только когда мы ДЕЙСТВИТЕЛЬНО знаем, что сессии нет:
+      // портал открыт и сессии в нём не видно (tabOpen), пара была и протухла
+      // по обоим токенам (hadPair), либо только что была жёсткая неудача (paused).
+      else if (h.tabOpen || h.hadPair || h.paused) state = 'nologin';
+      // Иначе состояние портала нам взять неоткуда: ни сохранённой пары, ни
+      // открытой вкладки egov.kz. «Нужен вход» тут было бы враньём (пользователь
+      // вполне может быть залогинен), поэтому нейтральный статус с действием.
+      else state = 'unknown';
+      if ((state === 'nologin' || state === 'unknown')
+          && (Date.now() - App.EGOV._lastLookupOk) < App.EGOV._TRUST_MS) {
+        state = 'online';
+      }
+      return state;
+    },
+    _set(state) {
+      App.EGOV.state = state;
+      App._paintSourceLinks();
+    },
+  },
+
+  // ===== ДВИЖОК ПРОВЕРОК ПОДКЛЮЧЕНИЯ (общий для STATGOV и EGOV) =====
+  // Машина состояний описывает только СВОЮ пробу (_probe), всё остальное здесь.
+  //
+  // Почему не «просто вызвать check() один раз»: расширение отвечает не сразу.
+  // Content-script шлёт BRIDGE_READY на document_start (мы его ещё не слушаем) и
+  // на DOMContentLoaded, а service worker MV3 в этот момент может СПАТЬ — первая
+  // проба легко получает таймаут и красит «нет расширения», хотя мост есть.
+  // Раньше повторную проверку по 'sl:bridge-ready' глушил флаг _busy (первая ещё
+  // шла) — и ошибочный статус залипал до фокуса или до 5-минутного таймера.
+  // Теперь: (1) параллельный вызов не теряется, а ставится в очередь; (2) после
+  // загрузки страницы идёт лесенка повторов, пока ответ не станет определённым.
+  _RECHECK_LADDER_MS: [800, 2000, 5000, 12000],
+
+  _wireSourceChecks(m, periodMs) {
+    m._settleLeft = App._RECHECK_LADDER_MS.length;
+    m.check();
+    App._scheduleSettle(m, 0);
+    // Мост объявился позже старта пробы — перепроверяем немедленно.
+    document.addEventListener('sl:bridge-ready', () => { m._settleLeft = 0; m.check(); });
+    m._timer = setInterval(() => m.check(), periodMs);
+    // Возврат на вкладку: focus ловит не все случаи (переключение вкладок внутри
+    // окна), поэтому слушаем и visibilitychange. pageshow — восстановление из
+    // bfcache (кнопка «назад»): DOMContentLoaded там НЕ повторяется, а сессии за
+    // это время могли протухнуть, поэтому гоняем полную лесенку заново.
+    window.addEventListener('focus', () => m.check());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') m.check();
+    });
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      m._settleLeft = App._RECHECK_LADDER_MS.length;
+      m.check();
+      App._scheduleSettle(m, 0);
+    });
+  },
+
+  // Лесенка повторов после загрузки: пока проба отвечает 'offline' (мост молчит),
+  // пробуем ещё — с растущей паузой. Как только ответ определённый, лесенка
+  // останавливается: лишних проб не делаем.
+  _scheduleSettle(m, i) {
+    if (i >= App._RECHECK_LADDER_MS.length) return;
+    clearTimeout(m._settleTimer);
+    m._settleTimer = setTimeout(async () => {
+      if (m._settleLeft <= 0 || m.state !== 'offline') return; // уже определились
+      m._settleLeft--;
+      await m.check();
+      App._scheduleSettle(m, i + 1);
+    }, App._RECHECK_LADDER_MS[i]);
+  },
+
+  // Один прогон пробы. Пока проба в полёте, повторный вызов не теряется
+  // (_again) — иначе ответ моста, пришедший во время проверки, игнорировался бы.
+  async _runSourceCheck(m, manual) {
+    if (m._busy) { m._again = true; return; }
+    m._busy = true;
+    try {
+      if (manual) m._set('checking');
+      do {
+        m._again = false;
+        const state = await m._probe().catch(() => 'offline');
+        m._set(state);
+      } while (m._again);
+    } finally {
+      m._busy = false;
+    }
+  },
+
+  // Красит карточки-ссылки на источники по состоянию подключения:
+  // зелёная — работает, красная — нужно вмешательство (вход/расширение),
+  // нейтральная — пока проверяем (врать до первого ответа нельзя).
+  _paintSourceLinks() {
+    const paint = (sel, state, labels, titles) => {
+      document.querySelectorAll(sel).forEach((a) => {
+        // 'unknown' и 'checking' — нейтральные: состояние нам неизвестно, и
+        // красить его в любой цвет значит врать (см. историю удалённой плашки).
+        const ok = state === 'online';
+        const bad = state === 'nologin' || state === 'offline' || state === 'unreachable';
+        a.classList.toggle('is-ok', ok);
+        a.classList.toggle('is-bad', bad);
+        a.classList.toggle('is-checking', !ok && !bad);
+        const el = a.querySelector('.src-link-state');
+        if (el) el.textContent = labels[state] || '';
+        a.title = titles[state] || '';
+      });
+    };
+    paint('.js-src-egov', App.EGOV.state, App.EGOV._LABELS, App.EGOV._TITLES);
+    // У stat.gov подписи длиннее (это был текст плашки) — для карточки режем
+    // префикс «stat.gov.kz · », он уже есть в заголовке.
+    const sgLabels = {};
+    for (const k of Object.keys(App.STATGOV._LABELS)) {
+      sgLabels[k] = App.STATGOV._LABELS[k].replace(/^stat\.gov\.kz\s·\s/, '');
+    }
+    paint('.js-src-statgov', App.STATGOV.state, sgLabels, App.STATGOV._TITLES);
   },
 
   // ===== VERDICT SELECTOR =====
@@ -526,8 +714,9 @@ const App = {
   // регистрации из stat.gov.kz). Срабатывает и в режиме быстрой проверки по
   // БИН, и при загруженной заявке. Скидка для таких компаний не применяется.
   _updateYoungCompanyAlert() {
-    // Алерт показывается в обеих вкладках с профилем («Проверка контрагента»
-    // и «Андеррайтинговое решение») — broadcast по классу .js-young-alert.
+    // Алерт живёт ТОЛЬКО в «Андеррайтинговом решении» (broadcast по классу
+    // .js-young-alert). С «Проверки контрагента» убран по просьбе пользователя:
+    // там премия/скидка не считаются, а возраст компании виден в досье.
     const els = document.querySelectorAll('.js-young-alert');
     if (!els.length) return;
     const hide = () => els.forEach(el => { el.classList.remove('visible'); el.innerHTML = ''; });
@@ -1799,8 +1988,10 @@ const App = {
       if (App.zayavka.bin) {
         App.autoLookupBIN(App.zayavka.bin);
         App.autoLookupStatGov(App.zayavka.bin);
-        // statsnet — отдельно, дольше (открывает background-вкладки)
-        App.autoLookupStatsnet(App.zayavka.bin);
+        // statsnet НЕ запускаем автоматически: он ищет через Яндекс с открытием
+        // background-вкладок и занимает 30–60 секунд — из-за него вся проверка
+        // выглядела «зависшей». Запуск — только кнопкой «Найти отрасль».
+        App.statsnet = null;
       }
 
       // Show preview
@@ -2131,10 +2322,15 @@ const App = {
     // Параллельные проверки. Каждая по готовности сама дёргает showPreview;
     // финальный _refreshDerivedData ниже — чтобы всё сошлось (адрес, гос.
     // участие, ОКЭДы, класс риска, алерт молодой компании).
+    // statsnet сюда НЕ входит: его Яндекс-поиск с background-вкладками занимал
+    // 30–60 секунд, и вся проверка казалась «долгой» (stat.gov сам по себе
+    // отвечает за 1–2 секунды, как и в пакетной проверке). Отрасль — по кнопке.
+    App.statsnet = null;
+    // Явная проверка по БИН: снять паузу egov (пользователь мог войти на портал).
+    if (typeof ResidentCheck !== 'undefined' && ResidentCheck.egovRetryNow) ResidentCheck.egovRetryNow();
     await Promise.allSettled([
       App.autoLookupBIN(bin),
       App.autoLookupStatGov(bin),
-      App.autoLookupStatsnet(bin),
     ]);
     App._refreshDerivedData();
   },
@@ -2254,11 +2450,11 @@ const App = {
     const statusZ = document.getElementById('status-zayavka');
     if (statusZ) statusZ.textContent = `Ручной ввод — БИН ${bin}`;
 
-    // Запустить автолукапы (БИН-Worker + stat.gov.kz + statsnet).
-    // Эти вызовы async, но они сами синхронно вызывают showPreview/renderCompanyOkeds.
+    // Запустить автолукапы (БИН-Worker + stat.gov.kz). statsnet — только по
+    // кнопке: он медленный и открывает background-вкладки.
     App.autoLookupBIN(bin);
     App.autoLookupStatGov(bin);
-    App.autoLookupStatsnet(bin);
+    App.statsnet = null;
 
     App._persistCase();
     // Единая точка обновления UI/превью/аналитики/snapshot — иначе при
@@ -2467,7 +2663,9 @@ const App = {
       App.refData.normativ = ExcelReader.readNormativ(App._rawNormativBuffer, App.zayavka.periodFrom || docDate);
       App._applyRefOverrides('normativ');
     }
-    if (bin) { App.autoLookupBIN(bin); App.autoLookupStatGov(bin); App.autoLookupStatsnet(bin); }
+    // statsnet — только по кнопке: он медленный и открывает background-вкладки.
+    if (bin) { App.autoLookupBIN(bin); App.autoLookupStatGov(bin); }
+    App.statsnet = null;
     App.onOkedChange();
     App.onPaymentChange();
     // Показать выбранную компанию в форме ручного ввода (данные из реестра) — чтобы
@@ -2538,179 +2736,9 @@ const App = {
     const grids = document.querySelectorAll('.js-preview-grid');
     if (!grids.length) return;
 
-    const resolved = App._resolveOked();
-
-    // === Источник истины: stat.gov.kz (если доступен), иначе — заявка ===
-    const sg = (App.statgov && !App.statgov.loading && !App.statgov.error && App.statgov.found !== false)
-      ? App.statgov : null;
-
-    // Активные значения для документов (через _resolveOked)
-    const effOked = resolved.oked || z.oked || '';
-    const effClass = resolved.riskClass || z.riskClass;
-    const effTariff = App._resolveTariff ? App._resolveTariff(effClass) : null;
-
-    // Имя деятельности для активного ОКЭДа: если primary statgov — okedPrimaryName,
-    // иначе из classifier через _collectCompanyOkeds
-    let effActivityName = resolved.activity;
-    if (sg && effOked === sg.okedPrimaryCode && sg.okedPrimaryName) {
-      effActivityName = sg.okedPrimaryName;
-    } else if (App._collectCompanyOkeds) {
-      const co = App._collectCompanyOkeds().find(o => o.code === effOked);
-      if (co && co.name) effActivityName = co.name;
-    }
-
-    // Эффективные финансы с учётом overrides (аффилирован, young, НС).
+    // Эффективные финансы с учётом overrides (аффилирован, young, НС) —
+    // нужны только бейджам no-discount ниже; сами поля показывает досье.
     const effFin = App._effectiveFinancials(z);
-    const insurerName = sg?.name ? Utils.formatCompanyName(sg.name) : Utils.formatCompanyName(z.insurerName);
-
-    // Сборка всех ОКЭДов компании (primary + secondary) с их названиями.
-    const companyOkeds = App._collectCompanyOkeds ? App._collectCompanyOkeds() : [];
-    let okedsBlockHtml = '';
-    if (companyOkeds.length > 0) {
-      okedsBlockHtml = companyOkeds.map(o => {
-        const kindLabel = o.kind === 'primary' ? 'основной' : 'вторичный';
-        const isActive = o.code === effOked;
-        const activeBadge = isActive ? ' <span class="pi-active-badge">активный</span>' : '';
-        // Класс и тариф per-OKED. Тариф — по классу из справочника (как «Страховой
-        // тариф» в профиле), fallback на тариф из калькулятора.
-        const okCls = (o.riskClass != null) ? o.riskClass : null;
-        const okTar = (okCls != null && App._resolveTariff) ? App._resolveTariff(okCls) : null;
-        const okTarVal = (okTar != null && !isNaN(okTar)) ? okTar : o.tariff;
-        const classStr = okCls != null ? `кл. ${okCls}` : '<span class="muted">—</span>';
-        const tariffStr = (okTarVal != null && !isNaN(okTarVal)) ? Utils.fmtPct(okTarVal) : '<span class="muted">—</span>';
-        return `<div class="pi-oked-row${isActive ? ' pi-oked-row--active' : ''}">
-          <span class="pi-oked-code">${o.code}</span>
-          <span class="pi-oked-kind">(${kindLabel})${activeBadge}</span>
-          <span class="pi-oked-class">${classStr}</span>
-          <span class="pi-oked-tariff">${tariffStr}</span>
-          <span class="pi-oked-name">${o.name || '<em class="muted">нет в классификаторе</em>'}</span>
-        </div>`;
-      }).join('');
-    } else if (effOked) {
-      const fbClassStr = effClass != null ? `кл. ${effClass}` : '<span class="muted">—</span>';
-      const fbTariffStr = (effTariff != null && !isNaN(effTariff)) ? Utils.fmtPct(effTariff) : '<span class="muted">—</span>';
-      okedsBlockHtml = `<div class="pi-oked-row pi-oked-row--active">
-        <span class="pi-oked-code">${effOked}</span>
-        <span class="pi-oked-kind">(активный)</span>
-        <span class="pi-oked-class">${fbClassStr}</span>
-        <span class="pi-oked-tariff">${fbTariffStr}</span>
-        <span class="pi-oked-name">${effActivityName || '<em class="muted">—</em>'}</span>
-      </div>`;
-    }
-
-    // НС: header + разбивка по годам в multi-line HTML формате.
-    let nsHtml = 'НС не было';
-    if (App.claims && App.claims.totalClaims > 0) {
-      const total = App.claims.totalClaims;
-      const byYear = App.claims.analytics?.byYear || [];
-      const sumTotal = App.claims.analytics?.sumTotal3y || 0;
-      const fmtTg = (v) => Utils.fmtMoney(v);
-      const header = `За последние 3 года — <strong>${total} НС</strong> (сумма: ${fmtTg(sumTotal)})`;
-      // Полный диапазон периода: "27.05.2023 — 26.05.2024" — чтобы сразу
-      // было видно, из какой по какую дату посчитали 12-мес. период.
-      // Fallback на короткий label, потом на год (для устаревшего кэша).
-      const yearLines = byYear
-        .sort((a, b) => a.year - b.year)
-        .map(b => `<div class="pi-claims-year"><span class="pi-claims-year-num">${b.labelRange || b.label || b.year}:</span> ${b.cases} НС (${fmtTg(b.sum)})</div>`)
-        .join('');
-      nsHtml = `<div class="pi-claims-header">${header}</div>${yearLines}`;
-    }
-
-    // ========== ОСНОВНАЯ ИНФОРМАЦИЯ (всегда видна) ==========
-    // Юридический адрес — ТОЛЬКО из stat.gov.kz (statgov). Без fallback на
-    // pk.uchet.kz — это другой источник с другим форматом, и пользователь
-    // хочет видеть только данные из официального реестра.
-    const statgovLoading = App.statgov?.loading === true;
-    const statgovDone = App.statgov && !App.statgov.loading;
-    const legalAddress = sg?.legalAddress
-      || (statgovLoading ? '(поиск в stat.gov.kz...)' : '—');
-    // Гос. участие — статгов не отдаёт, единственный источник pk.uchet.kz worker.
-    const binLoading = App.binData?.loading === true;
-    const sgGov = App.binData.govParticipation || z.govParticipation
-      || (binLoading ? '(поиск...)' : '—');
-    const premiumWithCoeffDisplay = (effFin.noDiscountReason || !effFin.coeffDown || effFin.premiumWithCoeff === effFin.premiumBase)
-      ? '—'
-      : Utils.fmtMoney(effFin.premiumWithCoeff);
-
-    const mainRows = [
-      ['БИН', z.bin],
-      ['Наименование', insurerName],
-      sg?.registrationDate ? ['Дата регистрации', sg.registrationDate] : null,
-      ['Юридический адрес', legalAddress],
-      ['Гос. участие', sgGov],
-      // Резидентство: Страхователь и Контрагент — отдельные строки (разные БИН).
-      // Метка «(страхователь)» появляется только когда есть отдельный контрагент.
-      [App._hasDistinctContragent() ? 'Признак резидентства (страхователь)' : 'Признак резидентства', App._residencyHtml()],
-      App._hasDistinctContragent() ? ['Признак резидентства (контрагент)', App._residencyContrHtml()] : null,
-      ['Класс риска', effClass || '—'],
-      ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
-      ['Страховая сумма', Utils.fmtMoney(effFin.insuranceSum)],
-      ['Работники', Utils.fmtInteger(z.workers)],
-      ['Страховая премия', Utils.fmtMoney(effFin.premiumBase)],
-      ['Премия с поправкой', premiumWithCoeffDisplay],
-      ['Регион', z.region || '—'],
-      ['Период страхования', (z.periodFrom && z.periodTo)
-        ? `${Utils.fmtDateShort(z.periodFrom)} — ${Utils.fmtDateShort(z.periodTo)}` : '—'],
-      ['Порядок оплаты', z.paymentOrder || '—'],
-      ['Страховые случаи', nsHtml],
-    ].filter(Boolean);
-
-    // ========== ПОДРОБНОСТИ (скрыты по умолчанию) ==========
-    const detailRows = [];
-    if (sg?.headFullname) detailRows.push(['ФИО руководителя', sg.headFullname]);
-    if (sg?.kato) detailRows.push(['КАТО', sg.kato]);
-    if (sg?.krpWithBranchesCode) detailRows.push(['Код КРП (с учётом филиалов)', sg.krpWithBranchesCode]);
-    if (sg?.krpWithBranchesName) detailRows.push(['Наименование КРП (с учётом филиалов)', sg.krpWithBranchesName]);
-    if (sg?.krpWithoutBranchesCode) detailRows.push(['Код КРП (без учёта филиалов)', sg.krpWithoutBranchesCode]);
-    if (sg?.krpWithoutBranchesName) detailRows.push(['Наименование КРП (без учёта филиалов)', sg.krpWithoutBranchesName]);
-    if (sg?.kfsCode) detailRows.push(['Код КФС', sg.kfsCode]);
-    if (sg?.kfsName) detailRows.push(['Наименование КФС', sg.kfsName]);
-    if (sg?.sectorCode) detailRows.push(['Код сектора экономики', sg.sectorCode]);
-    if (sg?.sectorName) detailRows.push(['Наименование сектора экономики', sg.sectorName]);
-    detailRows.push(['Дата заявки', z.docDate ? Utils.fmtDateShort(z.docDate) : '—']);
-
-    const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    // Денежные поля — выделить моноширинным шрифтом
-    const MONEY_FIELDS = new Set(['Страховая сумма', 'Страховая премия', 'Премия с поправкой']);
-    // Длинные текстовые поля занимают всю ширину (избегаем колонок с переносами)
-    const BIG_FIELDS = new Set(['Наименование', 'Юридический адрес', 'Страховые случаи',
-      'Наименование КРП (с учётом филиалов)', 'Наименование КРП (без учёта филиалов)',
-      'Наименование КФС', 'Наименование сектора экономики']);
-    // SVG-иконка «copy» (двойные прямоугольники) — кладём inline для консистентности
-    const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    const renderItems = (rows) => rows.map(([l, v]) => {
-      const display = (v == null || v === '') ? '—' : v;
-      // Спец-кейс: «Страховые случаи» рендерится как HTML-блок (multi-line)
-      // без кнопки копирования (она бы скопировала html-теги).
-      if (l === 'Страховые случаи') {
-        return `<div class="preview-item preview-item--big preview-item--claims">
-          <span class="pi-label">${l}</span>
-          <div class="pi-claims-block">${display}</div>
-        </div>`;
-      }
-      // «Признак резидентства» (страхователь / контрагент) — готовый HTML
-      // (бейдж + источник), копировать нечего.
-      if (l.startsWith('Признак резидентства')) {
-        return `<div class="preview-item">
-          <span class="pi-label">${l}</span>
-          <span class="pi-value-row"><span class="pi-value">${display}</span></span>
-        </div>`;
-      }
-      const canCopy = display !== '—' && display !== '(поиск...)';
-      const copyBtn = canCopy
-        ? `<button class="pi-copy" title="Скопировать" onclick="App.copyToClipboard('${escAttr(display)}', this)">${COPY_ICON}</button>`
-        : '';
-      const cls = ['preview-item'];
-      if (MONEY_FIELDS.has(l)) cls.push('preview-item--money');
-      if (BIG_FIELDS.has(l)) cls.push('preview-item--big');
-      return `<div class="${cls.join(' ')}">
-        <span class="pi-label">${l}</span>
-        <span class="pi-value-row">
-          <span class="pi-value">${display}</span>
-          ${copyBtn}
-        </span>
-      </div>`;
-    }).join('');
 
     // Бейджи no-discount: остался только young_company (возраст компании
     // не виден в основной информации). «Скидка не применяется из-за НС» убрано —
@@ -2733,40 +2761,15 @@ const App = {
       sgStatus = `<div class="preview-section"><div class="pi-warn">БИН ${App.statgov.bin || ''} не найден в реестре stat.gov.kz.</div></div>`;
     }
 
-    // Состояние раскрытия только для «Подробностей» (ОКЭДы теперь всегда видны)
-    const detailsOpen = localStorage.getItem('preview_details_open') === '1';
-
-    // ОКЭДы и Подробности объединены в один сворачиваемый блок «Подробности»
-    const okedsCount = companyOkeds.length || (effOked ? 1 : 0);
-    const okedsSubBlock = `
-      <div class="pi-subsection">
-        <div class="pi-subsection-title">ОКЭДы и виды деятельности <span class="pi-count">${okedsCount}</span></div>
-        ${okedsBlockHtml || '<div class="muted">— нет данных, загрузите заявку или подождите statgov</div>'}
-      </div>`;
-    const detailsSubBlock = detailRows.length ? `
-      <div class="pi-subsection">
-        <div class="pi-subsection-title">Реквизиты <span class="pi-count">${detailRows.length}</span></div>
-        <div class="pi-subsection-grid">${renderItems(detailRows)}</div>
-      </div>` : '';
-    const collapsibleTotal = okedsCount + detailRows.length;
-
+    // Профильной карточки «Основная информация» (+ОКЭДы, +Подробности) здесь
+    // больше НЕТ — по просьбе пользователя вкладка «Андеррайтинговое решение»
+    // показывает то же досье, что и «Проверка контрагента»: баннер с KPI,
+    // партийные карточки, «Деятельность и тариф», источники. Остаются только
+    // алерты про скидку и статус-плашка stat.gov.kz (ошибка/не найден —
+    // с подсказкой про расширение).
     const gridHtml =
       badges.join('') +
-      `<div class="preview-section">
-        <div class="preview-section-title">Основная информация</div>
-        ${renderItems(mainRows)}
-        ${okedsSubBlock}
-      </div>` +
-      (detailRows.length > 0 ? `<div class="preview-section preview-collapsible ${detailsOpen ? 'is-open' : ''}" id="preview-details-section">
-        <div class="preview-section-title preview-section-title--clickable" onclick="App.togglePreviewDetails()">
-          <span class="section-chevron">▸</span>
-          Подробности (руководитель, КРП, КФС, КАТО, сектор, дата заявки)
-          <span class="pi-count">${detailRows.length}</span>
-        </div>
-        <div class="preview-collapsible-body">
-          ${detailsSubBlock}
-        </div>
-      </div>` : '') +
+      `<div class="ds-mount" id="dossier-decision"></div>` +
       sgStatus;
 
     grids.forEach(g => { g.innerHTML = gridHtml; });
@@ -2778,39 +2781,24 @@ const App = {
     // работников, периода и НС — они тут не считаются (lookupOnly).
     const cGrid = document.getElementById('preview-grid-contractor');
     if (cGrid) {
-      const regVal = sg?.registrationDate || (statgovLoading ? '(поиск...)' : '—');
-      // Первая строка — компактная тройка: БИН · Дата регистрации · Гос. участие.
-      const rowKey = renderItems([['БИН', z.bin], ['Дата регистрации', regVal], ['Гос. участие', sgGov]]);
-      const rowName = renderItems([['Наименование', insurerName], ['Юридический адрес', legalAddress]]);
-      const rowRisk = renderItems([['Класс риска', effClass || '—'], ['Страховой тариф', effTariff != null ? Utils.fmtPct(effTariff) : '—'],
-        ['Признак резидентства', App._residencyHtml()]]);
-      // ИИ-советник: подобрать ОКЭД/класс для договора по ОКЭДам + должностям.
+      // Старой карточки «Информация о контрагенте» (БИН/адрес/дата/класс/тариф/
+      // резидентство + список ОКЭДов) здесь больше НЕТ — по просьбе пользователя:
+      // всё это показывает досье ниже (баннер с KPI, «Основная информация»,
+      // «Деятельность и тариф»), и карточка его дублировала. Баннеров про скидку
+      // (badges) тут тоже НЕТ — на этой вкладке премия/скидка не считаются,
+      // предупреждение живёт в «Андеррайтинговом решении». Остаются ИИ-советник
+      // по ОКЭД и само досье. Dossier перерисовывает только свой контейнер,
+      // чтобы догрузка источников не дёргала showPreview (иначе цикл).
       const advisorHtml = App._okedAdvisorHtml();
-      const contractorHtml =
-        badges.join('') +
+      cGrid.innerHTML =
         `<div class="preview-section preview-section--contractor">
-          <div class="preview-section-title">Информация о контрагенте</div>
-          <div class="ci-grid ci-grid--3">${rowKey}</div>
-          <div class="ci-grid ci-grid--1">${rowName}</div>
-          <div class="ci-grid ci-grid--3">${rowRisk}</div>
-          ${okedsSubBlock}
           ${advisorHtml}
-        </div>` +
-        sgStatus;
-      cGrid.innerHTML = contractorHtml;
+          <div class="ds-mount" id="dossier-contractor"></div>
+        </div>`;
+      if (typeof Dossier !== 'undefined') Dossier.renderSingle();
     }
     // Блок советника на вкладке «Андеррайтинговое решение» (отдельный маунт).
     App._renderOkedAdvisor();
-  },
-
-  togglePreviewDetails() {
-    // «Подробности» рендерятся в обе панели профиля (одинаковый id) — синхронно
-    // переключаем все, чтобы состояние не рассыпалось между вкладками.
-    const els = document.querySelectorAll('.preview-collapsible');
-    if (!els.length) return;
-    const open = !els[0].classList.contains('is-open');
-    els.forEach(el => el.classList.toggle('is-open', open));
-    localStorage.setItem('preview_details_open', open ? '1' : '0');
   },
 
   // Открывает выбранный AI-сервис с пред-заполненным промптом про компанию.

@@ -45,6 +45,32 @@
   </header>
   <div class="container">
 
+    <!-- Ссылки на источники — ОДИН шаблон на всё приложение. Раскладывается в
+         каждый маунт .js-src-links (App._renderSourceLinks из App.init):
+         вкладки «Проверка Договоров», «Проверка контрагента» и
+         «Андеррайтинговое решение». Держим в одном месте, чтобы три копии
+         разметки не разъезжались. Порталы открываются вручную — там же вход,
+         от которого зависят наши автоматические проверки (ЭЦП-сессия
+         stat.gov.kz и Bearer-сессия egov). -->
+    <template id="tpl-src-links">
+      <a class="src-link js-src-egov is-checking" href="https://egov.kz/services/P30.11/#/declaration///" target="_blank" rel="noopener noreferrer">
+        <span class="src-link-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></span>
+        <span class="src-link-body">
+          <span class="src-link-t">egov.kz <span class="src-link-state"></span></span>
+          <span class="src-link-s">Резидентство: Выдача справки о регистрации (перерегистрации) юридических лиц, об учетной регистрации (перерегистрации) их филиалов и представительств • справка P30.11</span>
+        </span>
+        <span class="src-link-ext" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+      </a>
+      <a class="src-link js-src-statgov is-checking" href="https://stat.gov.kz/ru/cabinet/juridical/by/bin/" target="_blank" rel="noopener noreferrer">
+        <span class="src-link-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <span class="src-link-body">
+          <span class="src-link-t">stat.gov.kz <span class="src-link-state"></span></span>
+          <span class="src-link-s">Поиск юридического лица или индивидуального предпринимателя</span>
+        </span>
+        <span class="src-link-ext" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+      </a>
+    </template>
+
     <!-- ============ Раздел 1: Справочники ============ -->
     <section class="tab-panel is-active" id="tab-refs" role="tabpanel" aria-labelledby="tabbtn-refs">
     <!-- Reference files (uploaded once, cached) — раскрывающийся раздел -->
@@ -253,6 +279,9 @@
 
     <!-- ============ Раздел 2: Проверка Договоров (массовая генерация АР из реестра) ============ -->
     <section class="tab-panel" id="tab-contracts" role="tabpanel" aria-labelledby="tabbtn-contracts">
+    <!-- Ссылки на источники — в самом верху вкладки, до блоков (просьба
+         пользователя). Наполняет App._renderSourceLinks из #tpl-src-links. -->
+    <div class="src-links js-src-links"></div>
     <!-- Загрузка ежедневной выгрузки договоров (.xlsx) → заполненные .docx
          «Андеррайтинговое решение» по каждой строке (форма «АРешение»).
          Имена файлов «АР {БИН}.docx», пакетом в ZIP. -->
@@ -436,6 +465,8 @@
 
     <!-- ============ Раздел 3: Проверка контрагента (быстрая проверка по БИН) ============ -->
     <section class="tab-panel" id="tab-contractor" role="tabpanel" aria-labelledby="tabbtn-contractor">
+    <!-- Ссылки на источники (см. #tpl-src-links). -->
+    <div class="src-links js-src-links"></div>
     <div class="section">
       <div class="section-title">Проверка контрагента по БИН</div>
       <p class="section-sub">Введите БИН/ИИН — приложение проверит компанию в реестрах (stat.gov.kz, гос. участие, аффилированные лица, юр. адрес, дата регистрации).</p>
@@ -449,11 +480,11 @@
           🔎 Проверить БИН
         </button>
       </div>
-      <!-- Alert: компания моложе 3 лет. Тот же рендер, что и в андеррайтинге. -->
-      <div class="avg-salary-alert js-young-alert" id="young-company-alert-contractor"></div>
-      <!-- Профиль контрагента — фокусный рендер (showPreview пишет сюда отдельно:
-           только БИН, наименование, юр. адрес, дата рег., гос. участие, ОКЭДы,
-           класс риска, тариф). Панель видима через .js-preview-panel, но грид
+      <!-- Алертов про скидку («компания моложе 3 лет») здесь НЕТ намеренно:
+           на этой вкладке премия/скидка не считаются, предупреждение живёт
+           только в «Андеррайтинговом решении». Возраст компании виден в досье. -->
+      <!-- Профиль контрагента = досье (showPreview пишет сюда отдельно: советник
+           по ОКЭД + Dossier). Панель видима через .js-preview-panel, но грид
            без .js-preview-grid — общий полный рендер его не заполняет. -->
       <div class="preview-panel js-preview-panel" id="preview-panel-contractor">
         <div class="preview-grid" id="preview-grid-contractor"></div>
@@ -463,6 +494,8 @@
 
     <!-- ============ Раздел 4: Андеррайтинговое решение ============ -->
     <section class="tab-panel" id="tab-decision" role="tabpanel" aria-labelledby="tabbtn-decision">
+    <!-- Ссылки на источники (см. #tpl-src-links). -->
+    <div class="src-links js-src-links"></div>
     <!-- Per-case files -->
     <div class="section">
       <div class="section-title">
@@ -887,6 +920,7 @@
   <script src="js/batch-reader.js"></script>
   <script src="js/ar-form.js"></script>
   <script src="js/batch-ar.js"></script>
+  <script src="js/dossier.js"></script>
   <script src="js/daip-print.js"></script>
   <script src="js/app.js"></script>
 </body>

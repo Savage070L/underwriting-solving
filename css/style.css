@@ -354,6 +354,81 @@ header.app-header {
 }
 
 /* ==========================================================================
+   Ссылки на источники — узкая полоса в самом верху вкладок «Проверка
+   Договоров» и «Проверка контрагента»: открыть egov / stat.gov вручную
+   (там же вход, от которого зависят наши автоматические проверки).
+   ========================================================================== */
+.src-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.src-link {
+  /* На всю ширину: две карточки делят строку поровну; на узком экране
+     переносятся (flex-basis 320px — минимум до переноса). */
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--c-surface-elevated);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.src-link:hover {
+  border-color: #c7d2fe;
+  box-shadow: 0 6px 14px -8px rgba(79, 70, 229, 0.45);
+  transform: translateY(-1px);
+}
+.src-link-ico {
+  width: 36px; height: 36px; flex: 0 0 auto;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  color: #4f46e5;
+  display: flex; align-items: center; justify-content: center;
+}
+.src-link-ico svg { width: 19px; height: 19px; }
+.src-link-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.src-link-t { font-size: 0.9rem; font-weight: 700; color: var(--c-text-primary); line-height: 1.2; }
+/* Полное название услуги — длинное, переносим по словам (не обрезаем: андеррайтеру
+   важно видеть, какая именно справка за ссылкой). */
+.src-link-s { font-size: 0.76rem; color: var(--c-text-secondary); line-height: 1.35; overflow-wrap: anywhere; }
+.src-link-ext { color: #94a3b8; display: flex; flex: 0 0 auto; }
+.src-link-ext svg { width: 14px; height: 14px; }
+.src-link:hover .src-link-ext { color: #4f46e5; }
+
+/* Статус подключения к источнику. Зелёная — работает; красная — нужно
+   вмешательство (вход в портал / включить расширение), и тогда сама ссылка
+   и есть лекарство. Пока проверяем — нейтральная: врать до первого ответа
+   нельзя (из-за ложного «недоступен» в прошлом убрали плашку в шапке). */
+.src-link-state {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.01em;
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;
+}
+.src-link.is-ok {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+.src-link.is-ok .src-link-ico { background: linear-gradient(135deg, #dcfce7, #bbf7d0); color: #15803d; }
+.src-link.is-ok .src-link-state { background: #dcfce7; color: #15803d; border-color: #86efac; }
+.src-link.is-ok:hover { border-color: #4ade80; box-shadow: 0 6px 14px -8px rgba(22, 163, 74, 0.5); }
+.src-link.is-bad {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+.src-link.is-bad .src-link-ico { background: linear-gradient(135deg, #fee2e2, #fecaca); color: #b91c1c; }
+.src-link.is-bad .src-link-state { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+.src-link.is-bad:hover { border-color: #f87171; box-shadow: 0 6px 14px -8px rgba(220, 38, 38, 0.5); }
+.src-link-t { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ==========================================================================
    Upload zones (reference files + per-case)
    ========================================================================== */
 .upload-grid {
@@ -3680,3 +3755,522 @@ tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn 
 .batch-sg--load { color: #b45309; }
 .batch-sg--ok   { color: #047857; }
 .batch-sg--err  { color: #b42318; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ДОСЬЕ (js/dossier.js) — карточка клиента.
+   Концепция: баннер-шапка (БИН, наименование, статус-пилюли, KPI-плитки
+   договора) → зоны «Компания» / «Договор» / «Проверка и источники», каждая
+   со своим заголовком и своей сеткой в 3 колонки. Карточки различаются
+   тонированной шапкой по типу: компания=индиго, договор=голубой,
+   деньги=изумруд, риск=янтарь, служебное=серый.
+   Стили общие для отдельной вкладки и встроенного блока «Проверки контрагента».
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Кликабельный БИН в таблице реестра. Не кнопка — в HTML-отчёте обработчики
+   снимаются, и остаётся обычный текст. */
+.batch-id-link {
+  cursor: pointer;
+  border-bottom: 1px dashed #94a3b8;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.batch-id-link:hover { color: #4338ca; border-bottom-color: #6366f1; }
+.batch-id-link:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+
+/* Встроенное досье во вкладке «Проверка контрагента». */
+.ds-mount { grid-column: 1 / -1; margin-top: 6px; }
+.ds-mount:empty { display: none; }
+
+/* ── Баннер-шапка ───────────────────────────────────────────────────── */
+.ds-head {
+  position: relative;
+  padding: 22px 26px 20px;
+  border: 1px solid #e3e9f4;
+  border-radius: 20px;
+  background:
+    radial-gradient(1200px 320px at 105% -40%, rgba(99, 102, 241, 0.10), transparent 60%),
+    radial-gradient(900px 260px at -5% 120%, rgba(14, 165, 233, 0.07), transparent 55%),
+    #ffffff;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.ds-head-role { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1.2px; color: #94a3b8; font-weight: 800; }
+.ds-head-id-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 8px 0 6px; }
+.ds-id {
+  font-size: 2rem;
+  font-weight: 850;
+  color: #0f172a;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.ds-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+/* Правая группа шапки: карточка «Лимит» (орган решения) слева от «Регион/Автор». */
+.ds-head-side { display: flex; align-items: stretch; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+/* Правый блок шапки — класс риска и тариф (референс). */
+.ds-risk { display: flex; align-items: center; gap: 14px; padding: 12px 18px; background: rgba(255, 255, 255, 0.9); border: 1px solid #e6ecf5; border-radius: 16px; }
+.ds-risk-ico {
+  width: 46px; height: 46px; border-radius: 13px;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 16px -8px rgba(37, 99, 235, 0.6);
+}
+.ds-risk-ico svg { width: 22px; height: 22px; }
+.ds-risk-l { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.8px; color: #94a3b8; font-weight: 800; }
+.ds-risk-v { font-size: 1.5rem; font-weight: 850; color: #0f172a; line-height: 1.1; }
+.ds-risk-v--sm { font-size: 1rem; font-weight: 750; max-width: 260px; white-space: normal; }
+.ds-risk-t b { font-weight: 650; }
+.ds-risk-t { font-size: 0.8rem; color: #64748b; }
+.ds-risk-t b { color: #0f172a; }
+/* «Копировать» — кнопка-иконка; обработчик инлайновый (см. dossier.js). */
+.ds-copy {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid #dbe3f0;
+  background: rgba(255, 255, 255, 0.85);
+  color: #64748b;
+  border-radius: 9px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ds-copy:hover { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.ds-copy.is-done { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+.ds-copy svg { width: 15px; height: 15px; }
+.ds-copy .ds-ico-check { display: none; }
+.ds-copy.is-done .ds-ico-copy { display: none; }
+.ds-copy.is-done .ds-ico-check { display: inline-flex; }
+.ds-copy--sm { width: 24px; height: 24px; border-radius: 7px; vertical-align: middle; }
+.ds-copy--sm svg { width: 12px; height: 12px; }
+.ds-head-name { color: #1f2937; font-size: 1.05rem; font-weight: 600; line-height: 1.45; max-width: 72ch; }
+
+/* Статусные пилюли шапки и карточек. */
+.ds-pill {
+  display: inline-block;
+  padding: 4px 13px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.ds-pill--good  { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+.ds-pill--bad   { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
+.ds-pill--warn  { background: #fef3c7; color: #b45309; border-color: #fde68a; }
+.ds-pill--info  { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+.ds-pill--muted { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+.ds-pill--class  { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+.ds-pill--tariff { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+
+/* KPI-плитки договора внутри баннера. */
+.ds-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.ds-kpi {
+  /* Ширина по содержимому: «ПК = 1» узкая, «Страховая сумма» не переносится. */
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e6ecf5;
+  border-radius: 14px;
+  padding: 10px 16px 10px 12px;
+}
+.ds-kpi-ico {
+  width: 38px; height: 38px; border-radius: 11px;
+  background: #eaf1ff;
+  color: #2563eb;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ds-kpi-ico svg { width: 18px; height: 18px; }
+.ds-kpi-l { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.8px; color: #94a3b8; font-weight: 800; white-space: nowrap; }
+.ds-kpi-v { font-size: 1.18rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; margin-top: 3px; white-space: nowrap; }
+.ds-kpi.is-warn .ds-kpi-v { color: #b45309; }
+.ds-kpi.is-bad .ds-kpi-v { color: #b91c1c; }
+
+/* ── Зоны ───────────────────────────────────────────────────────────── */
+.ds-zone {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 2px 12px;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: #8a94a6;
+  font-weight: 800;
+}
+.ds-zone::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, #dfe6f0, transparent); }
+
+/* ── Сетка: 3 карточки в ряд ────────────────────────────────────────── */
+.ds-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+/* Masonry-режим включает Dossier._layout после замера высот: строка 4px,
+   карточка занимает span по фактической высоте — без дыр под короткими.
+   dense — чтобы одинарные затекали в хвосты за широкими. Без JS — обычная сетка. */
+.ds-grid--masonry {
+  grid-auto-rows: 4px;
+  row-gap: 0;
+  align-items: stretch;
+  grid-auto-flow: row dense;
+}
+.ds-grid--masonry > .ds-card { margin-bottom: 16px; align-self: start; }
+.ds-card--wide { grid-column: span 2; }
+.ds-card--full { grid-column: 1 / -1; }
+
+/* ── Карточка ───────────────────────────────────────────────────────── */
+.ds-card {
+  border: 1px solid #e7ecf3;
+  border-radius: 18px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 28px -24px rgba(15, 23, 42, 0.28);
+}
+.ds-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+}
+.ds-card-ico {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #fff;
+  color: #64748b;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+}
+.ds-card-ico svg { width: 15px; height: 15px; }
+.ds-card--company .ds-card-ico { color: #4f46e5; }
+.ds-card--deal .ds-card-ico { color: #0284c7; }
+.ds-card--money .ds-card-ico { color: #059669; }
+.ds-card--risk .ds-card-ico { color: #d97706; }
+.ds-card-title {
+  font-size: 0.92rem;
+  font-weight: 750;
+  color: #111827;
+  letter-spacing: 0;
+}
+.ds-card-head .ds-card-right { margin-left: auto; }
+.ds-card-right, .ds-card-note { color: #94a3b8; font-size: 0.8rem; }
+.ds-card-foot {
+  padding: 11px 18px 13px;
+  border-top: 1px solid #eef2f7;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+.ds-card-foot b { color: #475569; }
+/* Тонированная шапка по типу карточки. */
+.ds-card--company .ds-card-head { background: linear-gradient(180deg, #eef2ff, #f8faff); }
+.ds-card--company .ds-card-title { color: #3730a3; }
+.ds-card--deal .ds-card-head { background: linear-gradient(180deg, #e8f5fe, #f7fcff); }
+.ds-card--deal .ds-card-title { color: #075985; }
+.ds-card--money .ds-card-head { background: linear-gradient(180deg, #e9fbf3, #f6fefa); }
+.ds-card--money .ds-card-title { color: #065f46; }
+.ds-card--risk .ds-card-head { background: linear-gradient(180deg, #fff6e4, #fffdf5); }
+.ds-card--risk .ds-card-title { color: #92400e; }
+.ds-card--tech .ds-card-head { background: linear-gradient(180deg, #f3f6fa, #fafcfe); }
+.ds-card--tech .ds-card-title { color: #475569; }
+/* Свёрнутая карточка («Справочные коды»). */
+.ds-card--fold > summary { cursor: pointer; list-style: none; }
+.ds-card--fold > summary::-webkit-details-marker { display: none; }
+.ds-card--fold > summary .ds-card-title::after { content: ' ▸'; color: #b6c2d2; }
+.ds-card--fold[open] > summary .ds-card-title::after { content: ' ▾'; }
+
+/* ── Строки «поле → значение» ───────────────────────────────────────── */
+.ds-kv { padding: 4px 18px 8px; }
+.ds-kv-row {
+  display: grid;
+  grid-template-columns: minmax(105px, 34%) 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+  align-items: baseline;
+}
+.ds-kv-row:last-child { border-bottom: none; }
+.ds-card--wide .ds-kv-row, .ds-card--full .ds-kv-row { grid-template-columns: minmax(120px, 24%) 1fr; }
+.ds-kv-k { color: #94a3b8; font-size: 0.85rem; }
+.ds-kv-v { color: #0f172a; font-size: 0.89rem; word-break: break-word; }
+.ds-kv-note { color: #94a3b8; font-size: 0.77rem; margin-top: 2px; }
+.ds-v { font-weight: 650; color: #0f172a; }
+.ds-v--num { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.ds-vnote { color: #94a3b8; font-weight: 400; margin-left: 8px; font-size: 0.85rem; }
+.ds-vnote--block { display: block; margin-left: 0; margin-top: 3px; font-size: 0.78rem; }
+.ds-unconfirmed { color: #b45309; font-weight: 650; }
+.ds-dim { color: #94a3b8; }
+.ds-good { color: #15803d; font-weight: 650; }
+.ds-bad { color: #b91c1c; font-weight: 650; }
+
+/* Подзаголовок блока значений внутри карточки. */
+.ds-group {
+  margin: 12px 0 2px;
+  padding-top: 11px;
+  border-top: 1px solid #eef2f7;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #b6c2d2;
+  font-weight: 800;
+}
+.ds-kv > .ds-group:first-child { margin-top: 4px; padding-top: 0; border-top: none; }
+
+/* Значение + серая подпись источника («база» / «проверка» / реестр). */
+.ds-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 1px 0; }
+.ds-val + .ds-val { border-top: 1px dotted #e2e8f0; margin-top: 3px; padding-top: 4px; }
+.ds-val-v { color: #0f172a; font-weight: 650; }
+.ds-src { color: #94a3b8; font-size: 0.74rem; font-weight: 400; white-space: nowrap; }
+
+/* Расхождение реестров — чип «N версий», раскрывается списком. */
+.ds-vers { display: inline-block; margin-left: 10px; }
+.ds-vers summary { cursor: pointer; list-style: none; display: inline-block; }
+.ds-vers summary::-webkit-details-marker { display: none; }
+.ds-chip-ver {
+  display: inline-block;
+  padding: 2px 11px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+.ds-ver { margin-top: 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+
+/* Расхождение «база ≠ проверка» — красное. Само ОШИБОЧНОЕ значение (база,
+   первое в паре) тоже красится красным, а правильное (проверка) — зелёным:
+   правило глобальное для всех карточек. */
+.ds-vals.is-diff { border-left: 3px solid #dc2626; padding-left: 9px; margin: 2px 0; }
+.ds-vals.is-diff > .ds-val:first-child .ds-val-v { color: #b91c1c; }
+.ds-vals.is-diff > .ds-val:nth-child(2):nth-last-child(2) .ds-val-v { color: #15803d; }
+.ds-diff {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* ── Шкала срока действия договора ──────────────────────────────────── */
+.ds-track { margin: 10px 0 2px; }
+.ds-track-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: #eef2f7;
+  margin-bottom: 16px;
+}
+.ds-track-bar i { position: absolute; inset: 0 auto 0 0; background: #2563eb; border-radius: 999px; }
+.ds-track-dot {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px #fff, 0 0 0 4px #bfdbfe;
+}
+.ds-track-mark {
+  position: relative;
+  top: -13px;
+  display: inline-block;
+  font-size: 0.76rem;
+  color: #2563eb;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ds-track-ends { display: flex; justify-content: space-between; gap: 10px; color: #94a3b8; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.ds-track-ends span { white-space: nowrap; }
+.ds-track-left { color: #2563eb; font-weight: 600; }
+.ds-track.soon .ds-track-bar i, .ds-track.soon .ds-track-dot { background: #d97706; }
+.ds-track.soon .ds-track-dot { box-shadow: 0 0 0 3px #fff, 0 0 0 4px #fde68a; }
+.ds-track.soon .ds-track-mark, .ds-track.soon .ds-track-left { color: #b45309; }
+.ds-track.over .ds-track-bar i { background: #dc2626; width: 100% !important; }
+.ds-track.over .ds-track-dot { background: #dc2626; box-shadow: 0 0 0 3px #fff, 0 0 0 4px #fecaca; }
+.ds-track.over .ds-track-mark, .ds-track.over .ds-track-left { color: #b91c1c; }
+
+/* ── Таблицы (деятельность, филиалы, проверки, источники) ───────────── */
+.ds-table-wrap { overflow-x: auto; padding: 4px 18px 14px; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.ds-table th {
+  text-align: left;
+  font-weight: 700;
+  color: #94a3b8;
+  border-bottom: 1px solid #eef2f7;
+  padding: 8px;
+  white-space: nowrap;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ds-table td { padding: 9px 8px; border-bottom: 1px solid #f5f8fb; vertical-align: top; color: #0f172a; }
+.ds-table tbody tr:last-child td { border-bottom: none; }
+.ds-table--raw td:first-child { color: #94a3b8; width: 38%; }
+/* Ведущий ОКЭД (класс с наибольшим тарифом) — подсветка строки. */
+.ds-lead { position: relative; }
+.ds-lead::after {
+  content: '';
+  position: absolute;
+  inset: -3px -7px;
+  border-radius: 7px;
+  background: #ecfdf5;
+  z-index: -1;
+}
+.ds-table td:has(.ds-lead) { background: #f7fdfa; }
+
+/* Полные выгрузки источников: «ярлык справа-серым → значение», переносы строк
+   сохраняются (многострочные «Орган гос.управления» / «Собственник»). */
+.ds-fields {
+  display: grid;
+  grid-template-columns: minmax(150px, 250px) 1fr;
+  gap: 0 20px;
+  padding: 6px 18px 14px;
+  font-size: 0.86rem;
+}
+.ds-fields-k { text-align: right; color: #94a3b8; padding: 9px 0; border-bottom: 1px solid #f5f8fb; }
+.ds-fields-v { color: #0f172a; padding: 9px 0; border-bottom: 1px solid #f5f8fb; white-space: pre-line; word-break: break-word; }
+.ds-fields-sep {
+  grid-column: 1 / -1;
+  margin: 12px 0 2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: #b6c2d2;
+  font-weight: 800;
+}
+
+/* «Активность» — таймлайн договора: дата · точка · событие, вертикальная нить.
+   Цвет точки = состояние: зелёный — свершилось, синий — оплата транша,
+   серый — будущее («Следующий платёж» темнее), красный — договор истёк. */
+.ds-tl { padding: 8px 18px 14px; }
+.ds-tl-row { position: relative; display: grid; grid-template-columns: 88px 14px 1fr; gap: 12px; align-items: center; padding: 8px 0; }
+.ds-tl-row::before { content: ''; position: absolute; left: 106px; top: 0; bottom: 0; width: 2px; background: #eef2f7; }
+.ds-tl-row:first-child::before { top: 50%; }
+.ds-tl-row:last-child::before { bottom: 50%; }
+.ds-tl-date { color: #94a3b8; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.ds-tl-dot { position: relative; z-index: 1; width: 13px; height: 13px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 3px #fff; justify-self: center; }
+.ds-tl-label { color: #0f172a; font-weight: 600; font-size: 0.88rem; }
+.ds-tl-row.is-pay .ds-tl-dot { background: #2563eb; }
+.ds-tl-row.is-next .ds-tl-dot { background: #94a3b8; }
+.ds-tl-row.is-next .ds-tl-label { color: #475569; }
+.ds-tl-row.is-future .ds-tl-dot { background: #cbd5e1; }
+.ds-tl-row.is-future .ds-tl-label { color: #94a3b8; font-weight: 500; }
+.ds-tl-row.is-over .ds-tl-dot { background: #dc2626; }
+
+/* «Выбранный в базе» ОКЭД в таблице деятельности — серым целиком. */
+.ds-mut, .ds-mut .ds-v, .ds-mut .ds-v--num { color: #9aa6b5; }
+.ds-mut .ds-pill { opacity: 0.75; }
+/* Жёлтая строка: ОКЭД валиден, но выбран не наивысший класс. */
+.ds-warnc, .ds-warnc .ds-v--num { color: #b45309; }
+
+/* Относительные дни в таймлайне («135 дн. назад», «через 229 дн.»). */
+.ds-tl-rel { color: #94a3b8; font-weight: 400; font-size: 0.78rem; margin-left: 8px; white-space: nowrap; }
+
+/* Шкала тарифов по классам 1–22 («Класс и тариф»). */
+.ds-scale { padding: 12px 18px 4px; }
+.ds-scale-bars { display: flex; align-items: flex-end; gap: 3px; }
+.ds-scale-col { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; }
+.ds-scale-col i { display: block; width: 100%; max-width: 18px; border-radius: 3px 3px 0 0; background: #dbe3f0; }
+.ds-scale-col b { font-size: 0.58rem; color: #b6c2d2; font-weight: 700; }
+/* Тариф над столбиком, повёрнут на 90° (текст читается снизу вверх). */
+.ds-scale-val {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 0.56rem;
+  color: #b6c2d2;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+.ds-scale-col.is-check .ds-scale-val { color: #047857; font-weight: 700; }
+.ds-scale-col.is-base .ds-scale-val { color: #b91c1c; font-weight: 700; }
+.ds-scale-col.is-check i { background: #10b981; }
+.ds-scale-col.is-check b { color: #047857; }
+.ds-scale-col.is-base i { background: #ef4444; }
+.ds-scale-col.is-base b { color: #b91c1c; }
+.ds-scale-col.is-alt i { background: #3b82f6; }
+.ds-scale-col.is-alt b { color: #1d4ed8; }
+.ds-scale-col.is-alt .ds-scale-val { color: #1d4ed8; }
+.ds-scale-legend { display: flex; gap: 16px; margin-top: 8px; font-size: 0.74rem; color: #64748b; }
+.ds-scale-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.ds-scale-legend i.is-check { background: #10b981; }
+.ds-scale-legend i.is-base { background: #ef4444; }
+.ds-scale-legend i.is-alt { background: #3b82f6; }
+
+/* «База | вердикт | Проверка» — блок сверки в стиле референса. */
+.ds-vs { padding: 12px 18px 10px; border-bottom: 1px solid #f1f5f9; }
+/* vs-блок, вставленный строкой в kv-список (label = null): свои отступы уже. */
+.ds-kv .ds-vs { padding: 12px 0 10px; }
+.ds-vs:last-of-type { border-bottom: none; }
+.ds-vs-t { text-align: center; font-weight: 700; color: #0f172a; font-size: 0.9rem; margin-bottom: 9px; }
+.ds-vs-grid { display: grid; grid-template-columns: 1fr 44px 1fr; align-items: center; gap: 8px; }
+.ds-vs-grid--one { grid-template-columns: 1fr; }
+.ds-vs-side { text-align: center; min-width: 0; }
+.ds-vs-l { color: #94a3b8; font-size: 0.78rem; margin-bottom: 3px; }
+.ds-vs-v { font-weight: 800; font-size: 1.02rem; color: #15803d; font-variant-numeric: tabular-nums; word-break: break-word; }
+.ds-vs-v.is-bad { color: #dc2626; text-decoration: line-through; text-decoration-thickness: 1px; }
+.ds-vs-v.is-plain { color: #0f172a; }
+.ds-vs-ico {
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  justify-self: center;
+}
+.ds-vs-ico svg { width: 19px; height: 19px; }
+.ds-vs-ico.ok { background: #dcfce7; color: #16a34a; }
+.ds-vs-ico.bad { background: #fee2e2; color: #dc2626; }
+.ds-vs-note { text-align: center; color: #94a3b8; font-size: 0.75rem; margin-top: 5px; }
+
+/* Сравнение СС ↔ ФОТ («Страховая сумма»). */
+.ds-cmp { padding: 12px 18px 2px; }
+.ds-cmp-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; padding: 4px 0; }
+.ds-cmp-l { color: #94a3b8; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
+.ds-cmp-bar { height: 10px; border-radius: 999px; background: #eef2f7; overflow: hidden; }
+.ds-cmp-bar i { display: block; height: 100%; border-radius: 999px; }
+.ds-cmp-bar i.is-ok { background: #10b981; }
+.ds-cmp-bar i.is-bad { background: #ef4444; }
+.ds-cmp-bar i.is-fot { background: #94a3b8; }
+.ds-cmp-bar i.is-avg { background: #3b82f6; }
+.ds-cmp-row b { font-size: 0.78rem; color: #475569; font-weight: 650; white-space: nowrap; }
+
+/* Мини-гистограмма траншей («Оплата»): синие — уже прошедшие по сроку. */
+.ds-tr-bars { display: flex; align-items: flex-end; gap: 10px; padding: 12px 18px 2px; height: 72px; }
+.ds-tr-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; width: 34px; }
+.ds-tr-col i { display: block; width: 100%; border-radius: 4px 4px 0 0; background: #dbe3f0; }
+.ds-tr-col.is-paid i { background: #2563eb; }
+.ds-tr-col b { font-size: 0.62rem; color: #94a3b8; font-weight: 700; }
+.ds-tr-col.is-paid b { color: #1d4ed8; }
+
+.ds-raw { margin: 0 18px 14px; }
+.ds-raw summary { cursor: pointer; color: #64748b; font-size: 0.8rem; }
+.ds-raw summary:hover { color: #4338ca; }
+
+/* ── Адаптив ────────────────────────────────────────────────────────── */
+@media (max-width: 1160px) {
+  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .ds-grid { grid-template-columns: 1fr; }
+  .ds-card--wide, .ds-card--full { grid-column: 1 / -1; }
+  .ds-kv-row, .ds-card--wide .ds-kv-row, .ds-card--full .ds-kv-row { grid-template-columns: 1fr; gap: 2px; }
+  .ds-id { font-size: 1.45rem; }
+  .ds-fields { grid-template-columns: 1fr; }
+  .ds-fields-k { text-align: left; padding-bottom: 0; border-bottom: none; }
+}

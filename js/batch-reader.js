@@ -47,6 +47,9 @@ const BatchReader = {
     // Страна резидентства Страхователя из выгрузки («Казахстан» → резидент).
     // Сверяется с авторитетным вердиктом egov (см. BatchAR._residRegDiff).
     residencyCountry: { headers: ['странарезидентствастрахователя'], col: 'F' },
+    // «Аффилированный контрагент» («Да »/«Нет ») — база для сверки с нашим
+    // справочником аффилированных лиц в досье.
+    affiliatedExport: { headers: ['аффилированныйконтрагент', 'афлицо'], col: 'E' },
     insurerName:    { headers: ['контрагент'], col: 'E' },
     // БИН для проверок — Контрагента; если в выгрузке нет колонки БИНКонтрагента
     // (сокращённый формат), берём БИН Страхователя.
@@ -311,6 +314,7 @@ const BatchReader = {
           : false,
         govParticipation: BatchReader._isYes(cell(row, 'govParticip')),
         affiliated: false,
+        affiliatedExport: (() => { const v = cell(row, 'affiliatedExport'); return v == null || String(v).trim() === '' ? null : BatchReader._isYes(v); })(),
         // Заполняется фоновым statgov-лукапом:
         statgov: null,           // { name, legalAddress, registrationDate, ... } | { error }
         statgovStatus: 'pending',// 'pending' | 'loading' | 'done' | 'error' | 'skip'

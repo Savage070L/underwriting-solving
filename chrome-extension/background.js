@@ -52,11 +52,16 @@ async function fetchByBin(bin) {
     throw new Error('stat.gov.kz GET вернул ' + pageResp.status);
   }
   const pageHtml = await pageResp.text();
+  // Сначала проверяем ВХОД, а не sessid: у анонима sessid тоже есть (CSRF-токен
+  // Bitrix), и раньше запрос молча уходил дальше, возвращая страницу логина
+  // вместо данных — а индикатор считал сессию живой.
+  if (!statgovIsLoggedIn(pageHtml)) {
+    throw new Error('Нет ЭЦП-сессии — войдите в кабинет stat.gov.kz');
+  }
   const sessidMatch = pageHtml.match(/<input[^>]*name="sessid"[^>]*value="([^"]+)"/i)
                    || pageHtml.match(/<input[^>]*value="([^"]+)"[^>]*name="sessid"/i);
   if (!sessidMatch) {
-    // Скорее всего сессия не активна / истёк ЭЦП-логин.
-    throw new Error('sessid не найден — войдите в кабинет stat.gov.kz через ЭЦП');
+    throw new Error('sessid не найден на странице кабинета stat.gov.kz');
   }
   const sessid = sessidMatch[1];
 
@@ -298,22 +303,315 @@ async function fetchStatsnetIndustry(bin) {
 // разбираем сбалансированными скобками + резолвим плейсхолдеры из карты args.
 // ============================================================
 // ============================================================================
-// EGOV — РЕЗИДЕНТСТВО ПО БИН (P30.11)
+// EGOV — РЕЗИДЕНТСТВО ПО БИН (услуга P3011)
 // ----------------------------------------------------------------------------
-// Эндпоинт поля БИН на портале egov (услуга e_084 / P30.11). Отдаёт JSON с
-// АВТОРИТЕТНЫМ признаком resident + код статуса. Требует активную сессию egov —
-// credentials:'include' + host_permissions на egov.kz прикладывают куки
-// пользователя автоматически (расширение работает в его браузере).
-//   resident:true,  status.code 002              → резидент
-//   resident:false, status.code 033              → БИН принадлежит ИП (не юрлицо)
-//   resident:false, status.code 034              → снят с учётной регистрации
-//   resident:false (прочее)                      → нерезидент
-// Источник актуальнее и полнее открытого gbd_ul: видит свежие регистрации,
-// которых в открытых данных ещё нет.
+// ПОРТАЛ ПЕРЕЕХАЛ. Старый JSF-портал с эндпоинтом
+//   GET https://egov.kz/services/P30.11/rest/gbdul/organizations/{бин}   (куки-сессия)
+// заменён Next.js-приложением: сам egov.kz теперь только фронт, а данные идут
+// через шлюз fgw.egov.kz по Bearer-токену. Услуга «о госрегистрации юрлица и его
+// подразделений» получила код P3011 (без точки), а лукап организации по БИН —
+//   GET https://fgw.egov.kz/v1/P3011/organizations?bin={12 цифр}
+//   Authorization: Bearer <access_token>
+// Ответ:  { code:'SUCCESS', data:{ organization_info_list:[{ bin, name_ru, name_kz }] } }
+// Ошибки в поле code (могут приходить с HTTP 200):
+//   ORGANIZATION_NOT_FOUND_BY_BIN — в реестре юр. лиц РК такого БИН нет;
+//   ORGANIZATION_LIQUIDATED       — юрлицо ликвидировано.
+// Тот же путь есть у P3001/P3002/P3005/P3006 — это общий поиск организации в
+// группе услуг ГБД ЮЛ; берём P3011, как и раньше.
+//
+// ЧТО ИЗМЕНИЛОСЬ ДЛЯ НАС:
+//   • признак resident отдельным полем больше НЕ приходит. Резидентство теперь
+//     выводится из самого факта: организация найдена в реестре юр. лиц Минюста
+//     РК → резидент; не найдена → нерезидент. Это ровно та же логика, что стоит
+//     за старым resident:true/false, только считаем её мы.
+//   • ликвидированная компания остаётся РЕЗИДЕНТОМ, но с пометкой (как в
+//     локальном индексе ГБД ЮЛ: «резидент · ликвидирован»). Старый API отдавал
+//     для неё resident:false — это давало ложного «нерезидента».
+//   • дата регистрации и страна инкорпорации новым эндпоинтом не отдаются
+//     (их и так дают stat.gov.kz / kyc.kz).
+//
+// ТОКЕН. Портал держит его не в куках, а в localStorage:
+//   localStorage['identity_data'] → state.identityData.auth.access_token
+// поэтому credentials:'include' больше не работает — токен читаем из вкладки
+// egov.kz через chrome.scripting (host_permissions на egov.kz уже есть).
+const EGOV_FGW_ORG_URL = 'https://fgw.egov.kz/v1/P3011/organizations?bin=';
+const EGOV_PORTAL_URL = 'https://egov.kz/ru';
+const EGOV_TOKEN_LS_KEY = 'identity_data';
+// Старый эндпоинт оставляем как fallback: если у пользователя ещё живёт сессия
+// старого портала, а токена нового нет — резидентство всё равно проверится.
 const EGOV_RESID_URL = 'https://egov.kz/services/P30.11/rest/gbdul/organizations/';
 
-async function fetchEgovResidency(bin) {
+// ТОКЕНЫ КОРОТКИЕ (замерено на живом портале): access — 10 минут, refresh — 20,
+// и refresh ОДНОРАЗОВЫЙ. Из этого следуют три жёстких правила:
+//   1. Кэшируем пару в chrome.storage.session и обновляем её ЧИСТЫМ fetch —
+//      фоновые вкладки egov.kz НЕ открываем вообще (они мигали у пользователя).
+//   2. После каждого нашего refresh новую пару надо ДОНЕСТИ до портала: пишем
+//      её в localStorage всех открытых вкладок egov.kz и кидаем synthetic
+//      StorageEvent (портал слушает его и подхватывает пару в память), а
+//      content-script egov-sync.js засеивает localStorage свежей парой ПРИ
+//      ОТКРЫТИИ egov.kz — иначе портал стартует со сгоревшим refresh и
+//      разлогинивает пользователя («постоянно вылетает из egov»).
+//   3. Keepalive пару НЕ трогает (passive): жечь одноразовый refresh по таймеру
+//      каждые 5 минут — это и была главная причина вылетов.
+const EGOV_REFRESH_URL = 'https://fgw.egov.kz/identity/v3/auth/token/refresh';
+const egovToken = { value: null, exp: 0 };        // access в памяти worker'а
+let egovAuthPair = null;                          // {access_token, refresh_token} — зеркало storage.session
+let egovTokenInFlight = null;                     // single-flight: пул из 6 воркеров ≠ 6 refresh
+let egovTokenInFlightPassive = false;             // текущая попытка — пассивная (без refresh)
+
+function jwtExpMs(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return 0;
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const p = JSON.parse(json);
+    return typeof p.exp === 'number' ? p.exp * 1000 : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Пара живёт в storage.session И в storage.local. session чистится при
+// перезагрузке расширения и рестарте браузера — после этого мы переставали
+// видеть сессию egov (нет открытой вкладки портала = нечего прочитать) и
+// показывали «нужен вход», хотя пользователь был залогинен. local это
+// переживает. Секрета мы не удлиняем: refresh живёт 20 минут, протухшую пару
+// egovPairUsable() всё равно отбрасывает.
+async function egovCacheLoad() {
+  if (egovAuthPair) return egovAuthPair;
+  try {
+    const st = await chrome.storage.session.get('egovAuthPair');
+    egovAuthPair = (st && st.egovAuthPair) || null;
+  } catch (e) { /* session storage недоступен — живём на памяти */ }
+  if (!egovAuthPair) {
+    try {
+      const st = await chrome.storage.local.get('egovAuthPair');
+      egovAuthPair = (st && st.egovAuthPair) || null;
+    } catch (e) {}
+  }
+  return egovAuthPair;
+}
+async function egovCacheSave(pair) {
+  egovAuthPair = pair || null;
+  try { await chrome.storage.session.set({ egovAuthPair: egovAuthPair }); } catch (e) {}
+  try { await chrome.storage.local.set({ egovAuthPair: egovAuthPair }); } catch (e) {}
+}
+
+// Пара ещё на что-то годна: жив либо access, либо refresh (им обменяем access).
+// Протухшая по обоим токенам пара — это не «сессия есть», а мусор.
+function egovPairUsable(pair) {
+  if (!pair || !pair.access_token) return false;
+  const now = Date.now();
+  if (jwtExpMs(pair.access_token) - 30000 > now) return true;
+  if (!pair.refresh_token) return false;
+  const rexp = jwtExpMs(pair.refresh_token);
+  return rexp === 0 || rexp > now;   // exp не прочитался — считаем годной, решит сам запрос
+}
+
+// Читает пару токенов из localStorage вкладки egov.kz (zustand-persist store).
+async function readEgovAuthFromTab(tabId) {
+  const res = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (key) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const d = JSON.parse(raw);
+        const auth = d && d.state && d.state.identityData && d.state.identityData.auth;
+        return (auth && auth.access_token) ? { access_token: auth.access_token, refresh_token: auth.refresh_token || null } : null;
+      } catch (e) {
+        return null;
+      }
+    },
+    args: [EGOV_TOKEN_LS_KEY],
+  });
+  return (res && res[0] && res[0].result) || null;
+}
+
+// Кладёт пару в localStorage вкладки и КИДАЕТ StorageEvent: страница портала
+// держит токены в памяти (zustand) и одну лишь запись в localStorage не видит —
+// без события она продолжит слать старый (уже сгоревший) refresh и разлогинится.
+async function writeEgovAuthToTab(tabId, pair) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (key, p) => {
+      try {
+        const raw = localStorage.getItem(key);
+        const d = raw ? JSON.parse(raw) : { state: { identityData: null, oauthData: null, hasHydrated: true }, version: 0 };
+        if (!d.state) d.state = {};
+        if (!d.state.identityData) d.state.identityData = {};
+        d.state.identityData.auth = Object.assign({}, d.state.identityData.auth || {}, p);
+        const next = JSON.stringify(d);
+        localStorage.setItem(key, next);
+        try {
+          window.dispatchEvent(new StorageEvent('storage', { key, newValue: next, oldValue: raw, storageArea: localStorage }));
+        } catch (e2) {}
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+    args: [EGOV_TOKEN_LS_KEY, pair],
+  });
+}
+
+async function egovTabs() {
+  try { return await chrome.tabs.query({ url: 'https://egov.kz/*' }); } catch (e) { return []; }
+}
+
+// Обмен refresh-токена на новую пару (тот же вызов, что делает сам портал).
+// Чистый fetch — вкладка не нужна.
+async function refreshEgovAuth(auth) {
+  if (!auth || !auth.refresh_token) return null;
+  const resp = await fetch(EGOV_REFRESH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'Bearer ' + auth.access_token,
+    },
+    body: JSON.stringify({ refresh_token: auth.refresh_token }),
+    cache: 'no-store',
+  });
+  const d = await resp.json().catch(() => null);
+  const pair = d && d.data;
+  if (!pair || !pair.access_token) return null;
+  await egovCacheSave(pair);
+  // Доносим пару до всех открытых вкладок портала.
+  for (const t of await egovTabs()) {
+    try { await writeEgovAuthToTab(t.id, pair); } catch (e) {}
+  }
+  return pair;
+}
+
+// Токен: живой access из кэша → свежая пара из открытой вкладки → refresh по
+// кэшированной паре. Фоновые вкладки НЕ открываются. passive=true — только
+// посмотреть (keepalive), одноразовый refresh не тратить.
+function getEgovToken(opts) {
+  const passive = !!(opts && opts.passive);
+  if (egovToken.value && egovToken.exp - 30000 > Date.now()) return Promise.resolve(egovToken.value);
+  // Разделяем очереди: пассивная проба (индикатор) НЕ делает refresh, и раньше
+  // реальный запрос, подсевший на её промис, тоже оставался без обновления
+  // токена — и падал на пустом месте. Пассивный ждёт активного (тот сделает
+  // больше), активный пассивного — никогда.
+  if (egovTokenInFlight) {
+    if (passive || !egovTokenInFlightPassive) return egovTokenInFlight;
+  }
+  egovTokenInFlightPassive = passive;
+  egovTokenInFlight = _getEgovToken(passive).finally(() => {
+    egovTokenInFlight = null;
+    egovTokenInFlightPassive = false;
+  });
+  return egovTokenInFlight;
+}
+
+async function _getEgovToken(passive) {
+  const remember = (tok) => {
+    if (!tok) return null;
+    egovToken.value = tok;
+    egovToken.exp = jwtExpMs(tok) || (Date.now() + 5 * 60 * 1000);
+    return tok;
+  };
+  const alive = (tok) => !!tok && (jwtExpMs(tok) === 0 || jwtExpMs(tok) - 30000 > Date.now());
+  let pair = await egovCacheLoad();
+  // Открытая вкладка портала могла обновить пару сама — берём более свежую
+  // (побеждает бОльший exp access-токена).
+  for (const t of await egovTabs()) {
+    const tabAuth = await readEgovAuthFromTab(t.id).catch(() => null);
+    if (tabAuth && (!pair || jwtExpMs(tabAuth.access_token) > jwtExpMs(pair.access_token))) {
+      pair = tabAuth;
+      await egovCacheSave(pair);
+    }
+  }
+  if (!pair) return null;
+  if (alive(pair.access_token)) return remember(pair.access_token);
+  if (passive) return null;
+  const fresh = await refreshEgovAuth(pair).catch(() => null);
+  return fresh ? remember(fresh.access_token) : null;
+}
+
+// Ответ нового шлюза → та же форма, что отдавал старый P30.11, чтобы
+// приложению (ResidentCheck._egovVerdict) ничего не пришлось переписывать.
+function egovOrgToResidency(d, bin) {
+  const code = (d && d.code) || null;
+  const list = (d && d.data && d.data.organization_info_list) || [];
+  const first = list[0] || null;
+  const name = first ? (first.name_ru || first.name_kz || first.name_en || null) : null;
+  // У шлюза своя человекочитаемая формулировка на трёх языках — она точнее
+  // наших домыслов, поэтому в statusText кладём именно её.
+  const msg = (d && d.message && d.message.ru) || '';
+  const base = {
+    bin: (first && first.bin) || bin,
+    resident: null,
+    statusCode: code,
+    statusText: msg,
+    shortName: name,
+    fullName: name,
+    registrationDate: null,       // новый эндпоинт их не отдаёт
+    incorporationCountry: null,
+    liquidated: false,
+    _source: 'fgw.egov.kz/v1/P3011/organizations',
+  };
+  if (code === 'ORGANIZATION_LIQUIDATED') {
+    return { ...base, resident: true, liquidated: true, statusText: msg || 'Юридическое лицо ликвидировано' };
+  }
+  if (code === 'ORGANIZATION_NOT_FOUND_BY_BIN' || code === 'ORGANIZATION_NOT_FOUND_BY_NAME') {
+    return { ...base, resident: false, statusText: msg || 'Организация с указанным БИН не найдена' };
+  }
+  if (list.length) {
+    return { ...base, resident: true, statusText: msg || 'Организация найдена в реестре юр. лиц РК' };
+  }
+  // SUCCESS с пустым списком либо незнакомый код — вердикт не выносим.
+  return { ...base, statusText: msg || (code ? 'egov вернул код ' + code : 'egov вернул пустой ответ') };
+}
+
+// Отсечка «сессии нет»: когда токена нет и legacy-путь тоже упал, минуту НЕ
+// делаем новых сетевых попыток — иначе пакетная проверка на мёртвой сессии
+// молотит egov.kz десятками бессмысленных запросов подряд (пугает пользователя).
+// Минута — чтобы после входа на портал проверка ожила сама без перезапуска.
+let egovNoSessionUntil = 0;
+
+async function fetchEgovResidency(bin, retried) {
   if (!/^\d{12}$/.test(bin)) throw new Error('Invalid BIN — must be 12 digits');
+  if (Date.now() < egovNoSessionUntil) {
+    throw new Error('Сессия egov.kz не активна — войдите на egov.kz (повторная попытка через минуту)');
+  }
+  const token = await getEgovToken();
+  if (!token) {
+    // Нового токена нет — пробуем старый портал (вдруг у пользователя ещё жив).
+    try {
+      return await fetchEgovResidencyLegacy(bin);
+    } catch (e) {
+      egovNoSessionUntil = Date.now() + 60 * 1000;
+      throw e;
+    }
+  }
+  egovNoSessionUntil = 0;
+  const resp = await fetch(EGOV_FGW_ORG_URL + bin, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json', 'Authorization': 'Bearer ' + token },
+    cache: 'no-store',
+  });
+  if (resp.status === 401 || resp.status === 403) {
+    // Access протух между проверкой exp и запросом — сбрасываем и пробуем ОДИН
+    // раз заново (getEgovToken перечитает вкладку и при нужде сделает refresh).
+    egovToken.value = null; egovToken.exp = 0;
+    if (!retried) return fetchEgovResidency(bin, true);
+    egovNoSessionUntil = Date.now() + 60 * 1000;
+    throw new Error('Сессия egov.kz истекла — откройте egov.kz и войдите заново');
+  }
+  if (resp.status >= 500) throw new Error('egov (fgw) вернул ' + resp.status);
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('json')) throw new Error('egov (fgw) вернул не JSON — проверьте вход на egov.kz');
+  // ВАЖНО: «организация не найдена» приходит со статусом 412 (не 200 и не 404) и
+  // нормальным JSON-телом — поэтому resp.ok здесь НЕ проверяем, вердикт целиком
+  // определяется полем code (проверено на живом ответе шлюза).
+  const d = await resp.json();
+  return egovOrgToResidency(d, bin);
+}
+
+// Старый портал (до редизайна). Оставлен как запасной путь.
+async function fetchEgovResidencyLegacy(bin) {
   const resp = await fetch(EGOV_RESID_URL + bin, {
     method: 'GET',
     credentials: 'include',
@@ -326,7 +624,6 @@ async function fetchEgovResidency(bin) {
     throw new Error('Нет сессии egov.kz — войдите на портал egov.kz');
   }
   if (!resp.ok) throw new Error('egov P30.11 вернул ' + resp.status);
-  // Без сессии egov редиректит на SSO и отдаёт HTML вместо JSON — ловим это.
   const ct = resp.headers.get('content-type') || '';
   if (!ct.includes('json')) {
     throw new Error('egov вернул не JSON — войдите в egov.kz (нужна активная сессия портала)');
@@ -342,6 +639,8 @@ async function fetchEgovResidency(bin) {
     fullName: (d && d.fullName) || null,
     registrationDate: (d && d.registrationDate) || null,
     incorporationCountry: (d && d.incorporationCountry) || null,
+    liquidated: false,
+    _source: 'egov.kz/services/P30.11 (старый портал)',
   };
 }
 
@@ -571,22 +870,46 @@ function parseKycNuxt(html, bin) {
  */
 async function statgovHealth() {
   let pageResp;
+  // Свой таймаут обязателен: без него зависший fetch молчит дольше, чем ждёт
+  // приложение, и оно принимало это за «расширение не отвечает» → индикатор
+  // писал «нет расширения», хотя мост жив, а тормозит сам stat.gov.kz.
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 7000);
   try {
     pageResp = await fetch(STATGOV_URL, {
       method: 'GET',
       credentials: 'include',
+      signal: ctl.signal,
       headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
     });
   } catch (e) {
     return { reachable: false, session: false, error: String(e && e.message || e) };
+  } finally {
+    clearTimeout(t);
   }
   if (!pageResp.ok) {
     return { reachable: false, session: false, error: 'stat.gov.kz GET вернул ' + pageResp.status };
   }
   const html = await pageResp.text();
-  const hasSessid = /<input[^>]*name="sessid"[^>]*value="[^"]+"/i.test(html)
-                 || /<input[^>]*value="[^"]+"[^>]*name="sessid"/i.test(html);
-  return { reachable: true, session: hasSessid };
+  return { reachable: true, session: statgovIsLoggedIn(html) };
+}
+
+/**
+ * Есть ли на странице кабинета активная ЭЦП-сессия.
+ *
+ * ВАЖНО: по наличию `sessid` это определять НЕЛЬЗЯ — это CSRF-токен Bitrix,
+ * он есть и у анонима (проверено на живой странице), из-за чего индикатор
+ * всегда светился «подключено», даже когда пользователь не вошёл.
+ * Настоящие признаки:
+ *   аноним      → блок `stat-authform` («Пожалуйста, авторизуйтесь») + authBySSO,
+ *                 поля поиска `name="bin"` НЕТ;
+ *   авторизован → есть поле поиска по БИН.
+ * Требуем оба условия: форма поиска есть И формы логина нет.
+ */
+function statgovIsLoggedIn(html) {
+  const authForm = /stat-authform|authBySSO|Пожалуйста,\s*авториз/i.test(html);
+  const searchField = /<input[^>]*name="bin"/i.test(html);
+  return searchField && !authForm;
 }
 
 // === Message handler: получает запросы из content script ===
@@ -639,17 +962,28 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   fetch(STATGOV_URL, { method: 'GET', credentials: 'include', cache: 'no-store' })
     .then((r) => { keepaliveState.statgov = !!(r && r.ok); })
     .catch(() => { keepaliveState.statgov = false; });
-  // egov: read-only GET org-endpoint с dummy-БИН (000…0) — «трогает» сессию,
-  // не запрашивая реальную компанию (сервер вернёт «не зарегистрирован»).
-  fetch(EGOV_RESID_URL + '000000000000', {
-    method: 'GET', credentials: 'include', cache: 'no-store',
-    headers: { 'Accept': 'application/json' },
-  })
-    .then((r) => { keepaliveState.egov = !!(r && r.ok); })
+  // egov: новый портал авторизуется Bearer-токеном из localStorage, а не кукой,
+  // поэтому «пинговать» нечего — просто перечитываем токен из УЖЕ открытой
+  // вкладки egov.kz (фоновую не открываем: это заметно пользователю). Наличие
+  // свежего токена и есть признак живой сессии.
+  // ПАССИВНО: только смотрим, жив ли access. Refresh здесь ЗАПРЕЩЁН — он
+  // одноразовый, и его трата по таймеру раз в 5 минут гарантированно
+  // рассинхронизировала пару с порталом (то самое «вылетает из egov»).
+  getEgovToken({ passive: true })
+    .then((t) => { keepaliveState.egov = !!t; })
     .catch(() => { keepaliveState.egov = false; });
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // egov-sync.js (content-script на egov.kz, document_start) просит свежую пару:
+  // засеять localStorage ДО старта портала, чтобы тот не стартовал со сгоревшим
+  // refresh-токеном после наших обновлений.
+  if (msg && msg.type === 'EGOV_AUTH_GET') {
+    egovCacheLoad()
+      .then(pair => sendResponse({ ok: true, pair: pair || null }))
+      .catch(() => sendResponse({ ok: false, pair: null }));
+    return true;
+  }
   if (msg && msg.type === 'KEEPALIVE_STATUS') {
     sendResponse({ ok: true, data: { ...keepaliveState, periodMin: KEEPALIVE_PERIOD_MIN } });
     return false;
@@ -657,6 +991,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'STATGOV_HEALTH') {
     statgovHealth()
       .then(data => sendResponse({ ok: true, data }))
+      .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
+    return true;
+  }
+  // Статус сессии egov для индикатора в приложении. СТРОГО ПАССИВНО:
+  // getEgovToken({passive:true}) только читает кэш/localStorage открытых вкладок,
+  // НЕ ходит в сеть и НЕ тратит одноразовый refresh-токен. Поэтому индикатор
+  // можно опрашивать сколь угодно часто — обращений к egov.kz он не добавляет.
+  if (msg && msg.type === 'EGOV_HEALTH') {
+    getEgovToken({ passive: true })
+      .then(async (token) => {
+        const pair = await egovCacheLoad().catch(() => null);
+        // tabOpen важен для честности индикатора: сессию портала мы можем
+        // увидеть ТОЛЬКО через кэш или открытую вкладку egov.kz. Если ни того,
+        // ни другого нет — мы не знаем состояния, и говорить «нужен вход»
+        // нельзя (пользователь может быть залогинен). Приложение покажет
+        // нейтральное «сессия не видна».
+        const tabs = await egovTabs().catch(() => []);
+        sendResponse({ ok: true, data: {
+          token: !!token,                          // живой access — запросы пройдут
+          hasPair: egovPairUsable(pair),           // пара годна (access либо refresh жив)
+          // Пара была, но протухла по обоим токенам — это ЗНАНИЕ, а не «не видно»:
+          // сессия точно кончилась, нужен новый вход. Позволяет дать честный
+          // красный статус даже без открытой вкладки портала.
+          hadPair: !!(pair && pair.access_token) && !egovPairUsable(pair),
+          tabOpen: !!(tabs && tabs.length),        // портал открыт — состояние видно
+          paused: Date.now() < egovNoSessionUntil, // недавняя неудача (сессия мертва)
+        } });
+      })
       .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
     return true;
   }

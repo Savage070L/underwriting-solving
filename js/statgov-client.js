@@ -88,6 +88,40 @@ const StatGovClient = {
     });
   },
 
+  // Статус сессии egov (для индикатора). Возвращает:
+  //   { bridge:false }                       — расширение не ответило
+  //   { bridge:true, token:true }            — живой access, запросы пройдут
+  //   { bridge:true, token:false, hasPair:true }  — пара есть, access протух (обновится сам при запросе)
+  //   { bridge:true, token:false, hasPair:false } — сессии нет, нужен вход на egov.kz
+  // ПАССИВНО: сети не касается, одноразовый refresh не тратит — можно опрашивать часто.
+  async egovHealth(timeoutMs = 4000) {
+    const requestId = 'egovh-' + Math.random().toString(36).slice(2);
+    return new Promise((resolve) => {
+      let done = false;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        const d = event.data;
+        if (!d || d.source !== StatGovClient.SOURCE_BRIDGE) return;
+        if (d.type !== 'EGOV_HEALTH_RESULT' || d.requestId !== requestId) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        StatGovClient._ready = true; // мост ответил — он установлен
+        const v = (d.ok && d.data) ? d.data : {};
+        // tabOpen/hadPair обязаны пройти сюда: без них App.EGOV._probe считает,
+        // что состояние портала не видно, и красный вердикт недостижим.
+        resolve({ bridge: true, token: !!v.token, hasPair: !!v.hasPair,
+          tabOpen: !!v.tabOpen, hadPair: !!v.hadPair, paused: !!v.paused });
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ source: StatGovClient.SOURCE_APP, type: 'EGOV_HEALTH', requestId }, '*');
+      setTimeout(() => {
+        if (done) return;
+        window.removeEventListener('message', handler);
+        resolve({ bridge: false, token: false, hasPair: false });
+      }, timeoutMs);
+    });
+  },
+
   // Лукап через statsnet.co — ищем «Отрасль» (10-40 сек, открывает background-вкладки).
   async lookupStatsnet(bin) {
     const cleanBin = String(bin || '').trim();

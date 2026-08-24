@@ -148,7 +148,13 @@ const BatchAR = {
       else if (gov.found === false) found = false;
       else found = gov.share != null;            // есть доля → найден
       const share = gov.share != null ? String(gov.share) : null;
-      return { status: 'done', found, share };
+      // name/status/extra воркер отдаёт давно, но раньше мы их выбрасывали —
+      // теперь они нужны досье («всё о клиенте»): наименование в реестре,
+      // статус объекта и блок «Дополнительные сведения» (РНН, ОКПО, ОПФ,
+      // № и даты госрегистрации, блокировка, орган гос. управления, отрасли).
+      return { status: 'done', found, share, name: gov.name || null,
+        objStatus: gov.status || null, objectId: gov.objectId || null,
+        extra: Array.isArray(gov.extra) ? gov.extra : null };
     } catch (e) {
       return { status: 'error', found: null, share: null };
     }
@@ -392,8 +398,8 @@ const BatchAR = {
     return `<tr data-idx="${i}"${rowCls}>
       <td class="batch-c-num">${i + 1}</td>
       <td class="batch-c-contract">${ARForm._esc(r.contractNumber || '—')}</td>
-      <td class="batch-c-insurer${binStCls}"${binStTitle}>${BatchAR._insurerIdentCell(r)}</td>
-      <td class="batch-c-contr${contrBinCls}">${BatchAR._contrIdentCell(r)}</td>
+      <td class="batch-c-insurer${binStCls}"${binStTitle}>${BatchAR._insurerIdentCell(r, i)}</td>
+      <td class="batch-c-contr${contrBinCls}">${BatchAR._contrIdentCell(r, i)}</td>
       <td class="batch-c-oked${okedCls}">${BatchAR._okedCell(r)}</td>
       <td class="batch-c-class${classCls}"${classTitle}>${BatchAR._classCell(r)}</td>
       <td class="batch-c-contr-class${contrClassCls}"${contrClassTitle}>${BatchAR._contrClassTariffCell(r)}</td>
@@ -823,18 +829,28 @@ const BatchAR = {
     return String(p).replace('.', ',') + '%';
   },
 
+  // БИН/ИИН стороны договора — КЛИКАБЕЛЬНЫЙ: открывает досье (js/dossier.js) в
+  // новой вкладке. Это <span>, а не <button>/<a>: в HTML-отчёте (downloadResults)
+  // обработчики снимаются, и элемент остаётся просто текстом, не «мёртвой»
+  // кнопкой. Индекс строки берётся из _rowHtml и не меняется при перерисовке.
+  _idLink(bin, side, i) {
+    if (!bin) return '—';
+    const b = ARForm._esc(bin);
+    const who = side === 'insurer' ? 'страхователю' : 'контрагенту';
+    return `<span class="batch-id-link" role="button" tabindex="0" title="Открыть полное досье по ${who} ${b} (все источники) в новой вкладке"`
+      + ` onclick="Dossier.openFromRow(${i}, '${side}')">${b}</span>`;
+  },
+
   // Страхователь: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче, с обрезкой).
-  _insurerIdentCell(r) {
-    const bin = r.binInsurer || '';
+  _insurerIdentCell(r, i) {
     const nm = r.insurerNameSt || '';
-    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${bin ? ARForm._esc(bin) : '—'}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
+    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${BatchAR._idLink(r.binInsurer || '', 'insurer', i)}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
   },
   // ===== Ячейки уровня КОНТРАГЕНТА =====
   // Контрагент: БИН (сверху, чёрный жирный) + наименование (снизу, серое мельче, с обрезкой).
-  _contrIdentCell(r) {
-    const bin = r.bin || '';
+  _contrIdentCell(r, i) {
     const nm = r.insurerName || r.excelName || '';
-    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${bin ? ARForm._esc(bin) : '—'}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
+    return `<div class="batch-stack"><span class="batch-stack-top batch-party-bin">${BatchAR._idLink(r.bin || '', 'contr', i)}</span><span class="batch-stack-bot batch-party-name" title="${ARForm._esc(nm)}">${nm ? ARForm._esc(nm) : '—'}</span></div>`;
   },
   // Класс контрагента (K, сверху) + тариф из выгрузки (снизу). Если тариф не
   // соответствует классу по справочнику — снизу красным «было → должно».
@@ -1420,9 +1436,12 @@ const BatchAR = {
     }
     const eg = ResidentCheck.egovResolved && ResidentCheck.egovResolved(bin);
     if (eg) {
-      return eg.status === 'resident'
-        ? { kind: 'res', txt: '✓', title: eg.title }
-        : { kind: 'non', txt: 'нерез.', title: eg.title };
+      if (eg.status !== 'resident') return { kind: 'non', txt: 'нерез.', title: eg.title };
+      // Ликвидированное юрлицо остаётся резидентом, но это флаг для андеррайтера
+      // (новый egov отдаёт его кодом ORGANIZATION_LIQUIDATED) — как в ГБД ЮЛ.
+      return eg.registryStatus
+        ? { kind: 'warn', txt: '✓ ликв.', title: eg.title }
+        : { kind: 'res', txt: '✓', title: eg.title };
     }
     if (BatchAR._egovResidPhase === 'pending' || BatchAR._egovResidPhase === 'idle') {
       return { kind: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.11)…' };
@@ -1458,7 +1477,7 @@ const BatchAR = {
   _residEffStatus(r) {
     const eg = BatchAR._residEgov(BatchAR._insurerBin(r));
     if (eg.kind === 'non') return 'nonresident';
-    if (eg.kind === 'res') return 'resident';
+    if (eg.kind === 'res' || eg.kind === 'warn') return 'resident';   // 'warn' = резидент, но ликвидирован
     if (eg.kind === 'ip') return 'individual';
     return BatchAR._residRegistryStatus(r);   // egov отключён/не ответил → выгрузка
   },
@@ -1865,6 +1884,8 @@ const BatchAR = {
   // Повторить проверку для непройденных (error/skip/pending) БИН.
   retryStatgov() {
     if (BatchAR._statgovRunning) return;
+    // Явный повтор: снять паузу egov (пользователь мог только что войти на портал).
+    if (typeof ResidentCheck !== 'undefined' && ResidentCheck.egovRetryNow) ResidentCheck.egovRetryNow();
     const idx = BatchAR.rows
       .map((r, i) => (r.statgovStatus !== 'done' ? i : -1))
       .filter(i => i >= 0);
