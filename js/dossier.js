@@ -311,6 +311,39 @@ const Dossier = {
       + '</head><body><div class="ds" id="ds-root"></div>'
       + '<scr' + 'ipt>' + Dossier._shellScript + '</scr' + 'ipt></body></html>';
   },
+  // ===== Досье как САМОДОСТАТОЧНЫЙ HTML-файл (для ZIP пакетной печати) =====
+  // Отличия от вкладки: стили вшиты в файл (внешний css/style.css рядом с ним
+  // не лежит), содержимое отрендерено заранее, а масонри пересчитывается сразу
+  // при открытии. Файл открывается офлайн и переживает пересылку.
+  //
+  // ВАЖНО: enrich здесь НЕ вызываем. Пакетная проверка уже сложила stat.gov,
+  // kyc, e-Qazyna и резидентство в кэши по каждому БИН — берём готовое. Дёргать
+  // источники на сотни строк при печати значило бы устроить тот самый шторм
+  // запросов, от которого мы уходили (см. бюджет запросов к egov).
+  ensureCss() {
+    if (Dossier._css) return Promise.resolve(Dossier._css);
+    return fetch(new URL('css/style.css', location.href).href)
+      .then(r => r.text())
+      .then((t) => { Dossier._css = t; return t; })
+      .catch(() => '');
+  },
+
+  fileHtml(ctx) {
+    const title = `Досье ${ctx.id}${ctx.role ? ' — ' + ctx.role : ''}`;
+    return '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + `<title>${Dossier._esc(title)}</title>`
+      + `<style>${Dossier._css || ''}</style>`
+      + '<style>body{margin:0;padding:24px 24px 48px;background:#f4f6fa;'
+      + 'font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0f172a}'
+      + '.ds{max-width:1400px;margin:0 auto}</style>'
+      + '</head><body><div class="ds" id="ds-root">' + Dossier._html(ctx) + '</div>'
+      + '<scr' + 'ipt>' + Dossier._shellScript + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>(function(){function R(){window.__dsRelayout&&window.__dsRelayout();}'
+      + 'if(document.readyState==="complete")R();else addEventListener("load",R);})();</scr' + 'ipt>'
+      + '</body></html>';
+  },
+
   _navigateShell(win, ctx) {
     const url = URL.createObjectURL(new Blob([Dossier._shellHtml(ctx)], { type: 'text/html;charset=utf-8' }));
     try { win.location.replace(url); } catch (e) { try { win.location = url; } catch (e2) {} }

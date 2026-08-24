@@ -1980,6 +1980,20 @@ const BatchAR = {
     return name;
   },
 
+  // Имя файла досье в пакете. Досье — на ДОГОВОР (в нём обе стороны: карточки
+  // «Страхователь» и «Контрагент»), поэтому ключ тот же, что у АР — номер договора.
+  _dossierFileName(contractNumber, taken) {
+    const safe = BatchAR._safeName(contractNumber) || 'без_номера';
+    const base = `Досье ${safe}`;
+    let name = `${base}.html`;
+    if (taken) {
+      let k = 2;
+      while (taken.has(name)) { name = `${base} (${k}).html`; k++; }
+      taken.add(name);
+    }
+    return name;
+  },
+
   // Группировка строк по номеру договора: один документ АР на договор.
   // Несколько строк одного договора = филиалы (Map сохраняет порядок встречи).
   _groupByContract() {
@@ -2409,8 +2423,12 @@ const BatchAR = {
     if (progress) progress.style.display = 'block';
     try {
       await BatchAR._ensureZip();
+      // Стили досье — один раз на весь пакет (файлы самодостаточные).
+      const withDossier = typeof Dossier !== 'undefined' && !!Dossier.fileHtml;
+      if (withDossier) await Dossier.ensureCss();
       const zip = new window.JSZip();
       const taken = new Set();
+      const takenDs = new Set();
       // Группируем по номеру договора: один документ АР на договор (филиалы — внутри).
       const groups = [...BatchAR._groupByContract().entries()];
       const errored = [];     // договоры с грубыми ошибками (красные) → НЕ печатаем
@@ -2424,11 +2442,25 @@ const BatchAR = {
       const N = toGenerate.length;
       for (let i = 0; i < N; i++) {
         const [cn, group] = toGenerate[i];
-        if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — АР ${cn}`;
+        if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — ${withDossier ? 'досье + ' : ''}АР ${cn}`;
         if (bar) bar.style.width = Math.round((i / N) * 100) + '%';
         const blob = await ARForm.buildDocx(group[0], { printAlert: false, filials: group.slice(1) });
         // .docx уже сжат (zip) — храним без перекомпрессии (STORE) — быстрее.
         zip.file(BatchAR._fileName(cn, taken), blob, { compression: 'STORE' });
+        // Досье по договору — рядом, в подпапке. Строится из УЖЕ полученных
+        // данных проверки (новых запросов к источникам не делает).
+        if (withDossier) {
+          try {
+            const idx = BatchAR.rows.indexOf(group[0]);
+            const ctx = idx >= 0 ? Dossier._ctxFromRow(idx, 'insurer') : null;
+            if (ctx && ctx.id) {
+              zip.file(`Досье/${BatchAR._dossierFileName(cn, takenDs)}`, Dossier.fileHtml(ctx));
+            }
+          } catch (e) {
+            // Досье не должно ронять печать документов — это доп. материал.
+            console.error('Досье для договора ' + cn + ':', e);
+          }
+        }
         // Изредка уступаем поток UI (каждые 10 документов)
         if (i % 10 === 9) await new Promise(r => setTimeout(r, 0));
       }
@@ -2456,13 +2488,13 @@ const BatchAR = {
       const out = await zip.generateAsync({ type: 'blob' });
       const today = new Date();
       const stamp = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
-      saveAs(out, `АР пакет ${stamp} (${N}).zip`);
+      saveAs(out, `${withDossier ? 'Досье и АР' : 'АР'} пакет ${stamp} (${N}).zip`);
       const extras = [
         overLimit.length ? `${overLimit.length} на АС` : '',
         errored.length ? `${errored.length} с ошибками (не напечатано)` : '',
         warned.length ? `${warned.length} с расхождениями` : '',
       ].filter(Boolean).join(', ');
-      if (txt) txt.textContent = `Готово: ${N} документов${extras ? ` + ${extras} (отдельные папки)` : ''}`;
+      if (txt) txt.textContent = `Готово: ${N} документов${withDossier ? ` + ${N} досье` : ''}${extras ? ` + ${extras} (отдельные папки)` : ''}`;
     } catch (e) {
       console.error('Batch ZIP error:', e);
       if (txt) txt.textContent = 'Ошибка: ' + e.message;
@@ -2500,15 +2532,15 @@ const BatchAR = {
       btnAll.style.display = inProgress ? 'none' : '';   // прячем во время проверки — вместо неё «Пауза»
       const ready = BatchAR._verifyComplete();
       btnAll.disabled = BatchAR._busy || !ready;
-      let label = 'Сгенерировать Рекомендации АР';
+      let label = 'Печать Досье + Рекомендации АР';
       if (BatchAR._busy) {
         label = 'Генерация…';
       } else if (BatchAR.rows.length && ready) {
         const errN = BatchAR._errorContractCount();
         const printable = BatchAR._contractCount() - errN;
         label = errN
-          ? `Сгенерировать Рекомендации АР (${printable}, исключено ${errN})`
-          : `Сгенерировать Рекомендации АР (${printable})`;
+          ? `Печать Досье + Рекомендации АР (${printable}, исключено ${errN})`
+          : `Печать Досье + Рекомендации АР (${printable})`;
       } else if (BatchAR.rows.length && !ready) {
         label = 'Ожидание проверки stat.gov.kz…';
       }
