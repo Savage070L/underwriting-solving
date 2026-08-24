@@ -84,7 +84,7 @@ const App = {
     section.classList.toggle('is-open', !section.classList.contains('is-open'));
   },
 
-  // Ссылки на источники (egov P30.11 / stat.gov.kz) в шапке вкладок. Разметка
+  // Ссылки на источники (egov P30.01 и P30.11 / stat.gov.kz) в шапке вкладок. Разметка
   // лежит ОДИН раз в <template id="tpl-src-links">, отсюда клонируется в каждый
   // маунт .js-src-links — чтобы три копии не разъезжались при правках текста.
   _renderSourceLinks() {
@@ -3284,7 +3284,7 @@ const App = {
     // Автоподстановка галочки: только пока андеррайтер не переключил её сам.
     if (cb && !App._residencyManual && res.nonResident !== null) cb.checked = res.nonResident;
     App._renderResidencyBadge();
-    // Авторитетное уточнение через egov P30.11 (если мост доступен, вердикта ещё
+    // Авторитетное уточнение через egov P30.01/P30.11 (если мост доступен, вердикта ещё
     // нет и андеррайтер не правил вручную). При ответе — перекрываем локальный.
     if (!egCached && !App._residencyManual
         && ResidentCheck.bridgeAvailable && ResidentCheck.bridgeAvailable()) {

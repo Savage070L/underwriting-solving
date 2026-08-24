@@ -53,10 +53,18 @@
          от которого зависят наши автоматические проверки (ЭЦП-сессия
          stat.gov.kz и Bearer-сессия egov). -->
     <template id="tpl-src-links">
+      <a class="src-link js-src-egov is-checking" href="https://egov.kz/ru/services/P3001/steps/1" target="_blank" rel="noopener noreferrer">
+        <span class="src-link-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></span>
+        <span class="src-link-body">
+          <span class="src-link-t">egov.kz · P30.01 <span class="src-link-state"></span></span>
+          <span class="src-link-s">Резидентство: Справки/сведения по юридическим лицам — тип «О госрегистрации юрлица и его подразделений» • справка P30.01</span>
+        </span>
+        <span class="src-link-ext" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+      </a>
       <a class="src-link js-src-egov is-checking" href="https://egov.kz/services/P30.11/#/declaration///" target="_blank" rel="noopener noreferrer">
         <span class="src-link-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></span>
         <span class="src-link-body">
-          <span class="src-link-t">egov.kz <span class="src-link-state"></span></span>
+          <span class="src-link-t">egov.kz · P30.11 <span class="src-link-state"></span></span>
           <span class="src-link-s">Резидентство: Выдача справки о регистрации (перерегистрации) юридических лиц, об учетной регистрации (перерегистрации) их филиалов и представительств • справка P30.11</span>
         </span>
         <span class="src-link-ext" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
@@ -357,7 +365,7 @@
                 <th class="batch-c-num2" title="СП (контрагент) → СП (К). Страховая премия (взнос) по контрагенту (филиалу). Снизу: расчётная СС×тариф×ПК.">СП<br>(К)</th>
                 <th class="batch-c-reg" title="Дата регистрации (страхователь) → Дата рег. (С). Дата официальной регистрации компании-клиента (stat.gov.kz / kyc.kz).">Дата рег.<br>(С)</th>
                 <th class="batch-c-gov" title="Государственное участие / доля → Гос. доля. Процент владения компании государством. Сверху: из выгрузки; снизу: по реестру e-Qazyna.">Гос.<br>доля</th>
-                <th class="batch-c-resident" title="Признак резидентства Страхователя. Сверху (чёрным): из выгрузки — колонка «СтранаРезидентстваСтрахователя» («Казахстан» → ✓ резидент, иная страна → нерез., пусто → «отсутствует»). Снизу в скобках (серым): из реестра egov P30.11. Красным — РАСХОЖДЕНИЕ выгрузки с egov. «(ИП)» — ИИН физлица/ИП: резидентство автоматически не определяется. «(отключен)» — нет подключения к egov, проверка не выполнялась.">Рези-<br>дент</th>
+                <th class="batch-c-resident" title="Признак резидентства Страхователя. Сверху (чёрным): из выгрузки — колонка «СтранаРезидентстваСтрахователя» («Казахстан» → ✓ резидент, иная страна → нерез., пусто → «отсутствует»). Снизу в скобках (серым): из реестра egov (P30.01/P30.11). Красным — РАСХОЖДЕНИЕ выгрузки с egov. «(ИП)» — ИИН физлица/ИП: резидентство автоматически не определяется. «(отключен)» — нет подключения к egov, проверка не выполнялась.">Рези-<br>дент</th>
                 <th class="batch-c-author" title="Автор → Сотрудник, оформивший решение по данному договору (колонка «Автор» из выгрузки; в старом шаблоне — «Менеджер»).">Автор</th>
                 <th class="batch-c-tranche" title="Транш оплаты. «—» — оплата единовременно; число — количество траншей рассрочки (по заполненным этапам оплаты из выгрузки).">Транш<br>оплаты</th>
                 <th class="batch-c-approve" title="Согласовано андеррайтером → Согл. андер. Отметка, что специалист по оценке рисков проверил и одобрил условия договора (галочка). Печать с исходными данными под его ответственность. Строка перестаёт считаться ошибочной, но подсветка ошибочных ячеек остаётся.">Согл.<br>андер.</th>

@@ -234,7 +234,7 @@ const StatGovClient = {
     });
   },
 
-  // Резидентство по БИН через egov P30.11 (мост EGOV_RESIDENCY_LOOKUP). Использует
+  // Резидентство по БИН через egov P30.01/P30.11 (мост EGOV_RESIDENCY_LOOKUP). Использует
   // сессию egov.kz пользователя. Возвращает { resident, statusCode, statusText,
   // shortName, registrationDate, incorporationCountry } — авторитетный источник.
   async lookupEgovResidency(bin) {

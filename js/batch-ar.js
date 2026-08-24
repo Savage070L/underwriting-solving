@@ -47,7 +47,7 @@ const BatchAR = {
   STATGOV_CONCURRENCY: 6,
   EGOV_CONCURRENCY: 8,
   KYC_CONCURRENCY: 5,   // fallback дат/адреса через kyc.kz (один GET ~250 КБ)
-  EGOV_RESID_CONCURRENCY: 6,  // авторитетная проверка резидентства через egov P30.11
+  EGOV_RESID_CONCURRENCY: 6,  // авторитетная проверка резидентства через egov P30.01/P30.11
   // Фаза авторитетной проверки резидентства (egov): пока 'pending' — в ячейках
   // резидентства показываем ⏳, а не промежуточный локальный вердикт. 'unavailable'
   // (нет моста) / 'done' (пул отработал) → показываем что есть (egov или локальный).
@@ -1444,7 +1444,7 @@ const BatchAR = {
         : { kind: 'res', txt: '✓', title: eg.title };
     }
     if (BatchAR._egovResidPhase === 'pending' || BatchAR._egovResidPhase === 'idle') {
-      return { kind: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.11)…' };
+      return { kind: 'wait', txt: '⏳', title: 'Резидентство проверяется через egov (P30.01/P30.11)…' };
     }
     return { kind: 'na', txt: 'н/д', title: 'egov не вернул данные по этому БИН' };
   },
@@ -1636,7 +1636,7 @@ const BatchAR = {
     // не тормозить основную проверку statgov.
     BatchAR._poolEgov(targets.slice());
 
-    // Авторитетное резидентство через egov P30.11 — тоже отдельным фоновым пулом.
+    // Авторитетное резидентство через egov P30.01/P30.11 — тоже отдельным фоновым пулом.
     // Не гейтит генерацию; уточняет локальный вердикт по мере ответов.
     BatchAR._poolEgovResidency(targets.slice());
 
@@ -1836,12 +1836,12 @@ const BatchAR = {
     await Promise.all(Array.from({ length: n }, worker));
   },
 
-  // Пул АВТОРИТЕТНОГО резидентства через egov P30.11 (мост-расширение). Локальный
+  // Пул АВТОРИТЕТНОГО резидентства через egov P30.01/P30.11 (мост-расширение). Локальный
   // индекс ГБД ЮЛ даёт мгновенный вердикт в каждой ячейке при рендере; этот пул в
   // фоне уточняет его egov'ом (источник актуальнее — видит свежие регистрации) и
   // перерисовывает строки по мере ответов. Наполняет общий кэш
   // ResidentCheck.egovResolved (его же читает _residVerdict). Не гейтит генерацию.
-  // ИИН пропускаются (эндпоинт P30.11 — только для БИН юрлиц; checkEgov сам это
+  // ИИН пропускаются (эндпоинт /organizations — только для БИН юрлиц; checkEgov сам это
   // проверяет). Дедуп по БИН: страхователь и филиалы с одним БИН — один запрос.
   async _poolEgovResidency(targets) {
     if (typeof ResidentCheck === 'undefined'

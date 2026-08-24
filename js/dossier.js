@@ -9,7 +9,7 @@
 //     маунты из _SINGLE_MOUNTS; старые карточки полей убраны).
 //
 // Источники: выгрузка (реестр), stat.gov.kz (мост-расширение), kyc.kz, egov
-// P30.11 (резидентство), e-Qazyna (гос. участие), локальный индекс ГБД ЮЛ,
+// P30.01/P30.11 (резидентство), e-Qazyna (гос. участие), локальный индекс ГБД ЮЛ,
 // справочники приложения (классификатор ОКЭД → класс → тариф, аффилированные
 // лица), statsnet.co (отрасль — только одиночная проверка).
 //
@@ -21,7 +21,7 @@
 
 const Dossier = {
   // Догруженное «по требованию» — общий кэш страницы (ключ = БИН/ИИН, 12 цифр).
-  // egov P3011 своей карты НЕ имеет: сырые ответы кэширует ResidentCheck
+  // egov P30.01/P30.11 своей карты НЕ имеет: сырые ответы кэширует ResidentCheck
   // (_egovRaw + localStorage) — общий бюджет «один БИН = один запрос».
   _sg: new Map(),      // stat.gov.kz
   _kyc: new Map(),     // kyc.kz
@@ -30,7 +30,7 @@ const Dossier = {
   _miss: new Map(),    // «источник+БИН» → ts неудачи: не молотим источник повторно
   MISS_TTL_MS: 5 * 60 * 1000,  // после неудачи источник не трогаем 5 минут
 
-  // Сырой ответ egov P3011 — из общего кэша ResidentCheck (включая localStorage).
+  // Сырой ответ egov P30.01/P30.11 — из общего кэша ResidentCheck (включая localStorage).
   _egovRawOf(id) {
     return (typeof ResidentCheck !== 'undefined' && ResidentCheck.egovRawFor)
       ? ResidentCheck.egovRawFor(id) : null;
@@ -45,7 +45,7 @@ const Dossier = {
     check: 'проверка',
     sg: 'stat.gov.kz',
     kyc: 'kyc.kz',
-    egov: 'egov',
+    egov: 'egov P30.01/P30.11',
     gbd: 'ГБД ЮЛ',
     qazyna: 'e-Qazyna',
     statsnet: 'statsnet.co',
@@ -550,7 +550,7 @@ const Dossier = {
       Dossier._gov.set(id, d); ctx.gov = d;
       return !!(d && d.status !== 'error');
     });
-    // egov P3011 — авторитетное резидентство. ТОЛЬКО через общий
+    // egov P30.01/P30.11 — авторитетное резидентство. ТОЛЬКО через общий
     // ResidentCheck.fetchEgovRaw: один БИН = один сетевой запрос на всё
     // приложение (кэш raw + localStorage + пауза после ошибки — там же).
     run('egov', bridge && isBin && !ctx.egovRaw
@@ -1109,9 +1109,9 @@ const Dossier = {
     const tone = (t) => t === 'резидент' ? `<span class="ds-good">${e(t)}</span>` : `<span class="ds-bad">${e(t)}</span>`;
     const egovNote = !egTxt
       ? (kind !== 'bin'
-        ? 'egov не запрашивается для ИИН (P30.11 — только БИН юр. лиц; для ИИН он вернул бы ложного «нерезидента»)'
+        ? 'egov не запрашивается для ИИН (P30.01/P30.11 — только БИН юр. лиц; для ИИН он вернул бы ложного «нерезидента»)'
         : ((typeof ResidentCheck !== 'undefined' && ResidentCheck.bridgeAvailable && ResidentCheck.bridgeAvailable())
-          ? 'egov: запрашивается…' : 'egov: нет моста (расширение выключено или нет сессии egov.kz)'))
+          ? 'egov (P30.01/P30.11): запрашивается…' : 'egov (P30.01/P30.11): нет моста (расширение выключено или нет сессии egov.kz)'))
       : '';
     const regSt = (typeof ResidentCheck !== 'undefined' && ResidentCheck.registryStatus) ? ResidentCheck.registryStatus(ctx.id) : 0;
     // ИИН (ИП/физлицо): резидентство автоматически не определяется — одна
@@ -1217,7 +1217,7 @@ const Dossier = {
       const rows = Object.keys(ctx.egovRaw)
         .map(key => [key, Dossier._flat(ctx.egovRaw[key])])
         .filter(([, v]) => v !== '' && v !== 'null');
-      if (rows.length) out.push(table('egov P3011 — все поля', 'database', rows));
+      if (rows.length) out.push(table(Dossier.SRC.egov + ' — все поля', 'database', rows));
     }
     // e-Qazyna: и результат поиска, и блок «Дополнительные сведения» карточки
     // объекта (его тянет воркер — см. worker/index.js fetchGovExtra).
@@ -1741,7 +1741,7 @@ const Dossier = {
     const rows = [
       line(S.sg, ctx.sg, ctx.sgPending ? 'проверяется' : ''),
       line(S.kyc, ctx.kyc),
-      line(S.egov + ' P3011', ctx.egovRaw),
+      line(S.egov, ctx.egovRaw),
       [e(S.qazyna), ctx.gov ? (ctx.gov.status === 'done' ? '<span class="ds-good">получено</span>' : `<span class="ds-bad">${e(ctx.gov.status)}</span>`) : '<span class="ds-dim">не запрашивалось</span>', '', ''],
       [e(S.gbd) + ' (локально)', (typeof ResidentCheck !== 'undefined' && ResidentCheck.ready())
         ? '<span class="ds-good">индекс загружен</span>' : '<span class="ds-dim">индекс не загружен</span>', '',
