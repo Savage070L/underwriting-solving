@@ -303,7 +303,7 @@ async function fetchStatsnetIndustry(bin) {
 // разбираем сбалансированными скобками + резолвим плейсхолдеры из карты args.
 // ============================================================
 // ============================================================================
-// EGOV — РЕЗИДЕНТСТВО ПО БИН (услуга P3011)
+// EGOV — РЕЗИДЕНТСТВО ПО БИН (услуга P3001, запасная P3011)
 // ----------------------------------------------------------------------------
 // ПОРТАЛ ПЕРЕЕХАЛ. Старый JSF-портал с эндпоинтом
 //   GET https://egov.kz/services/P30.11/rest/gbdul/organizations/{бин}   (куки-сессия)
@@ -317,7 +317,8 @@ async function fetchStatsnetIndustry(bin) {
 //   ORGANIZATION_NOT_FOUND_BY_BIN — в реестре юр. лиц РК такого БИН нет;
 //   ORGANIZATION_LIQUIDATED       — юрлицо ликвидировано.
 // Тот же путь есть у P3001/P3002/P3005/P3006 — это общий поиск организации в
-// группе услуг ГБД ЮЛ; берём P3011, как и раньше.
+// группе услуг ГБД ЮЛ. Основной теперь P3001 («Справки/сведения по юридическим
+// лицам», тип «О госрегистрации юрлица и его подразделений») — см. ниже.
 //
 // ЧТО ИЗМЕНИЛОСЬ ДЛЯ НАС:
 //   • признак resident отдельным полем больше НЕ приходит. Резидентство теперь
@@ -334,7 +335,15 @@ async function fetchStatsnetIndustry(bin) {
 //   localStorage['identity_data'] → state.identityData.auth.access_token
 // поэтому credentials:'include' больше не работает — токен читаем из вкладки
 // egov.kz через chrome.scripting (host_permissions на egov.kz уже есть).
-const EGOV_FGW_ORG_URL = 'https://fgw.egov.kz/v1/P3011/organizations?bin=';
+// Услуга ГБД ЮЛ, по которой ищем организацию по БИН. Пользователь указал
+// P3001 («Справки/сведения по юридическим лицам», тип «О госрегистрации юрлица
+// и его подразделений») — с неё и начинаем. Проверено вживую под сессией
+// пользователя: на шаге поиска организации P3001 и P3011 отдают ОДИНАКОВЫЙ
+// ответ (bin + name_ru/kz/en, тот же code/message), поэтому вердикт
+// резидентства от смены услуги не меняется. Второй код оставлен запасным:
+// если одну из услуг отключат, мост переживёт это без правок.
+const EGOV_FGW_SERVICES = ['P3001', 'P3011'];
+const egovFgwOrgUrl = (svc, bin) => `https://fgw.egov.kz/v1/${svc}/organizations?bin=${encodeURIComponent(bin)}`;
 const EGOV_PORTAL_URL = 'https://egov.kz/ru';
 const EGOV_TOKEN_LS_KEY = 'identity_data';
 // Старый эндпоинт оставляем как fallback: если у пользователя ещё живёт сессия
@@ -532,7 +541,7 @@ async function _getEgovToken(passive) {
 
 // Ответ нового шлюза → та же форма, что отдавал старый P30.11, чтобы
 // приложению (ResidentCheck._egovVerdict) ничего не пришлось переписывать.
-function egovOrgToResidency(d, bin) {
+function egovOrgToResidency(d, bin, svc) {
   const code = (d && d.code) || null;
   const list = (d && d.data && d.data.organization_info_list) || [];
   const first = list[0] || null;
@@ -550,7 +559,7 @@ function egovOrgToResidency(d, bin) {
     registrationDate: null,       // новый эндпоинт их не отдаёт
     incorporationCountry: null,
     liquidated: false,
-    _source: 'fgw.egov.kz/v1/P3011/organizations',
+    _source: `fgw.egov.kz/v1/${svc || 'P3001'}/organizations`,
   };
   if (code === 'ORGANIZATION_LIQUIDATED') {
     return { ...base, resident: true, liquidated: true, statusText: msg || 'Юридическое лицо ликвидировано' };
@@ -587,27 +596,42 @@ async function fetchEgovResidency(bin, retried) {
     }
   }
   egovNoSessionUntil = 0;
-  const resp = await fetch(EGOV_FGW_ORG_URL + bin, {
-    method: 'GET',
-    headers: { 'Accept': 'application/json', 'Authorization': 'Bearer ' + token },
-    cache: 'no-store',
-  });
-  if (resp.status === 401 || resp.status === 403) {
-    // Access протух между проверкой exp и запросом — сбрасываем и пробуем ОДИН
-    // раз заново (getEgovToken перечитает вкладку и при нужде сделает refresh).
-    egovToken.value = null; egovToken.exp = 0;
-    if (!retried) return fetchEgovResidency(bin, true);
-    egovNoSessionUntil = Date.now() + 60 * 1000;
-    throw new Error('Сессия egov.kz истекла — откройте egov.kz и войдите заново');
+  // Перебираем коды услуг по порядку. Со второй услугой пробуем ТОЛЬКО когда
+  // шлюз сломался (5xx / не JSON): «организация не найдена» — это валидный
+  // вердикт (нерезидент), и повторять его другой услугой нельзя.
+  let lastErr = null;
+  for (let i = 0; i < EGOV_FGW_SERVICES.length; i++) {
+    const svc = EGOV_FGW_SERVICES[i];
+    const resp = await fetch(egovFgwOrgUrl(svc, bin), {
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'Authorization': 'Bearer ' + token },
+      cache: 'no-store',
+    });
+    if (resp.status === 401 || resp.status === 403) {
+      // Access протух между проверкой exp и запросом — сбрасываем и пробуем ОДИН
+      // раз заново (getEgovToken перечитает вкладку и при нужде сделает refresh).
+      egovToken.value = null; egovToken.exp = 0;
+      if (!retried) return fetchEgovResidency(bin, true);
+      egovNoSessionUntil = Date.now() + 60 * 1000;
+      throw new Error('Сессия egov.kz истекла — откройте egov.kz и войдите заново');
+    }
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.status >= 500 || !ct.includes('json')) {
+      lastErr = new Error(resp.status >= 500
+        ? `egov (${svc}) вернул ${resp.status}`
+        : `egov (${svc}) вернул не JSON — проверьте вход на egov.kz`);
+      continue;   // услуга недоступна — пробуем следующую
+    }
+    // ВАЖНО: «организация не найдена» приходит НЕ с 200, причём код статуса у
+    // разных услуг РАЗНЫЙ: P3001 → 404, P3011 → 412 (проверено вживую), тело в
+    // обоих случаях нормальный JSON с code:'ORGANIZATION_NOT_FOUND_BY_BIN'.
+    // Поэтому resp.ok здесь НЕ проверяем и по коду статуса вердикт не выносим —
+    // его целиком определяет поле code. Иначе «нерезидент» превратился бы в
+    // ошибку запроса при любой смене услуги.
+    const d = await resp.json();
+    return egovOrgToResidency(d, bin, svc);
   }
-  if (resp.status >= 500) throw new Error('egov (fgw) вернул ' + resp.status);
-  const ct = resp.headers.get('content-type') || '';
-  if (!ct.includes('json')) throw new Error('egov (fgw) вернул не JSON — проверьте вход на egov.kz');
-  // ВАЖНО: «организация не найдена» приходит со статусом 412 (не 200 и не 404) и
-  // нормальным JSON-телом — поэтому resp.ok здесь НЕ проверяем, вердикт целиком
-  // определяется полем code (проверено на живом ответе шлюза).
-  const d = await resp.json();
-  return egovOrgToResidency(d, bin);
+  throw lastErr || new Error('egov (fgw) недоступен');
 }
 
 // Старый портал (до редизайна). Оставлен как запасной путь.
