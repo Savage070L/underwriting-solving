@@ -431,18 +431,37 @@ const Dossier = {
   // информация»). Вызывается из App.showPreview; перерисовывает ТОЛЬКО свои
   // контейнеры, чтобы догрузка источников не дёргала showPreview (иначе цикл).
   _SINGLE_MOUNTS: ['dossier-contractor', 'dossier-decision'],
+  //
+  // ПОЧЕМУ ctx ПЕРЕСОБИРАЕТСЯ НА КАЖДУЮ ОТРИСОВКУ (и зачем поколение _singleGen).
+  // Проверка по БИН рисует досье дважды: сразу (stat.gov ещё «в пути», ОКЭДов
+  // компании нет) и после ответа. Первая отрисовка запускала _enrich, чей
+  // колбэк держал ЗАМЫКАНИЕ на старый ctx — и когда через секунду отвечали
+  // kyc / e-Qazyna / egov, они перерисовывали досье из ТОГО ЖЕ устаревшего
+  // среза, затирая уже показанные данные stat.gov. Наружу это выглядело как
+  // «вторичные ОКЭДы не появляются, показывается только основной, а с 2-3-й
+  // попытки всё на месте» (со второй попытки источники уже в кэше, поздних
+  // колбэков нет — и затирать некому). Лечится двумя правилами:
+  //   1) ctx собирается ЗАНОВО в момент отрисовки (_ctxSingle всегда читает
+  //      текущее состояние App и кэши источников);
+  //   2) колбэки прошлой проверки отбрасываются по номеру поколения.
+  _singleGen: 0,
   renderSingle() {
     const hosts = () => Dossier._SINGLE_MOUNTS
       .map(id => document.getElementById(id)).filter(Boolean);
     if (!hosts().length) return;
-    const ctx = Dossier._ctxSingle();
-    const paint = () => hosts().forEach(h => {
-      if (!ctx.id) { h.innerHTML = ''; return; }
-      h.innerHTML = Dossier._html(ctx);
-      Dossier._layout(h);
-    });
-    paint();
-    if (ctx.id) Dossier._enrich(ctx, paint);
+    const gen = ++Dossier._singleGen;
+    const paint = () => {
+      if (gen !== Dossier._singleGen) return null;   // это ответ прошлой проверки
+      const ctx = Dossier._ctxSingle();
+      hosts().forEach(h => {
+        if (!ctx.id) { h.innerHTML = ''; return; }
+        h.innerHTML = Dossier._html(ctx);
+        Dossier._layout(h);
+      });
+      return ctx;
+    };
+    const ctx = paint();
+    if (ctx && ctx.id) Dossier._enrich(ctx, paint);
   },
 
   // Пересчёт masonry для встроенных досье — зовётся из App.switchTab: маунт,
