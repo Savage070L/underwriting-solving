@@ -728,7 +728,8 @@ const Dossier = {
       add('wallet', 'ФОТ (годовой)', money(fot));
       if (w > 0 && fot > 0) add('card', 'Средняя зарплата', Dossier._money(Math.round(fot / w / 12)) + ' ₸/мес');
     }
-    const oked = (r && r.oked) || (sg && sg.okedPrimaryCode) || (k && k.okedPrimaryCode) || null;
+    // Без фолбэка на kyc.kz: ОКЭД показываем из выгрузки или stat.gov.kz.
+    const oked = (r && r.oked) || (sg && sg.okedPrimaryCode) || null;
     add('hash', 'ОКЭД', oked);
     if (r) {
       const trP = Array.isArray(r.tranches) ? r.tranches : [];
@@ -993,7 +994,10 @@ const Dossier = {
     const ageRaw = (isInsurer && r && r._foundingDate) || (sgo && sgo.registrationDate) || (k && k.registrationDate) || null;
     const ageNow = (B && B._ageText && ageRaw) ? B._ageText(ageRaw, new Date()) : null;
     const ageAtDeal = (isInsurer && B && B._ageText && ageRaw && r && B._ageShownRef) ? B._ageText(ageRaw, B._ageShownRef(r)) : null;
-    const act = (sgo && sgo.okedPrimaryName) || (isCtxId && ctx.row && ctx.row.activity) || (k && k.okedPrimaryName) || null;
+    // Вид деятельности — из stat.gov.kz (или из выгрузки строки). Фолбэк на
+    // kyc.kz убран: его вид деятельности идёт от собственного ОКЭД, который
+    // мы больше не используем, и мог противоречить реестру.
+    const act = (sgo && sgo.okedPrimaryName) || (isCtxId && ctx.row && ctx.row.activity) || null;
     const name = (sgo && sgo.name) || (isCtxId ? Dossier._bestName(ctx) : '') || '';
     const rows = [
       bin ? ['БИН', `<span class="ds-v ds-v--num">${e(bin)}</span> ${Dossier._copyBtnHtml(bin, true)}`] : null,
@@ -1083,9 +1087,10 @@ const Dossier = {
       ['Тип ид.', `<span class="ds-v">${e(kind === 'bin' ? 'БИН' : (kind === 'iin' ? 'ИИН' : 'некорректный ид.'))}</span>${note ? `<span class="ds-vnote">${e(note.replace(/^по структуре БИН — /, ''))}</span>` : ''}`],
       (k && k.payNds != null) ? ['Плательщик НДС', `<span class="ds-v">${e(Dossier._flat(k.payNds) === 'true' ? 'да' : (Dossier._flat(k.payNds) === 'false' ? 'нет' : Dossier._flat(k.payNds)))}</span>`] : null,
       (k && k.status) ? ['Статус в реестре', `<span class="ds-v">${e(k.status)}</span><span class="ds-vnote">kyc.kz</span>`] : null,
+      // Только stat.gov.kz: вторичные виды деятельности из kyc.kz не берём
+      // (см. комментарий в _secOkeds — их маппинг не совпадает с реестром).
       Dossier._row('Вторичные ОКЭД', [
         { src: S.sg, v: sg && (sg.okedSecondaryCodes && sg.okedSecondaryCodes.length ? sg.okedSecondaryCodes.join(', ') : sg.okedSecondaryCode) },
-        { src: S.kyc, v: k && k.okedSecondary },
       ]),
     ].filter(Boolean);
     if (!rows.length) return null;
@@ -1268,11 +1273,18 @@ const Dossier = {
       if (found) { if (!found.tags.includes(tag)) found.tags.push(tag); return; }
       codes.push({ code: c, tags: [tag] });
     };
+    // ОКЭДы КОМПАНИИ берём ТОЛЬКО из stat.gov.kz — это официальный реестр и
+    // единственный источник, которому мы доверяем в вопросе видов деятельности.
+    // Раньше сюда подмешивался ОКЭД из kyc.kz: его маппинг вида деятельности
+    // приблизительный, и в таблицу попадала строка с кодом, которого у компании
+    // по реестру нет, — она путала выбор класса и тарифа.
     if (sg) {
       push(sg.okedPrimaryCode, Dossier.SRC.sg + ' (основной)');
       (sg.okedSecondaryCodes || []).forEach(c => push(c, Dossier.SRC.sg + ' (вторичный)'));
     }
-    if (Dossier._ok(ctx.kyc)) push(ctx.kyc.okedPrimaryCode, Dossier.SRC.kyc);
+    // Ниже — НЕ источники ОКЭДов компании, а проверяемые значения: код из
+    // выгрузки (его и красим красным, если у компании такого нет) и код,
+    // применённый в расчёте одиночной проверки.
     if (ctx.row) push(ctx.row.oked, Dossier.SRC.exp);
     if (!ctx.row && typeof App !== 'undefined' && App._resolveOked) {
       const rez = App._resolveOked();
