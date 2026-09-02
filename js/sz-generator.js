@@ -36,9 +36,12 @@ const SZGenerator = {
     const companyName = Utils.formatCompanyName(data.insurerName);
 
     // Решение по риску — единый источник (вердикт андеррайтера главнее алгоритма).
-    // «Страховая премия с ПК» = финальная премия оттуда же: при стандартном решении
-    // она равна базовой (в образцах обе строки совпадают), при скидке — со скидкой.
-    const { verdict, finalPremium } = Utils.acceptedConditions(data);
+    // useAdjusted = ПК ДЕЙСТВИТЕЛЬНО применён. Если скидки нет (были НС, молодая
+    // компания, премия упала бы ниже 1 МЗП или андеррайтер выбрал «стандарт») —
+    // строки «с ПК» в записке быть НЕ должно: раньше она печаталась всегда и
+    // повторяла базовую премию, из-за чего записка выглядела так, будто скидка
+    // применена, хотя по 45 НС её сняли.
+    const { verdict, finalPremium, useAdjusted } = Utils.acceptedConditions(data);
 
     const ctrGen = 'договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
     let projectDecision;
@@ -80,7 +83,9 @@ const SZGenerator = {
           line('Страховая сумма: ', money(data.insuranceSum)),
           line('Количество работников: ', Utils.fmtInteger(data.workers)),
           line('Страховая премия: ', money(data.premiumBase)),
-          line('Страховая премия с ПК: ', money(finalPremium != null ? finalPremium : data.premiumBase)),
+          ...(useAdjusted
+            ? [line('Страховая премия с ПК: ', money(finalPremium != null ? finalPremium : data.premiumBase))]
+            : []),
           line('Оплата: ', data.paymentOrder || '—'),
         ]),
         row('Укажите проект решения по вопросу повестки. ',
@@ -247,10 +252,12 @@ const SZGenerator = {
       : (data.claimsSummary || 'НС не было');
     // Премию «с учётом ПК» показываем ТОЛЬКО если решение действительно со
     // скидкой/повышением (useAdjusted из Utils.acceptedConditions). При стандарте
-    // или отклонении — прочерк: иначе записка противоречила бы решению по риску
-    // (показывала бы скидку там, где принято «со стандартным коэффициентом»).
+    // или отклонении СТРОКИ НЕТ ВОВСЕ (раньше печатался прочерк): если скидка
+    // снята — из-за НС, молодой компании, минимума в 1 МЗП или ручного
+    // «стандарта» — в записке остаётся одно поле «Страховая премия».
     const premWithCoeff = (useAdjusted && data.premiumWithCoeff && data.premiumWithCoeff !== data.premiumBase)
       ? Utils.fmtMoney(data.premiumWithCoeff) : '-';
+    const showPremWithCoeff = useAdjusted && premWithCoeff !== '-';
 
     const detailLine = (label, value) => justifyP([trB(`${label}: `), tr(String(value))]);
     const detailParas = [
@@ -260,8 +267,9 @@ const SZGenerator = {
       detailLine('Страховая сумма', Utils.fmtMoney(data.insuranceSum)),
       detailLine('Количество работников', Utils.fmtInteger(data.workers)),
       detailLine('Страховая премия', Utils.fmtMoney(data.premiumBase)),
-      // «Страховая премия с учётом ПК» — убираем для сделок уровня СД.
-      ...(isSdLimit ? [] : [detailLine('Страховая премия с учетом ПК', premWithCoeff)]),
+      // «Страховая премия с учётом ПК» — убираем для сделок уровня СД, а также
+      // когда ПК фактически не применён (см. showPremWithCoeff).
+      ...((isSdLimit || !showPremWithCoeff) ? [] : [detailLine('Страховая премия с учетом ПК', premWithCoeff)]),
       detailLine('Оплата', data.paymentOrder || '—'),
       detailLine('Статистика НС за последние 3-х лет', claimsLine),
       detailLine('Организация с государственным участием', `– ${data.govParticipation || '—'}`),
