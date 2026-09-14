@@ -28,6 +28,9 @@ const ARFormPdf = {
   // Поэтому считаем переносы сами — по реальным ширинам символов Times New Roman
   // (PDF_CHAR_W из js/lib/pdf-fonts.js) — и добавляем ячейке верхний отступ.
   LINE_K: 1.15,          // высота строки = кегль × K (замерено по готовому PDF)
+  SIG_ROW_K: 2.5,        // во столько раз выше обычной делаем строку с подписью
+  SIG_ROW_PAD: 12,       // pt — воздух над и под подписью внутри строки
+  SIG_ABOVE: 0.55,       // какая доля росчерка лежит ВЫШЕ линии прочерка
 
   _charW(ch, bold) {
     const t = (typeof PDF_CHAR_W !== 'undefined') ? PDF_CHAR_W
@@ -170,7 +173,12 @@ const ARFormPdf = {
                 width: w,
                 height: h,
                 // dy — своя посадка у каждой подписи (см. ARForm.SIGNATURES).
-                margin: [(LINE_W - w) / 2, -(h + (meta.dy != null ? meta.dy : A.SIG_DY_DEFAULT) * MM), 0, -h],
+                // Доля росчерка НАД линией (SIG_ABOVE) + тонкая подстройка dy.
+                // Раньше подпись висела на линии нижним краем (доля = 1), и при
+                // увеличении размера верх уезжал на соседние строки. Теперь доля
+                // постоянна, поэтому посадка не зависит от размера подписи.
+                margin: [(LINE_W - w) / 2 + (meta.dx != null ? meta.dx : A.SIG_DX_DEFAULT) * MM,
+                  -(h * ARFormPdf.SIG_ABOVE + (meta.dy != null ? meta.dy : A.SIG_DY_DEFAULT) * MM), 0, -h],
               },
             ],
           },
@@ -230,6 +238,8 @@ const ARFormPdf = {
     };
 
     const body = [];
+    // Индексы строк с подписью: им задаётся увеличенная высота (см. ниже).
+    const sigRows = [];
     // ===== СЕКЦИЯ 1: РЕКОМЕНДАЦИЯ ДАиП =====
     body.push(sectionRow('РЕКОМЕНДАЦИЯ ДАиП', docNo, docDate));
     body.push(labelRow('Страхователь', nameCell));
@@ -241,13 +251,13 @@ const ARFormPdf = {
     body.push(labelRow('Срок действия договора страхования', period));
     body.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
     body.push(labelRow('ДАиП рекомендовано:', recText));
-    body.push(labelRow(`${uwRole}:`, sigCell(uwName)));
+    sigRows.push(body.length); body.push(labelRow(`${uwRole}:`, sigCell(uwName)));
     // ===== СЕКЦИЯ 2: ЗАКЛЮЧЕНИЕ ПО УПРАВЛЕНИЮ РИСКАМИ =====
     body.push(sectionRow('ЗАКЛЮЧЕНИЕ ПОДРАЗДЕЛЕНИЯ ПО УПРАВЛЕНИЮ РИСКАМИ', docNo, docDate));
     body.push(labelRow('Класс профессионального риска', 'соответствует'));
     body.push(labelRow('Страховой тариф', 'соответствует'));
     body.push(labelRow('Источник данных по статистике страховых случаев Страхователя', 'Единая Страховая База Данных'));
-    body.push(labelRow(rmRole, sigCell(rmName)));
+    sigRows.push(body.length); body.push(labelRow(rmRole, sigCell(rmName)));
     // ===== СЕКЦИЯ 3: АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ =====
     body.push(sectionRow('АНДЕРРАЙТИНГОВОЕ РЕШЕНИЕ', docNo, docDate));
     body.push(labelRow('На основании Рекомендации', `№ ${docNo || '____'} от ${docDate}`));
@@ -260,14 +270,33 @@ const ARFormPdf = {
     body.push(labelRow('Срок действия договора страхования', period));
     body.push(labelRow('Информация о страховом агенте/Брокере', 'нет'));
     body.push(labelRow('РЕШЕНИЕ:', recText));
-    body.push(labelRow(`${uwRole}:`, sigCell(uwName)));
+    sigRows.push(body.length); body.push(labelRow(`${uwRole}:`, sigCell(uwName)));
+
+    // Строки с подписью делаем выше обычных — чтобы факсимиле было читаемым
+    // на бумаге (пользователь: на печати подписи выглядели слишком мелкими).
+    // Высота задаётся МИНИМУМОМ через table.heights: содержимое в неё
+    // центрируется, а не прижимается к верху.
+    const rowHeights = {};
+    {
+      // Высота строки подписи — НЕ МЕНЬШЕ самой подписи плюс поля, иначе
+      // факсимиле не помещается и вылезает на соседние строки. Отдельно
+      // держим кратность SIG_ROW_K (во сколько раз выше обычной строки), но
+      // побеждает большее из двух.
+      const sigH = A.SIG_HEIGHT * 0.75;                       // px(96 dpi) → pt
+      for (const idx of sigRows) {
+        const labelLines = ARFormPdf._lineCount(body[idx][0].text, COLS[0], SZ, false);
+        const byLines = labelLines * SZ * ARFormPdf.LINE_K * ARFormPdf.SIG_ROW_K;
+        const byImage = sigH + ARFormPdf.SIG_ROW_PAD;
+        rowHeights[idx] = Math.max(byLines, byImage);
+      }
+    }
 
     // Вертикально центрируем содержимое каждой ячейки: в бланке (и в исходной
     // .docx-форме) текст стоит посередине строки, а pdfmake прижимает его к
     // верху. Считаем, сколько строк займёт каждая ячейка, и недостающую
     // половину разницы добавляем верхним отступом.
     const LINE_H = SZ * ARFormPdf.LINE_K;
-    for (const rowCells of body) {
+    body.forEach((rowCells, rowIdx) => {
       // Ширина ячейки с учётом объединения колонок (внутренние отступы
       // объединённых колонок становятся частью содержимого).
       const widthAt = (j, cs) => {
@@ -284,10 +313,16 @@ const ARFormPdf = {
         info.push({ cell: c, lines: ARFormPdf._lineCount(c.text, widthAt(j, cs), size, !!c.bold), size });
       }
       const maxLines = Math.max(1, ...info.filter(Boolean).map(x => x.lines));
-      if (maxLines < 2) continue;                                   // однострочная строка — центрировать нечего
+      // Полезная высота строки: обычно по самой «высокой» ячейке, а у строк с
+      // подписью — заданная принудительно (ROW_H в rowHeights).
+      const forced = rowHeights[rowIdx];
+      const rowH = forced != null ? forced : maxLines * LINE_H;
+      if (rowH <= LINE_H + 0.01) return;                            // однострочная строка — центрировать нечего
       for (const x of info) {
-        if (!x || x.lines >= maxLines) continue;
-        const shift = (maxLines - x.lines) * (x.size * ARFormPdf.LINE_K) / 2;
+        if (!x) continue;
+        const own = x.lines * (x.size * ARFormPdf.LINE_K);
+        const shift = (rowH - own) / 2;
+        if (shift <= 0) continue;
         const m = x.cell.margin || [0, 0, 0, 0];
         x.cell.margin = [m[0], m[1] + shift, m[2], m[3]];
       }
@@ -295,15 +330,16 @@ const ARFormPdf = {
       for (const c of rowCells) {
         if (c && c.columns && !c._vcentered) {
           c._vcentered = true;
-          const shift = (maxLines - 1) * LINE_H / 2;
+          const shift = (rowH - LINE_H) / 2;
           const m = c.margin || [0, 0, 0, 0];
           c.margin = [m[0], m[1] + shift, m[2], m[3]];
         }
       }
-    }
+    });
 
     const content = [{
-      table: { widths: COLS, body, dontBreakRows: true },
+      table: { widths: COLS, body, dontBreakRows: true,
+        heights: (i) => rowHeights[i] },
       layout: {
         hLineWidth: () => 0.5, vLineWidth: () => 0.5,
         hLineColor: () => '#000000', vLineColor: () => '#000000',
