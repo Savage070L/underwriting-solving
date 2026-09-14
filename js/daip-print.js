@@ -11,7 +11,7 @@
 //   2) подписант РЕДАКТИРУЕМЫЙ — ФИО и должность (периодически меняются).
 // Один документ на договор (филиалы — внутри), всё в один ZIP.
 //
-// Переиспользуем ARForm.buildDocx (underwriterName/Role), BatchAR._ensureZip
+// Переиспользуем ARFormPdf.buildPdf (underwriterName/Role), BatchAR._ensureZip
 // (ленивая загрузка JSZip) и глобальный saveAs.
 
 const DaipPrint = {
@@ -44,6 +44,15 @@ const DaipPrint = {
   // Обновить статус/кнопку по текущему реестру. Вызывается при переключении на
   // вкладку (App.switchTab) и после загрузки/очистки реестра в «Проверке договоров».
   refresh() {
+    // Подписант по умолчанию — из «Справочников» (App._getSigner), а не жёстко
+    // вписанный в разметку: раньше в поле стоял «Бурханов Д.К.», и он ПЕРЕБИВАЛ
+    // справочник, потому что значение поля идёт в opts.underwriterName.
+    // Заполняем только пустое поле — правку пользователя не затираем.
+    const nameInp = document.getElementById('daip-signer-name');
+    if (nameInp && !nameInp.value.trim() && typeof App !== 'undefined' && App._getSigner) {
+      const ref = App._getSigner('daipDirector');
+      if (ref) { nameInp.value = ref; nameInp.placeholder = `Из справочника: ${ref}`; }
+    }
     const rows = DaipPrint._rows();
     const contracts = rows.length ? DaipPrint._groupByContract().size : 0;
     const statusEl = document.getElementById('daip-status');
@@ -66,9 +75,9 @@ const DaipPrint = {
   // «/» в номере договора → дефис, прочие запрещённые символы → «_».
   _fileName(cn, taken) {
     const base = `Рекомендация ДАиП ${BatchAR._safeName(cn) || 'без номера'}`;
-    let name = `${base}.docx`;
+    let name = `${base}.pdf`;
     let n = 2;
-    while (taken.has(name)) name = `${base} (${n++}).docx`;
+    while (taken.has(name)) name = `${base} (${n++}).pdf`;
     taken.add(name);
     return name;
   },
@@ -93,7 +102,7 @@ const DaipPrint = {
         const [cn, group] = groups[i];
         if (txt) txt.textContent = `Печать ${i + 1} из ${N} — договор ${cn}`;
         if (bar) bar.style.width = Math.round((i / N) * 100) + '%';
-        const blob = await ARForm.buildDocx(group[0], {
+        const blob = await ARFormPdf.buildPdf(group[0], {
           underwriterName: name,
           underwriterRole: role,
           filials: group.slice(1),

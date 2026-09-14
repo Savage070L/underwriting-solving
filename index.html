@@ -451,7 +451,7 @@
             </label>
             <label class="daip-field">
               <span class="daip-field-label">ФИО подписанта</span>
-              <input type="text" id="daip-signer-name" value="Бурханов Д.К." placeholder="Например: Бурханов Д.К.">
+              <input type="text" id="daip-signer-name" placeholder="Из справочника подписантов">
             </label>
           </div>
 
@@ -913,6 +913,9 @@
 
   <script src="js/lib/xlsx.full.min.js"></script>
   <script src="js/lib/docx.min.js"></script>
+  <!-- PDF-версия «Рекомендации ДАиП»: библиотека + вшитый шрифт (см. js/ar-form-pdf.js) -->
+  <script src="js/lib/pdfmake.min.js"></script>
+  <script src="js/lib/pdf-fonts.js"></script>
   <script src="js/lib/FileSaver.min.js"></script>
   <!-- PDF-экспорт аналитики делается через скрытый iframe с analytics.html?exportPdf=<имя>.
        html2canvas + jsPDF подгружаются по требованию изнутри analytics.js — здесь
@@ -929,6 +932,7 @@
   <script src="js/resident-check.js"></script>
   <script src="js/batch-reader.js"></script>
   <script src="js/ar-form.js"></script>
+  <script src="js/ar-form-pdf.js"></script>
   <script src="js/batch-ar.js"></script>
   <script src="js/dossier.js"></script>
   <script src="js/daip-print.js"></script>

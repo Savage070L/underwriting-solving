@@ -1,9 +1,10 @@
 // batch-ar.js — контроллер массовой генерации Андеррайтинговых решений (АР).
 //
 // Поток: загрузка ежедневного реестра (.xlsx) → BatchReader.parse → превью-
-// таблица → генерация заполненных .docx по форме ARForm (docx-библиотека,
+// таблица → генерация заполненных PDF по форме ARFormPdf (см. ar-form-pdf.js,
 // редактируемые таблицы), поодиночке или пакетом в ZIP (JSZip). Имена файлов —
-// «АР {БИН}.docx». Генерация быстрая — просто сборка docx-объектов, без рендера.
+// «АР {номер договора}.pdf» — PDF, а не .docx: в форму вшиты факсимиле
+// подписантов, и подписанный документ не должен быть редактируемым.
 //
 // Параллельно (в фоне, с лимитом параллельности) по каждому БИНу запрашивается
 // statgov: подтягивается официальное название/адрес и дата регистрации. Если
@@ -1952,11 +1953,6 @@ const BatchAR = {
     }
   },
 
-  // ===== Сборка одной формы в .docx (Blob) =====
-  _genBlob(row) {
-    return ARForm.buildDocx(row, { printAlert: false });
-  },
-
   // Номер договора → безопасный кусок имени файла. Слеши (в номерах договоров
   // они встречаются: «T04/290526/0002») заменяем на ДЕФИС, а не на «_»: так
   // читается ближе к оригиналу, и внутри ZIP «/» не создаёт лишнюю папку.
@@ -1971,10 +1967,10 @@ const BatchAR = {
   _fileName(contractNumber, taken) {
     const safe = BatchAR._safeName(contractNumber) || 'без_номера';
     const base = `АР ${safe}`;
-    let name = `${base}.docx`;
+    let name = `${base}.pdf`;
     if (taken) {
       let k = 2;
-      while (taken.has(name)) { name = `${base} (${k}).docx`; k++; }
+      while (taken.has(name)) { name = `${base} (${k}).pdf`; k++; }
       taken.add(name);
     }
     return name;
@@ -2444,8 +2440,8 @@ const BatchAR = {
         const [cn, group] = toGenerate[i];
         if (txt) txt.textContent = `Генерация ${i + 1} из ${N} — ${withDossier ? 'досье + ' : ''}АР ${cn}`;
         if (bar) bar.style.width = Math.round((i / N) * 100) + '%';
-        const blob = await ARForm.buildDocx(group[0], { printAlert: false, filials: group.slice(1) });
-        // .docx уже сжат (zip) — храним без перекомпрессии (STORE) — быстрее.
+        const blob = await ARFormPdf.buildPdf(group[0], { printAlert: false, filials: group.slice(1) });
+        // PDF уже сжат внутри — храним без перекомпрессии (STORE), так быстрее.
         zip.file(BatchAR._fileName(cn, taken), blob, { compression: 'STORE' });
         // Досье по договору — рядом, в подпапке. Строится из УЖЕ полученных
         // данных проверки (новых запросов к источникам не делает).
