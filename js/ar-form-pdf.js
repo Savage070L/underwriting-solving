@@ -154,6 +154,14 @@ const ARFormPdf = {
     // Подпись привязана к ФАМИЛИИ: у постороннего подписанта останется прочерк.
     const UNDERSCORES = '_______________';
     const LINE_W = UNDERSCORES.length * 0.5 * SZ;   // ширина прочерка, pt
+    // Факсимиле объявляем в словаре images и ссылаемся по ключу: директор ДАиП
+    // подписывает разделы 1 и 3, и при передаче data:URL прямо в узел pdfmake
+    // вшивает один и тот же PNG в документ ДВАЖДЫ (+60 КБ на документ пакета).
+    const imageDict = {};
+    const imageKey = (file) => {
+      if (!imageDict[file]) imageDict[file] = sigs[file].url;
+      return file;
+    };
     const sigCell = (name) => {
       const meta = A._sigFor(name);
       const img = meta && sigs[meta.file];
@@ -169,7 +177,7 @@ const ARFormPdf = {
             stack: [
               txt(UNDERSCORES),
               {
-                image: img.url,
+                image: imageKey(meta.file),
                 width: w,
                 height: h,
                 // dy — своя посадка у каждой подписи (см. ARForm.SIGNATURES).
@@ -361,6 +369,7 @@ const ARFormPdf = {
       pageSize: 'A4',
       pageMargins: [pt(567), pt(567), pt(567), pt(567)],
       defaultStyle: { font: ARFormPdf.FONT, fontSize: SZ },
+      images: imageDict,
       content,
     };
   },
