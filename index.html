@@ -209,6 +209,17 @@
               </div>
             </div>
 
+            <!-- Подписант Рекомендации ДАиП — отдельное поле, потому что это
+                 другой человек, чем Директор ДАиП выше. Пока ключ был общий,
+                 смена подписанта Рекомендации меняла ФИО и в СЗ, и в Протоколе. -->
+            <div class="signers-group" style="order:3">
+              <div class="signers-group-title">Рекомендация ДАиП</div>
+              <div class="signer-row signer-row--solo" id="sgn-row-daipUnderwriter">
+                <input type="text" id="sgn-role-daipUnderwriter" class="signer-role-input" placeholder="Должность" oninput="App.onSignerOverride('daipUnderwriter','role',this.value)">
+                <input type="text" id="sgn-daipUnderwriter" placeholder="ФИО" oninput="App.onSignerOverride('daipUnderwriter','name',this.value)">
+              </div>
+            </div>
+
             <!-- Члены АС: 6 человек + секретарь. У каждого члена можно править
                  должность и снять галочку «участвует» (отпуск → строка не
                  попадёт в АР/Протокол). Секретарь без галочки — он обязателен. -->
@@ -447,7 +458,7 @@
           <div class="daip-signer">
             <label class="daip-field">
               <span class="daip-field-label">Должность подписанта</span>
-              <input type="text" id="daip-signer-role" value="Андеррайтер" placeholder="Например: Андеррайтер">
+              <input type="text" id="daip-signer-role" placeholder="Например: Андеррайтер">
             </label>
             <label class="daip-field">
               <span class="daip-field-label">ФИО подписанта</span>

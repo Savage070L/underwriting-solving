@@ -448,13 +448,16 @@ const ZaklGenerator = {
       children: [trB('Директор Департамента')],
     }));
 
-    // Use a right-aligned tab stop so signatory name sits on the same line
+    // Use a right-aligned tab stop so signatory name sits on the same line.
+    // ФИО — из «Справочников» (Директор ДАиП), а не вписанное сюда: подписант
+    // меняется, и раньше Заключение оставалось единственным документом, где
+    // правка в справочнике не срабатывала.
     paragraphs.push(new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
       children: [
         trB('андеррайтинга и перестрахования'),
         trB('\t'),
-        trB('Бурханов Д.К.'),
+        trB(Utils.DAIP_DIRECTOR_NAME),
       ],
     }));
 

@@ -63,8 +63,17 @@ const DaipPrint = {
     // Заполняем только пустое поле — правку пользователя не затираем.
     const nameInp = document.getElementById('daip-signer-name');
     if (nameInp && !nameInp.value.trim() && typeof App !== 'undefined' && App._getSigner) {
-      const ref = App._getSigner('daipDirector');
+      // Справочник «Рекомендация ДАиП», а не «Директор ДАиП» — Рекомендацию и
+      // СЗ/Протокол подписывают разные люди.
+      const ref = App._getSigner('daipUnderwriter');
       if (ref) { nameInp.value = ref; nameInp.placeholder = `Из справочника: ${ref}`; }
+    }
+    // Должность — оттуда же и по той же причине: вписанная в разметку строка
+    // ушла бы в opts.underwriterRole и перебила справочник.
+    const roleInp = document.getElementById('daip-signer-role');
+    if (roleInp && !roleInp.value.trim() && typeof App !== 'undefined' && App._getSignerRole) {
+      const ref = App._getSignerRole('daipUnderwriter');
+      if (ref) { roleInp.value = ref; roleInp.placeholder = `Из справочника: ${ref}`; }
     }
     const rows = DaipPrint._rows();
     const contracts = rows.length ? DaipPrint._groupByContract().size : 0;

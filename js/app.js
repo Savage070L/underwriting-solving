@@ -1385,8 +1385,14 @@ const App = {
     // Solo positions
     sdChair:          'М.К. Альжанову',    // Председатель Совета директоров (адресат СЗ на СД, дат. падеж)
     pravlenieChair:   'Г. Амерходжаев',    // Председатель Правления (адресат СЗ на Правление)
-    // С 01.07.2026 Рекомендацию ДАиП подписывает Джелкобаев (ранее Бурханов Д.К.).
-    daipDirector:     'Джелкобаев Т.К.', // Директор ДАиП (подписант СЗ и Рекомендации ДАиП)
+    // ВНИМАНИЕ: подписантов двое, и это РАЗНЫЕ люди — не сливать в один ключ.
+    // daipDirector — Директор ДАиП: он подписывает документы со страницы
+    // «Андеррайтинговое решение» (СЗ, Протокол; в АР и Протоколе он же идёт
+    // членом АС — asMember5). daipUnderwriter — андеррайтер, подписывающий
+    // Рекомендацию ДАиП (js/ar-form-pdf.js). Раньше ключ был один, и смена
+    // подписанта Рекомендации протащила Джелкобаева во ВСЕ документы страницы.
+    daipDirector:     'Бурханов Д.К.',   // Директор ДАиП (подписант СЗ и Протокола)
+    daipUnderwriter:  'Джелкобаев Т.К.', // Андеррайтер — подписант Рекомендации ДАиП
     upravDir:         'Аринов Д.С.',       // Управляющий директор
     // АС (Андеррайтинговый Совет) — 6 членов + секретарь
     asMember0:        'Амерходжаев Г.Т.',  // Председатель Правления
@@ -1409,6 +1415,7 @@ const App = {
     sdChair:          'Председатель Совета директоров',
     pravlenieChair:   'Председатель Правления',
     daipDirector:     'Директор ДАиП',
+    daipUnderwriter:  'Андеррайтер',
     upravDir:         'Заместитель Председателя Правления, член Правления',
     asMember0:        'Председатель Правления',
     asMember1:        'Заместитель Председателя Правления, член Правления',
@@ -1606,8 +1613,40 @@ const App = {
     } catch (_) {
       App.refData.signers = {};
     }
+    App._migrateDaipSigner();
     App._syncSignersToUtils();
     App._fillSignersInputs();
+  },
+
+  // Разовый перенос сохранённого подписанта Рекомендации ДАиП.
+  // Пока ключ был один (daipDirector), подписанта Рекомендации вписывали именно
+  // в него — и этот override лежит в localStorage у каждого, кто так делал.
+  // Сам по себе он никуда не денется и продолжит подставлять Джелкобаева в СЗ и
+  // Протокол, поэтому переносим значение в daipUnderwriter (если там ещё пусто)
+  // и снимаем override с daipDirector — тот вернётся к Директору ДАиП.
+  // Трогаем ТОЛЬКО ровно это значение: чужое ФИО в поле — осознанная правка
+  // пользователя, её не перекладываем.
+  _migrateDaipSigner() {
+    const signers = App.refData.signers;
+    if (!signers) return;
+    const ovr = signers.daipDirector;
+    const name = (typeof ovr === 'string') ? ovr : (ovr && ovr.name);
+    if (!name || String(name).trim() !== App.SIGNERS_DEFAULTS.daipUnderwriter) return;
+    if (!signers.daipUnderwriter) {
+      const rest = (typeof ovr === 'object' && ovr) ? { ...ovr } : {};
+      delete rest.name;
+      // Значение совпадает с дефолтом нового ключа, поэтому override не нужен —
+      // достаточно снять его со старого. Остальные поля (role/skip) сохраняем.
+      if (Object.keys(rest).length) signers.daipUnderwriter = rest;
+    }
+    if (typeof ovr === 'object' && ovr) {
+      delete ovr.name;
+      if (!Object.keys(ovr).length) delete signers.daipDirector;
+    } else {
+      delete signers.daipDirector;
+    }
+    App._persistSigners();
+    console.info('Подписанты: ФИО из «Директор ДАиП» относится к Рекомендации ДАиП — перенесено в отдельное поле.');
   },
 
   // Восстановление overrides из localStorage. Вызывается из restoreCache.

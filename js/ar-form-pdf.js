@@ -123,9 +123,15 @@ const ARFormPdf = {
     const recText = `принять на страхование на указанных условиях — ${A.decisionText(row)}`;
 
     const fromRef = (key) => ((typeof App !== 'undefined' && App._getSigner) ? App._getSigner(key) : null);
+    const fromRefRole = (key) => ((typeof App !== 'undefined' && App._getSignerRole) ? App._getSignerRole(key) : null);
+    // Подписант Рекомендации ДАиП — ОТДЕЛЬНЫЙ справочник ('daipUnderwriter'), а
+    // не «Директор ДАиП» ('daipDirector'). Ключ был один, и смена подписанта
+    // Рекомендации протаскивала его во все документы «Андеррайтингового
+    // решения» (СЗ, Протокол) — теперь это разные люди и разные поля.
     const uwName = (opts.underwriterName && String(opts.underwriterName).trim())
-      || fromRef('daipDirector') || A.UNDERWRITER;
-    const uwRole = (opts.underwriterRole && String(opts.underwriterRole).trim()) || 'Андеррайтер';
+      || fromRef('daipUnderwriter') || A.UNDERWRITER;
+    const uwRole = (opts.underwriterRole && String(opts.underwriterRole).trim())
+      || fromRefRole('daipUnderwriter') || A.UNDERWRITER_ROLE;
     const rmName = fromRef('asMember4') || A.RISK_MANAGER;
     const rmRole = (typeof App !== 'undefined' && App._getSignerRole)
       ? (App._getSignerRole('asMember4') || A.RISK_MANAGER_ROLE) : A.RISK_MANAGER_ROLE;
