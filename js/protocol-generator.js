@@ -53,8 +53,11 @@ const ProtocolGenerator = {
       ...opts,
     });
 
-    // Decide organ
-    const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
+    // Орган — тот же, что определила страница (data.organ учитывает
+    // аффилированность); пересчёт по сумме — только запасной путь. Иначе
+    // Протокол и АР могли бы разойтись с баннером и СЗ по органу.
+    const organ = data.organ
+      || Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge, data.isAffiliated);
     const isPravlenie = organ === 'pravlenie';
     const members = isPravlenie ? Utils.PRAVLENIE_MEMBERS : Utils.AS_MEMBERS;
     const secretary = isPravlenie ? Utils.PRAVLENIE_SECRETARY : Utils.AS_SECRETARY;

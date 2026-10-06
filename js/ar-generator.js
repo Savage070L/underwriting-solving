@@ -9,14 +9,21 @@ const ARGenerator = {
       TableLayoutType, VerticalAlign, CheckBox,
     } = docx;
 
-    const organ = Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge);
+    // Орган — ТОТ ЖЕ, что определила страница (баннер «Определён орган», набор
+    // кнопок, СЗ): App._effectiveFinancials → data.organ учитывает и
+    // аффилированность (→ Совет директоров). Раньше АР пересчитывал орган сам —
+    // только по сумме и активам, — и для аффилированного лица (пакет СД) печатал
+    // «в рамках лимита Андеррайтингового совета», «Члены/Секретарь
+    // Андеррайтингового Совета», хотя СЗ в том же пакете шла на СД.
+    // Пересчёт — только запасной путь, если data.organ не передан.
+    const organ = data.organ
+      || Utils.determineOrgan(data.insuranceSum, data.riskClass, data.normativ?.fullAssetsTenge, data.isAffiliated);
     // Решение/условия/ПК — из единого источника (Utils.acceptedConditions):
     // ФИНАЛЬНОЕ решение всегда за андеррайтером (ручной вердикт главнее алгоритма).
     //   accept_standard → decision='standard', coeffEffective=1, премия с ПК = «-»
     //   accept_adjusted → вычисленный decision (lowered/raised), реальный ПК/премия
     //   reject/defer     → decision не используется (execution-line другая)
     const { verdict, decision, useAdjusted, coeffEffective } = Utils.acceptedConditions(data);
-    const organName = Utils.getOrganName(organ);
     const organNameHeader = Utils.getOrganNameHeader(organ);
     // Правление и Совет директоров используют ОДИН состав (члены Правления):
     // в подписном блоке АР — «Члены Правления» и члены Правления даже при лимитах СД.
@@ -63,11 +70,12 @@ const ARGenerator = {
     addressParts.push(`Признак резидентства – ${residency}.`);
     const addressLine = addressParts.join(', ');
 
-    // Row 7: причина вынесения — «в рамках лимита <орган> Компании № <номер АР> от <дата>г.»
-    // organName склоняется по органу (Андеррайтингового совета / Правления / Совета
-    // директоров). Номер — из поля «Номер АР» (data.docNumber), дата — из заявки
-    // (F3 → data.docDate). Оба ПОДТЯГИВАЮТСЯ динамически (не фиксированные).
-    const reasonText = `Страховая сумма в рамках лимита ${organName} Компании\n№ ${data.docNumber} от ${dateShort}г.`;
+    // Row 7: причина вынесения — одной строкой, как в бланке:
+    // «Страховая сумма в рамках лимита Андеррайтингового Совета | Правления |
+    // Совета директоров Компании № <номер АР> от <дата>г.». Орган — заглавной
+    // («Совета»), как в шапке «Члены …». Номер — поле «Номер АР» (data.docNumber),
+    // дата — из заявки (F3 → data.docDate).
+    const reasonText = `Страховая сумма в рамках лимита ${organNameHeader} Компании № ${data.docNumber} от ${dateShort}г.`;
 
     // Decision options — driven by verdict (manual selection or auto-resolved)
     const decisionOptions = [
@@ -135,7 +143,7 @@ const ARGenerator = {
       ['4. Выгодоприобретатель (ФИО)', Utils.BENEFICIARY_TEXT],
       ['5. Вид страхования', Utils.INSURANCE_TYPE],
       ['6. Вид экономической деятельности', data.activity || '-'],
-      ['7. Причина вынесения на рассмотрение/\n№ и дата рекомендации\nДепартамента андеррайтинга и перестрахования', reasonText],
+      ['7. Причина вынесения на рассмотрение/ № и дата рекомендации Департамента андеррайтинга и перестрахования', reasonText],
       ['8. Класс профессионального риска', String(data.riskClass || '-')],
       ['9. Статистика убытков за последние 3-х лет', (data.claims && data.claims.detailedSummary && data.claims.detailedSummary !== 'НС не было') ? data.claims.detailedSummary : (data.claimsSummary || 'НС не было')],
     ];

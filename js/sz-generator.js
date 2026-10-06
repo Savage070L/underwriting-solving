@@ -161,7 +161,6 @@ const SZGenerator = {
     // расходится с принятым решением (стандарт / со скидкой / отклонение).
     // Единый источник (Utils.acceptedConditions): вердикт андеррайтера главнее алгоритма.
     const { verdict, conditionText, useAdjusted } = Utils.acceptedConditions(data);
-    const verdictLabel = Utils.VERDICT_LABELS[verdict] || Utils.VERDICT_LABELS.accept_standard;
 
     // Recipient block
     const isPravlenie = (mode === 'pravlenie');
@@ -170,51 +169,51 @@ const SZGenerator = {
       : 'Председателю Совета директоров';
     const fixedRecipientName = isPravlenie ? 'Амерходжаеву Г.Т.' : Utils.SD_CHAIR_NAME;
 
-    // Формулировки для СЗ — с учётом аффилированности (data.isAffiliated)
+    // Формулировки — по бланкам «СЗ на Правление» / «СЗ на СД» (образцы
+    // компании). Образцы написаны для аффилированного лица; если лицо НЕ
+    // аффилировано, фрагменты «сделки с аффилированным лицом Общества…» просто
+    // выпадают, а остальной текст остаётся грамматически цельным.
     const isAff = !!data.isAffiliated;
-    // Сделка уровня Совета директоров (крупная сделка или аффилированное лицо).
+    // Сделка уровня Совета директоров (крупная сделка или аффилированное лицо):
+    // тогда СЗ на Правление лишь выносит вопрос на СД.
     const isSdLimit = (data.organ === 'sd');
-    // Квалификация сделки для формулировок СД: крупная / с аффилированным лицом.
-    const sdDealGen = isAff ? 'сделки с аффилированным лицом' : 'крупной сделки'; // род. падеж
-    const sdDealNom = isAff ? 'сделка с аффилированным лицом' : 'крупная сделка'; // им. падеж
-    let subject;
-    if (isPravlenie) {
-      // СЗ на Правление: при лимитах СД — формулировка «на рассмотрение Совета директоров».
-      subject = isSdLimit
-        ? `О вынесении на рассмотрение Совета директоров решения о заключении ${sdDealGen} (договора ОСРНС)`
-        : (isAff
-            ? 'О вынесении на рассмотрение Правления решения о заключении сделки с аффилированным лицом (договор ОСРНС)'
-            : 'О вынесении на рассмотрение Правления решения о заключении сделки (договор ОСРНС)');
-    } else {
-      // СЗ на Совет директоров. По умолчанию — «крупная сделка»; для
-      // аффилированного лица — «сделка с аффилированным лицом» (без «крупной»).
-      subject = isAff
-        ? 'О заключении сделки с аффилированным лицом (договор ОСРНС)'
-        : 'О заключении крупной сделки (договора ОСРНС)';
-    }
+    // Квалификация сделки для строки «Лимит СД» (им. падеж).
+    const sdDealNom = isAff ? 'сделка с аффилированным лицом' : 'крупная сделка';
 
-    // Проект решения зависит от решения по риску (verdict). Условия принятия
-    // (стандарт / со скидкой / с повышением) подставляются из conditionText.
     const ctrGen = 'договора обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
     const ctrAcc = 'договор обязательного страхования работника от несчастных случаев при исполнении им трудовых (служебных) обязанностей';
-    const counterpartyPravl = isAff
-      ? `с аффилированным лицом с компанией – ${companyName}`
-      : `сделки с компанией – ${companyName}`;
+    const affGen = isAff ? 'сделки с аффилированным лицом Общества ' : '';
+    const affAcc = isAff ? 'сделку с аффилированным лицом Общества ' : '';
+    const dealGen = `${affGen}${ctrGen}`; // «(заключение) сделки с аффил. лицом Общества договора …»
+    const dealAcc = `${affAcc}${ctrAcc}`; // «Заключить сделку с аффил. лицом Общества договор …»
+
+    let subject;
+    if (isPravlenie) {
+      subject = `О вынесении на рассмотрение заседания Правления заключения ${dealGen}`;
+    } else {
+      subject = isAff
+        ? `О заключении сделки с аффилированным лицом Общества ${companyName} ${ctrGen}`
+        : `О заключении ${ctrGen} с ${companyName}`;
+    }
+
+    // Проект решения зависит от решения по риску (verdict).
+    const recommendation = `в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
     let projectDecision;
     if (verdict === 'reject') {
-      projectDecision = isPravlenie
-        ? `Отказать в заключении ${ctrGen} ${counterpartyPravl} в связи со степенью риска.`
-        : `Отказать в заключении ${ctrGen} с ${companyName} в связи со степенью риска.`;
+      projectDecision = `Отказать в заключении ${dealGen} с ${companyName} в связи со степенью риска.`;
     } else if (verdict === 'defer') {
-      projectDecision = isPravlenie
-        ? `Отложить заключение ${ctrGen} ${counterpartyPravl} на определенный срок.`
-        : `Отложить заключение ${ctrGen} с ${companyName} на определенный срок.`;
+      projectDecision = `Отложить заключение ${dealGen} с ${companyName} на определенный срок.`;
+    } else if (isPravlenie && isSdLimit) {
+      // Правление решение не принимает — одобряет и выносит на СД (как в образце).
+      projectDecision = `Одобрить и вынести на рассмотрение Совета директоров заключение ${dealGen} с ${companyName}`;
+    } else if (isPravlenie) {
+      // Лимит Правления — Правление и есть итоговый орган: условия принятия
+      // (стандарт / с пониженным / с повышенным) — из conditionText.
+      projectDecision = `Одобрить заключение ${dealGen} с ${companyName} ${conditionText}.`;
     } else {
-      // Для СЗ на СД убираем «со стандартным коэффициентом» (при стандартном решении).
-      const condSd = (verdict === 'accept_standard') ? '' : ` ${conditionText}`;
-      projectDecision = isPravlenie
-        ? `Рассмотреть и утвердить Правлением заключение ${ctrGen} ${counterpartyPravl} ${conditionText}.`
-        : `Заключить ${ctrAcc} с ${companyName}${condSd}, в соответствии с заключением (рекомендацией) департамента андеррайтинга и перестрахования № ${docNumber} от ${dateDot}`;
+      // СЗ на СД: условия принятия в проекте решения не пишем (как в образце) —
+      // ПК виден в строке «Страховая премия с учетом ПК».
+      projectDecision = `Заключить ${dealAcc} с ${companyName} ${recommendation}`;
     }
 
     const approverRole = isPravlenie ? Utils.UPRAV_DIR_ROLE : Utils.PRAVLENIE_CHAIR_ROLE;
@@ -267,27 +266,20 @@ const SZGenerator = {
       detailLine('Страховая сумма', Utils.fmtMoney(data.insuranceSum)),
       detailLine('Количество работников', Utils.fmtInteger(data.workers)),
       detailLine('Страховая премия', Utils.fmtMoney(data.premiumBase)),
-      // «Страховая премия с учётом ПК» — убираем для сделок уровня СД, а также
-      // когда ПК фактически не применён (см. showPremWithCoeff).
-      ...((isSdLimit || !showPremWithCoeff) ? [] : [detailLine('Страховая премия с учетом ПК', premWithCoeff)]),
+      // «Страховая премия с учетом ПК» — только когда ПК фактически применён.
+      ...(showPremWithCoeff ? [detailLine('Страховая премия с учетом ПК', premWithCoeff)] : []),
       detailLine('Оплата', data.paymentOrder || '—'),
       detailLine('Статистика НС за последние 3-х лет', claimsLine),
-      detailLine('Организация с государственным участием', `– ${data.govParticipation || '—'}`),
-      // «Решение по риску»: для СЗ на СД → «Лимит СД – <крупная сделка / с аффил.>»;
-      // для СЗ Правления при лимитах СД — строка убирается; иначе — как есть.
-      ...(!isSdLimit
-          ? [detailLine('Решение по риску', `– ${verdictLabel}`)]
-          : (isPravlenie ? [] : [detailLine('Лимит СД', `– ${sdDealNom}`)])),
+      // Только в СЗ на СД: основание вынесения на Совет директоров.
+      ...(isPravlenie ? [] : [detailLine('Лимит СД', `– ${sdDealNom}`)]),
     ];
 
-    // ============ Метки левого столбца ============
-    // СЗ на Правление обновлена под новый бланк (короткие формулировки). СЗ на СД
-    // пока оставляем в прежнем виде.
-    const lblQuestion = isPravlenie ? 'Вопросы на повестку дня' : 'Укажите формулировку вопроса включаемого в повестку дня заседания.';
-    const lblExplain  = isPravlenie ? 'Краткое пояснение по вопросу повестки дня' : 'Коротко дайте пояснения по предлагаемому вопросу повестки дня.';
-    const lblDecision = isPravlenie ? 'Проект решения по вопросу повестки дня' : 'Укажите проект решения по вопросу повестки.';
-    const lblReporter = isPravlenie ? 'ФИО докладчика:' : 'Докладчик:';
-    const lblAttach   = isPravlenie ? 'Приложения:' : 'Приложения';
+    // ============ Метки левого столбца (единый бланк для Правления и СД) ============
+    const lblQuestion = 'Вопросы на повестку дня';
+    const lblExplain  = 'Краткое пояснение по вопросу повестки дня';
+    const lblDecision = 'Проект решения по вопросу повестки дня';
+    const lblReporter = 'ФИО докладчика:';
+    const lblAttach   = 'Приложения:';
 
     // ============ Build the main table ============
     const makeRow = (leftText, rightParas) => new TableRow({
@@ -299,7 +291,7 @@ const SZGenerator = {
 
     const mainTable = new Table({
       rows: [
-        makeRow(lblQuestion, justifyP(trB(subject))),
+        makeRow(lblQuestion, justifyP(tr(subject))),
         makeRow(lblExplain, detailParas),
         makeRow(lblDecision, justifyP(tr(projectDecision))),
         new TableRow({
