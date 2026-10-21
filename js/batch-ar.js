@@ -16,6 +16,8 @@ const BatchAR = {
   _busy: false,
   _statgovRunning: false,
   _statgovPaused: false,      // пользователь поставил проверку stat.gov.kz на паузу
+  _statgovLimitedUntil: 0,    // stat.gov.kz ответил «превышено число запросов» → пауза до этого момента
+  _statgovLimitTimer: null,   // автопродолжение после паузы по лимиту
   _sgQueue: null,             // очередь оставшихся индексов statgov (для возобновления после паузы)
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
@@ -42,10 +44,15 @@ const BatchAR = {
     exceljs: 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
   },
 
-  // statgov-лукап — это fetch (GET sessid + POST), а не открытие вкладок,
-  // поэтому безопасно гнать с высокой параллельностью. e-Qazyna — лёгкий fetch
-  // к воркеру, отдельным пулом и ещё параллельнее.
-  STATGOV_CONCURRENCY: 6,
+  // stat.gov.kz ограничивает число поисков: 6 потоков выбивали лимит за минуты.
+  // Расширение (0.8.0+) само ставит поиски в очередь по одному с паузой; 2 потока
+  // здесь — чтобы следующий БИН уже ждал в очереди, пока идёт текущий. Ответы
+  // кэшируются в StatGovClient (IndexedDB), повторный реестр лимит не тратит.
+  // e-Qazyna — лёгкий fetch к воркеру, отдельным пулом и параллельнее.
+  STATGOV_CONCURRENCY: 2,
+  // Временный режим «данные о компании с kyc.kz» (StatGovClient.source()==='kyc'):
+  // одна GET-страница ~250 КБ, без ЭЦП. Умеренно, чтобы kyc.kz не начал блокировать.
+  KYC_SOURCE_CONCURRENCY: 4,
   EGOV_CONCURRENCY: 8,
   KYC_CONCURRENCY: 5,   // fallback дат/адреса через kyc.kz (один GET ~250 КБ)
   EGOV_RESID_CONCURRENCY: 6,  // авторитетная проверка резидентства через egov P30.01/P30.11
@@ -1156,14 +1163,14 @@ const BatchAR = {
     const top = ARForm._esc(r.oked || '—');
     let bottom = '';
     if (r.statgovStatus === 'loading') {
-      bottom = '<span class="batch-sub batch-sub--load">⏳ statgov…</span>';
+      bottom = `<span class="batch-sub batch-sub--load">⏳ ${StatGovClient.source() === 'kyc' ? 'kyc' : 'statgov'}…</span>`;
     } else {
       const list = BatchAR._okedList(r);
       if (list.length) {
         const err = BatchAR._okedError(r);
         const title = err
           ? 'ОКЭД из выгрузки не найден среди ОКЭД компании по stat.gov.kz — код ошибочный'
-          : 'ОКЭД компании по stat.gov.kz';
+          : 'ОКЭД компании по ' + ((r.statgov && r.statgov._source) || 'stat.gov.kz');
         bottom = `<span class="batch-sub ${err ? 'batch-sub--err' : ''}" title="${title}">(${ARForm._esc(list.join(', '))})</span>`;
       }
     }
@@ -1687,11 +1694,27 @@ const BatchAR = {
           if (cbin && /^\d{12}$/.test(cbin) && cbin !== lbin) {
             let pc = sgCache.get(cbin);
             if (!pc) { pc = StatGovClient.lookup(cbin); sgCache.set(cbin, pc); }
-            try { r.statgovContr = (await pc) || {}; } catch (e2) { r.statgovContr = { error: (e2 && e2.message) || 'ошибка' }; }
+            try { r.statgovContr = (await pc) || {}; } catch (e2) {
+              if (StatGovClient.isRateLimit(e2)) throw e2;
+              r.statgovContr = { error: (e2 && e2.message) || 'ошибка' };
+            }
           } else {
             r.statgovContr = r.statgov;
           }
         } catch (e) {
+          if (StatGovClient.isRateLimit(e)) {
+            // Лимит stat.gov.kz: строку возвращаем в начало очереди (не ошибка —
+            // просто не успели), неудачные промисы из кэша убираем, чтобы после
+            // паузы БИН спросились заново. Остальные воркеры остановятся сами.
+            r.statgovStatus = 'pending';
+            r.statgov = null; r.statgovContr = null;
+            sgQueue.unshift(i);
+            for (const [k, v] of sgCache) v.catch(() => sgCache.delete(k));
+            BatchAR._onStatgovLimit(e.until);
+            BatchAR._refreshRow(i);
+            BatchAR._scheduleAggregate();
+            break;
+          }
           r.statgov = { error: (e && e.message) || 'ошибка' };
           r.statgovStatus = 'error';
         }
@@ -1702,7 +1725,7 @@ const BatchAR = {
         BatchAR._maybeQueueKyc(i);
       }
     };
-    const n = Math.max(1, BatchAR.STATGOV_CONCURRENCY);
+    const n = Math.max(1, StatGovClient.source() === 'kyc' ? BatchAR.KYC_SOURCE_CONCURRENCY : BatchAR.STATGOV_CONCURRENCY);
     await Promise.all(Array.from({ length: n }, sgWorker));
     BatchAR._statgovRunning = false;
     BatchAR._updateVerify();
@@ -1713,6 +1736,48 @@ const BatchAR = {
       BatchAR.rows.forEach((_, i) => BatchAR._maybeQueueKyc(i));
       BatchAR._maybeFinishKyc();
     }
+  },
+
+  // Переключатель «Данные о компании: kyc.kz / stat.gov.kz». Смена источника
+  // перепроверяет загруженный реестр целиком (кэш у источников раздельный).
+  setSource(src) {
+    StatGovClient.setSource(src);
+    BatchAR._syncSourceRadios();
+    if (!BatchAR.rows.length || BatchAR._statgovRunning) return;
+    BatchAR._statgovPaused = false;
+    BatchAR.startStatgov();
+  },
+  _syncSourceRadios() {
+    const cur = (typeof StatGovClient !== 'undefined') ? StatGovClient.source() : 'kyc';
+    document.querySelectorAll('input[name="batch-source"]').forEach((el) => { el.checked = el.value === cur; });
+  },
+
+  // stat.gov.kz вернул «превышено число запросов»: ставим пул на паузу (очередь
+  // сохраняется) и планируем одну попытку продолжить, когда пауза истечёт.
+  _onStatgovLimit(until) {
+    BatchAR._statgovLimitedUntil = until || (Date.now() + 60 * 60 * 1000);
+    BatchAR._statgovPaused = true;
+    clearTimeout(BatchAR._statgovLimitTimer);
+    const delay = Math.max(30 * 1000, BatchAR._statgovLimitedUntil - Date.now() + 30 * 1000);
+    BatchAR._statgovLimitTimer = setTimeout(() => {
+      BatchAR._statgovLimitedUntil = 0;
+      BatchAR.resumeStatgov();
+    }, delay);
+    BatchAR._updateVerify();
+    BatchAR._updateControls();
+  },
+
+  // «Попробовать сейчас»: пользователь считает, что лимит уже сняли. Снимаем
+  // паузу в расширении и продолжаем очередь — ОДИН БИН покажет, так ли это.
+  async retryAfterLimit() {
+    clearTimeout(BatchAR._statgovLimitTimer);
+    BatchAR._statgovLimitedUntil = 0;
+    if (StatGovClient.limitClear) await StatGovClient.limitClear();
+    BatchAR.resumeStatgov();
+  },
+
+  _statgovLimited() {
+    return Date.now() < BatchAR._statgovLimitedUntil;
   },
 
   // Пауза проверки stat.gov.kz: воркеры дорабатывают текущие БИН и останавливаются,
@@ -1732,6 +1797,7 @@ const BatchAR = {
     else { BatchAR._updateVerify(); BatchAR._updateControls(); }
   },
   togglePause() {
+    if (BatchAR._statgovLimited()) { BatchAR.retryAfterLimit(); return; }
     if (BatchAR._statgovPaused) BatchAR.resumeStatgov();
     else BatchAR.pauseStatgov();
   },
@@ -1747,6 +1813,7 @@ const BatchAR = {
     const r = BatchAR.rows[i];
     if (!r || r.statgovStatus !== 'done') return;
     if (r.statgov && !r.statgov.error && r.statgov.registrationDate) return; // дата уже есть
+    if (r.statgov && r.statgov._source === 'kyc.kz') return;  // карточка и так с kyc.kz — второй запрос ничего не даст
     if (r._kycQueued || r.kycStatus === 'loading' || r.kycStatus === 'done') return;
     if (typeof StatGovClient === 'undefined' || !StatGovClient.lookupKyc) return;
     r._kycQueued = true;
@@ -1885,6 +1952,7 @@ const BatchAR = {
   // Повторить проверку для непройденных (error/skip/pending) БИН.
   retryStatgov() {
     if (BatchAR._statgovRunning) return;
+    if (BatchAR._statgovLimited()) { BatchAR.retryAfterLimit(); return; }
     // Явный повтор: снять паузу egov (пользователь мог только что войти на портал).
     if (typeof ResidentCheck !== 'undefined' && ResidentCheck.egovRetryNow) ResidentCheck.egovRetryNow();
     const idx = BatchAR.rows
@@ -1923,11 +1991,24 @@ const BatchAR = {
 
     if (!BatchAR._statgovConnected) {
       box.className = 'batch-verify batch-verify--err';
-      txt.innerHTML = '✕ Нет подключения к stat.gov.kz — генерация недоступна. Активируйте расширение-мост «Standard Life — мост к stat.gov.kz» и повторите проверку.';
+      txt.innerHTML = `✕ Нет подключения к ${StatGovClient.sourceLabel()} — генерация недоступна. Расширение-мост «Standard Life — мост к stat.gov.kz» не ответило: включите или перезагрузите его (chrome://extensions → ↻) и повторите проверку.`;
       retry.style.display = '';
       retry.disabled = false;
       return;
     }
+    if (BatchAR._statgovLimited()) {
+      const left = BatchAR._sgQueue ? new Set(BatchAR._sgQueue.map(i => BatchAR._insurerBin(BatchAR.rows[i]))).size : 0;
+      const at = new Date(BatchAR._statgovLimitedUntil).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const drain = BatchAR._statgovRunning ? ' (дожидаюсь текущих…)' : '';
+      box.className = 'batch-verify batch-verify--err';
+      txt.innerHTML = `⛔ stat.gov.kz: превышено число запросов. Проверено <b>${done}</b> из <b>${total}</b>, в очереди осталось <b>${left}</b> БИН${drain}. `
+        + `Очередь сохранена — проверка продолжится сама примерно в <b>${at}</b>. Не обновляйте страницу и не ищите вручную на stat.gov.kz: это продлевает блокировку.`;
+      retry.textContent = 'Попробовать сейчас';
+      retry.style.display = '';
+      retry.disabled = BatchAR._statgovRunning;
+      return;
+    }
+    retry.textContent = 'Повторить проверку';
     if (BatchAR._statgovPaused) {
       box.className = 'batch-verify batch-verify--warn';
       const drain = BatchAR._statgovRunning ? ' (останавливаю текущие…)' : '';
@@ -1937,7 +2018,7 @@ const BatchAR = {
     }
     if (BatchAR._statgovRunning) {
       box.className = 'batch-verify batch-verify--load';
-      txt.innerHTML = `⏳ Проверка stat.gov.kz: <b>${done}</b> из <b>${total}</b>… Кнопка генерации станет доступна, когда все БИН пройдут проверку.`;
+      txt.innerHTML = `⏳ Проверка ${StatGovClient.sourceLabel()}: <b>${done}</b> из <b>${total}</b>… Кнопка генерации станет доступна, когда все БИН пройдут проверку.`;
       retry.style.display = 'none';
       return;
     }
@@ -1948,7 +2029,9 @@ const BatchAR = {
       retry.disabled = false;
     } else {
       box.className = 'batch-verify batch-verify--ok';
-      txt.innerHTML = `✓ Все <b>${total}</b> БИН проверены через stat.gov.kz — можно генерировать.`;
+      txt.innerHTML = StatGovClient.source() === 'kyc'
+        ? `✓ Все <b>${total}</b> БИН проверены через <b>kyc.kz</b> (временно вместо stat.gov.kz — данные бизнес-регистра с задержкой обновления) — можно генерировать.`
+        : `✓ Все <b>${total}</b> БИН проверены через stat.gov.kz — можно генерировать.`;
       retry.style.display = 'none';
     }
   },
@@ -2668,6 +2751,8 @@ const BatchAR = {
     BatchAR.rows = [];
     BatchAR._statgovRunning = false;
     BatchAR._statgovPaused = false;
+    BatchAR._statgovLimitedUntil = 0;
+    clearTimeout(BatchAR._statgovLimitTimer);
     BatchAR._sgQueue = null;
     BatchAR._statgovConnected = false;
     BatchAR._kycQueue = []; BatchAR._kycActive = 0; BatchAR._kycCacheP = null;
@@ -2685,3 +2770,5 @@ const BatchAR = {
 };
 
 if (typeof window !== 'undefined') window.BatchAR = BatchAR;
+
+document.addEventListener('DOMContentLoaded', () => BatchAR._syncSourceRadios());

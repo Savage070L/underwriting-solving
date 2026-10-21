@@ -142,13 +142,14 @@ const App = {
   // Индикатор в шапке. Подключение идёт через расширение-мост (StatGovClient):
   // ping → PONG = мост активен. Опрашиваем периодически и при возврате фокуса.
   STATGOV: {
-    // checking | online | nologin | unreachable | offline
+    // checking | online | nologin | limited | unreachable | offline
     state: 'checking',
     _timer: null,
     _busy: false,
-    _STATES: ['checking', 'online', 'nologin', 'unreachable', 'offline'],
+    _STATES: ['checking', 'online', 'nologin', 'limited', 'unreachable', 'offline'],
     _LABELS: {
       checking: 'stat.gov.kz · проверка…',
+      limited: 'stat.gov.kz · превышен лимит запросов',
       online: 'stat.gov.kz · подключено',
       nologin: 'stat.gov.kz · нужен вход по ЭЦП',
       unreachable: 'stat.gov.kz · недоступен',
@@ -157,6 +158,7 @@ const App = {
     _TITLES: {
       checking: 'Проверяем реальное подключение к stat.gov.kz…',
       online: 'stat.gov.kz отвечает, ЭЦП-сессия активна — запросы по БИН пройдут. Нажмите, чтобы перепроверить.',
+      limited: 'stat.gov.kz ответил «Превышено число запросов». Расширение не отправляет запросы до конца паузы; проверка реестра продолжится сама. Не ищите вручную на stat.gov.kz — это продлевает блокировку.',
       nologin: 'Расширение-мост активно, но ЭЦП-сессия не найдена. Откройте stat.gov.kz и войдите в кабинет по ЭЦП, затем нажмите, чтобы перепроверить.',
       unreachable: 'Расширение-мост активно, но stat.gov.kz не отвечает (сеть/блокировка). Нажмите, чтобы перепроверить.',
       offline: 'Расширение «Standard Life — мост к stat.gov.kz» не установлено или выключено. Установите/включите его и нажмите, чтобы перепроверить.',
@@ -170,6 +172,8 @@ const App = {
       // Handshake расширения означает лишь «мост установлен» — не статус stat.gov.
       // Поэтому на него запускаем РЕАЛЬНУЮ проверку, а не зеленим индикатор.
       App._wireSourceChecks(App.STATGOV, 300000);
+      // Любой лукап (пакет, досье, одиночная проверка) поймал лимит → красим сразу.
+      document.addEventListener('sl:statgov-limit', () => App.STATGOV._set('limited'));
     },
     // Вызывается из autoLookupStatGov с результатом РЕАЛЬНОГО запроса по БИН —
     // это самый достоверный сигнал: если данные пришли, stat.gov точно работает.
@@ -177,6 +181,8 @@ const App = {
       if (ok) {
         App.STATGOV._lastLookupOk = Date.now();
         App.STATGOV._set('online');
+      } else if (errorMsg && /превышено\s+число\s+запросов/i.test(errorMsg)) {
+        App.STATGOV._set('limited');
       } else if (errorMsg && /sessid|ЭЦП|войдите|логин|авториз/i.test(errorMsg)) {
         App.STATGOV._set('nologin');
       }
@@ -188,6 +194,7 @@ const App = {
       if (typeof StatGovClient === 'undefined') return 'offline';
       const h = await StatGovClient.health(8000).catch(() => ({ bridge: false }));
       let state;
+      if (h.bridge && h.limited) return 'limited';
       if (h.bridge) {
         if (h.session) state = 'online';
         else if (h.reachable) state = 'nologin';
@@ -369,7 +376,7 @@ const App = {
         // 'unknown' и 'checking' — нейтральные: состояние нам неизвестно, и
         // красить его в любой цвет значит врать (см. историю удалённой плашки).
         const ok = state === 'online';
-        const bad = state === 'nologin' || state === 'offline' || state === 'unreachable';
+        const bad = state === 'nologin' || state === 'offline' || state === 'unreachable' || state === 'limited';
         a.classList.toggle('is-ok', ok);
         a.classList.toggle('is-bad', bad);
         a.classList.toggle('is-checking', !ok && !bad);

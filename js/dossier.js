@@ -43,7 +43,8 @@ const Dossier = {
     // чёрная строка); «проверка» — то, что посчитало приложение по справочникам.
     exp: 'база',
     check: 'проверка',
-    sg: 'stat.gov.kz',
+    // Временный режим: карточка компании с kyc.kz вместо stat.gov.kz (StatGovClient.source()).
+    get sg() { return (typeof StatGovClient !== 'undefined' && StatGovClient.source() === 'kyc') ? 'kyc.kz' : 'stat.gov.kz'; },
     kyc: 'kyc.kz',
     egov: 'egov P30.01/P30.11',
     gbd: 'ГБД ЮЛ',
@@ -1216,7 +1217,7 @@ const Dossier = {
     });
     const sg = Dossier._ok(ctx.sg) ? ctx.sg : null;
     if (sg && Array.isArray(sg._raw) && sg._raw.length) {
-      out.push(table('stat.gov.kz — все поля', 'database', sg._raw.map(([k, v]) => [k, Dossier._flat(v)])));
+      out.push(table((sg._source === 'kyc.kz' ? 'kyc.kz (вместо stat.gov.kz)' : 'stat.gov.kz') + ' — все поля', 'database', sg._raw.map(([k, v]) => [k, Dossier._flat(v)])));
     }
     const k = Dossier._ok(ctx.kyc) ? ctx.kyc : null;
     if (k) {
