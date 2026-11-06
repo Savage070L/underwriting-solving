@@ -1296,8 +1296,11 @@ const Dossier = {
     const enriched = codes.map((c) => {
       const cls = BatchAR._classOf(c.code);
       const look = (classifier && typeof Utils !== 'undefined' && Utils.lookupOked) ? Utils.lookupOked(c.code, classifier) : null;
-      return { ...c, cls, tariff: BatchAR._tariffByClass(cls), name: look ? look.name : null };
+      // notInRef — справочник загружен, а кода в нём нет (без справочника не судим).
+      const notInRef = !!(classifier && classifier.length) && !look;
+      return { ...c, cls, tariff: BatchAR._tariffByClass(cls), name: look ? look.name : null, notInRef };
     });
+    const missingRef = enriched.filter(x => x.notInRef).map(x => x.code);
     // Ведущий ОКЭД (класс с наибольшим тарифом — по нему считается договор)
     // помечаем ПОДСВЕТКОЙ строки, без слов: подписи «макс. тариф» просто шумели.
     // «Правильный» класс считаем ТОЛЬКО по ОКЭД компании из stat.gov.kz —
@@ -1321,15 +1324,19 @@ const Dossier = {
       // зелёная; база с ОКЭД, которого у компании НЕТ, — красная; база с
       // валидным, но не наивысшим классом — жёлтая; остальные нейтральные.
       const wrap = (h) => {
+        if (x.notInRef) return `<b class="ds-bad">${h}</b>`;
         if (isBase && !fromSg) return `<b class="ds-bad">${h}</b>`;
         if (lead) return `<b class="ds-good">${h}</b>`;
         if (isBase) return `<b class="ds-warnc">${h}</b>`;
         return h;
       };
       const nm = x.name || (sg && x.code === sg.okedPrimaryCode ? sg.okedPrimaryName : '') || '';
+      const nmHtml = x.notInRef
+        ? (nm ? e(nm) + '<br>' : '') + e(BatchAR.OKED_NOT_IN_REF_MSG)
+        : e(nm);
       return [
         wrap(`<span class="ds-v--num">${e(x.code)}</span>`),
-        wrap(e(nm)),
+        wrap(nmHtml),
         x.cls == null ? '<span class="ds-dim">—</span>' : wrap(e(String(x.cls))),
         x.tariff == null ? '<span class="ds-dim">—</span>' : wrap(e(Dossier._pct(x.tariff))),
       ];
@@ -1337,6 +1344,11 @@ const Dossier = {
     return {
       title: 'Деятельность и тариф', icon: 'tag', accent: 'company', span: 'wide',
       titleRight: pending ? '<span class="ds-card-note">идёт проверка stat.gov.kz…</span>' : '',
+      // Ошибка «нет в справочнике» показывается сразу, без ожидания stat.gov:
+      // она зависит только от классификатора, а не от списка ОКЭД компании.
+      lead: missingRef.length
+        ? `<div class="ds-oked-ref-err"><span class="ds-pill ds-pill--bad">ошибка</span> <b class="ds-bad">${e(BatchAR.OKED_NOT_IN_REF_MSG)}: ${e(missingRef.join(', '))}</b></div>`
+        : '',
       table: { head: ['ОКЭД', 'Вид деятельности', 'Класс', 'Тариф'], rows },
     };
   },
@@ -1722,6 +1734,7 @@ const Dossier = {
     const B = BatchAR;
     const errs = [
       [B._okedError(r), 'ОКЭД из выгрузки отсутствует среди ОКЭД компании в stat.gov.kz — значит и класс по нему неверный'],
+      [B._okedRefError(r), B.OKED_NOT_IN_REF_MSG + ': ' + B._okedsNotInRef(r).join(', ')],
       [B._classWrongForOked(r), 'Класс профриска не соответствует своему же ОКЭД по классификатору'],
       [B._govDiff(r), 'Гос. участие: выгрузка не совпала с реестром e-Qazyna'],
       [B._residRegDiff(r), 'Резидентство: страна из выгрузки не совпала с ответом egov'],

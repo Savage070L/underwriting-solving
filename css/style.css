@@ -4327,3 +4327,7 @@ tr.batch-row--checking .batch-sub--err, tr.batch-row--checking .batch-sub--warn 
   .ds-fields { grid-template-columns: 1fr; }
   .ds-fields-k { text-align: left; padding-bottom: 0; border-bottom: none; }
 }
+
+/* Досье «Деятельность и тариф»: ОКЭД отсутствует в справочнике ОКЭД */
+.ds-oked-ref-err { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; font-size: 13px; }
+.oked-warn--err { color: #b91c1c; font-weight: 700; }

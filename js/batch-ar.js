@@ -351,7 +351,7 @@ const BatchAR = {
     const cDiffWarn = BatchAR._classDiffWarn(r);
     const classWrong = BatchAR._classWrongForOked(r);
     const gDiff = BatchAR._govDiff(r);
-    const okedCls = okedErr ? ' batch-cell--err' : '';
+    const okedCls = (okedErr || BatchAR._okedRefError(r)) ? ' batch-cell--err' : '';
     // ПК ≠ 1 → строка не жёлтая, но ячейка класса остаётся помеченной; поясняем
     // это в подсказке, иначе жёлтая ячейка в зелёной строке выглядит нелогично.
     const pkAdj = BatchAR._pkAdjusted(r);
@@ -979,6 +979,39 @@ const BatchAR = {
     return BatchAR._okedConfirmed(r) === false;
   },
 
+  // Текст ошибки «ОКЭД нет в справочнике» — один для таблицы, досье и подсказок.
+  OKED_NOT_IN_REF_MSG: 'Данного ОКЭДа нету в справочнике ОКЭД',
+
+  // ОКЭД есть в классификаторе («Справочники» → Классификатор ОКЭД)?
+  //   true/false — проверено; null — классификатор не загружен (проверить нельзя,
+  //   красным НЕ красим: иначе без справочника вся таблица стала бы красной).
+  _okedInRef(code) {
+    const c = String(code == null ? '' : code).trim().replace(/\s+/g, '');
+    if (!c) return null;
+    const classifier = (typeof App !== 'undefined' && App.refData && App.refData.classifier) || null;
+    if (!classifier || !classifier.length || !Utils.lookupOked) return null;
+    return !!Utils.lookupOked(c, classifier);
+  },
+
+  // Все ОКЭД строки (выгрузка + ОКЭД компании по stat.gov.kz), которых НЕТ в справочнике.
+  _okedsNotInRef(r) {
+    const seen = new Set();
+    const out = [];
+    [r.oked].concat(BatchAR._okedList(r)).forEach((code) => {
+      const c = String(code == null ? '' : code).trim();
+      if (!c || seen.has(c)) return;
+      seen.add(c);
+      if (BatchAR._okedInRef(c) === false) out.push(c);
+    });
+    return out;
+  },
+
+  // КРАСНЫЙ: хотя бы один ОКЭД строки отсутствует в справочнике ОКЭД — класс
+  // риска и тариф по нему определить нельзя.
+  _okedRefError(r) {
+    return BatchAR._okedsNotInRef(r).length > 0;
+  },
+
   // Жёлтым подсвечиваем мягкое расхождение класса ТОЛЬКО для высоких классов
   // (≥ _CLASS_WARN_MIN). Расхождения среди классов 1–12 несущественны → зелёные.
   _CLASS_WARN_MIN: 13,
@@ -1027,7 +1060,7 @@ const BatchAR = {
   //   null             — расхождений нет.
   // «Сырой» уровень — РЕАЛЬНЫЙ результат валидации, без учёта согласования андеррайтером.
   _rawRowLevel(r) {
-    if (BatchAR._okedError(r) || BatchAR._govDiff(r) || BatchAR._residRegDiff(r) || BatchAR._pkYoungError(r)
+    if (BatchAR._okedError(r) || BatchAR._okedRefError(r) || BatchAR._govDiff(r) || BatchAR._residRegDiff(r) || BatchAR._pkYoungError(r)
         || BatchAR._sumError(r) || BatchAR._premiumBelowMinError(r) || BatchAR._binInvalid(r)
         || BatchAR._insurerBinInvalidReason(r) || BatchAR._classWrongForOked(r)
         || BatchAR._contrSumLtFotError(r) || BatchAR._contrTariffClassError(r)
@@ -1160,7 +1193,12 @@ const BatchAR = {
   // ОКЭД: сверху — из выгрузки, снизу в скобках — из stat.gov.kz (все коды по порядку).
   // Если кода из выгрузки нет среди ОКЭД компании — список снизу краснеет (ошибка).
   _okedCell(r) {
-    const top = ARForm._esc(r.oked || '—');
+    const missing = new Set(BatchAR._okedsNotInRef(r));
+    const refMsg = BatchAR.OKED_NOT_IN_REF_MSG;
+    const topRaw = String(r.oked == null ? '' : r.oked).trim();
+    const top = missing.has(topRaw)
+      ? `<span class="batch-sub--err" title="${refMsg}">${ARForm._esc(topRaw)}</span>`
+      : ARForm._esc(r.oked || '—');
     let bottom = '';
     if (r.statgovStatus === 'loading') {
       bottom = `<span class="batch-sub batch-sub--load">⏳ ${StatGovClient.source() === 'kyc' ? 'kyc' : 'statgov'}…</span>`;
@@ -1171,10 +1209,19 @@ const BatchAR = {
         const title = err
           ? 'ОКЭД из выгрузки не найден среди ОКЭД компании по stat.gov.kz — код ошибочный'
           : 'ОКЭД компании по ' + ((r.statgov && r.statgov._source) || 'stat.gov.kz');
-        bottom = `<span class="batch-sub ${err ? 'batch-sub--err' : ''}" title="${title}">(${ARForm._esc(list.join(', '))})</span>`;
+        const items = list.map((c) => {
+          const t = String(c).trim();
+          return missing.has(t)
+            ? `<span class="batch-sub--err" title="${refMsg}">${ARForm._esc(t)}</span>`
+            : ARForm._esc(t);
+        }).join(', ');
+        bottom = `<span class="batch-sub ${err ? 'batch-sub--err' : ''}" title="${title}">(${items})</span>`;
       }
     }
-    return `<div class="batch-stack"><span class="batch-stack-top batch-oked-code">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}</div>`;
+    const refNote = missing.size
+      ? `<span class="batch-stack-bot"><span class="batch-sub batch-sub--err" title="${ARForm._esc([...missing].join(', '))}">${refMsg}</span></span>`
+      : '';
+    return `<div class="batch-stack"><span class="batch-stack-top batch-oked-code">${top}</span>${bottom ? `<span class="batch-stack-bot">${bottom}</span>` : ''}${refNote}</div>`;
   },
 
   // Класс: сверху — из выгрузки, снизу в скобках — классы по каждому ОКЭД
@@ -1551,7 +1598,7 @@ const BatchAR = {
     const classWrong = BatchAR._classWrongForOked(r);
     const gDiff = BatchAR._govDiff(r);
     const okedCell = tr.querySelector('.batch-c-oked');
-    if (okedCell) okedCell.classList.toggle('batch-cell--err', okedErr);
+    if (okedCell) okedCell.classList.toggle('batch-cell--err', okedErr || BatchAR._okedRefError(r));
     const classCell = tr.querySelector('.batch-c-class');
     if (classCell) {
       classCell.classList.toggle('batch-cell--err', classWrong || (cDiff && okedErr));
@@ -2184,7 +2231,7 @@ const BatchAR = {
     if (BatchAR._pkYoungError(r)) out.push(['coeff', RED]);
     if (BatchAR._insurerBinInvalidReason(r)) out.push(['binInsurer', RED]);
     if (BatchAR._binInvalidReason(r)) out.push(['bin', RED]);
-    if (okedErr) out.push(['oked', RED]);
+    if (okedErr || BatchAR._okedRefError(r)) out.push(['oked', RED]);
     if (BatchAR._classWrongForOked(r) || (okedErr && BatchAR._classDiff(r))) out.push(['riskClass', RED]);
     else if (BatchAR._classDiff(r)) out.push(['riskClass', YEL]);
     if (BatchAR._govDiff(r)) out.push(['govParticip', RED]);

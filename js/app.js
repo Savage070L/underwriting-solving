@@ -1401,13 +1401,13 @@ const App = {
     daipDirector:     'Бурханов Д.К.',   // Директор ДАиП (подписант СЗ и Протокола)
     daipUnderwriter:  'Джелкобаев Т.К.', // Андеррайтер — подписант Рекомендации ДАиП
     upravDir:         'Аринов Д.С.',       // Управляющий директор
-    // АС (Андеррайтинговый Совет) — 7 членов + секретарь
+    // АС (Андеррайтинговый Совет) — 6 членов + секретарь
     asMember0:        'Амерходжаев Г.Т.',  // Председатель Правления
     asMember1:        'Кныкова А.У.',      // Заместитель Председателя Правления, член Правления
     asMember2:        'Аринов Д.С.',       // Заместитель Председателя Правления, член Правления
-    // Ключ asMember6 (а не сдвиг asMember3…5): в документе стоит 4-м — порядок
-    // задаёт buildMembers, — а asMember4 (риск-менеджер) читается по ключу в ar-form-pdf.js.
-    asMember6:        'Ашимов Д.А.',       // Заместитель Председателя Правления, член Правления
+    // Ашимов Д.А. (бывший asMember6) исключён из состава АС с 2026-11-06.
+    // Ключ asMember6 не переиспользовать: у пользователей в localStorage могут
+    // лежать его старые override'ы. asMember4 (риск-менеджер) читается по ключу в ar-form-pdf.js.
     asMember3:        'Уткин А.С.',        // Управляющий директор
     asMember4:        'Осинцев Р.С.',      // Руководитель Службы управления рисками
     asMember5:        'Бурханов Д.К.',   // Директор ДАиП
@@ -1430,7 +1430,6 @@ const App = {
     asMember0:        'Председатель Правления',
     asMember1:        'Заместитель Председателя Правления, член Правления',
     asMember2:        'Заместитель Председателя Правления, член Правления',
-    asMember6:        'Заместитель Председателя Правления, член Правления',
     asMember3:        'Управляющий директор',
     asMember4:        'Руководитель Службы управления рисками',
     asMember5:        'Директор ДАиП',
@@ -1494,7 +1493,7 @@ const App = {
       .filter(k => !App._isSignerSkipped(k))
       .map(k => [App._getSignerRole(k), App._getSigner(k)]);
 
-    Utils.AS_MEMBERS = buildMembers(['asMember0','asMember1','asMember2','asMember6','asMember3','asMember4','asMember5']);
+    Utils.AS_MEMBERS = buildMembers(['asMember0','asMember1','asMember2','asMember3','asMember4','asMember5']);
     Utils.PRAVLENIE_MEMBERS = buildMembers(['pravlenieMember0','pravlenieMember1','pravlenieMember2','pravlenieMember3']);
   },
 
@@ -4405,7 +4404,7 @@ const App = {
       } else {
         result.classList.add('visible', 'oked-result--missing');
         result.classList.remove('oked-result--found');
-        result.innerHTML = `<span class="oked-warn">⚠ ОКЭД «${code}» не найден в классификаторе</span>`;
+        result.innerHTML = `<span class="oked-warn oked-warn--err">⚠ ОКЭД «${code}»: Данного ОКЭДа нету в справочнике ОКЭД</span>`;
       }
     }
     // После определения эффективного ОКЭДа — auto-выбор activity, всегда.
