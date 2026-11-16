@@ -3361,6 +3361,9 @@ body.inline-analytics-open .ai-fab { display: inline-flex; }
 .batch-sort-btn--filial { border-color: #99f6e4; color: #0f766e; }
 .batch-sort-btn--filial:hover { background: #f0fdfa; }
 .batch-sort-btn--filial.is-active { background: #ccfbf1; border-color: #14b8a6; color: #0f766e; }
+.batch-sort-btn--filialbin { border-color: #bae6fd; color: #0369a1; }
+.batch-sort-btn--filialbin:hover { background: #f0f9ff; }
+.batch-sort-btn--filialbin.is-active { background: #e0f2fe; border-color: #0ea5e9; color: #075985; }
 /* «АС лимиты» — фиолетовая, в тон обводке строк свыше лимитов АС. */
 .batch-sort-btn--aslimit { border-color: #ddd6fe; color: #6d28d9; }
 .batch-sort-btn--aslimit:hover { background: #f5f3ff; }

@@ -21,7 +21,7 @@ const BatchAR = {
   _sgQueue: null,             // очередь оставшихся индексов statgov (для возобновления после паузы)
   _statgovConnected: false,   // подтверждено ли соединение с stat.gov.kz (ping ok)
   _tableVersion: 0,           // растёт при каждом изменении таблицы (для зеркала в новой вкладке)
-  // Активные ФИЛЬТРЫ (массив ключей: 'errors' | 'filial' | 'tranche' |
+  // Активные ФИЛЬТРЫ (массив ключей: 'errors' | 'filial' | 'filialbin' | 'tranche' |
   // 'nonresident' | 'aslimit'). Пусто — показываем все строки, как в файле.
   _filters: [],
 
@@ -177,9 +177,12 @@ const BatchAR = {
     { key: 'errors', icon: '⚑', label: 'Ошибки',
       title: 'Только строки с проблемами: сначала красные (некорректные данные), затем жёлтые (расхождения)',
       match: (r) => !!BatchAR._rowLevel(r) },
-    { key: 'filial', icon: '🏢', label: 'Филиалы',
+    { key: 'filial', icon: '🏢', label: 'ГО + Филиалы (С≠К)',
       title: 'Только договоры с несколькими филиалами (номер договора встречается больше одного раза); строки одного договора идут подряд',
       match: (r) => BatchAR._isFilial(r), group: true },
+    { key: 'filialbin', icon: '🏬', label: 'Филиалы (по БИН)',
+      title: 'Только строки, где Страхователь (С) — филиал по структуре БИН: ИИН отсекаются (5-я цифра 4/5/6 — БИН), 6-я цифра БИН = 1 (0 — головная организация)',
+      match: (r) => BatchAR._insurerIsFilialByBin(r) },
     { key: 'tranche', icon: '⏳', label: 'Транши',
       title: 'Только договоры с рассрочкой (есть заполненные этапы оплаты)',
       match: (r) => (BatchAR._trancheCount(r) || 0) > 0 },
@@ -190,6 +193,19 @@ const BatchAR = {
       title: 'Только договоры свыше лимитов АС из «Справочников»: класс 1–15 и страховая сумма выше лимита АС 1–15, либо класс 16–22 выше лимита АС 16–22. Такие строки обведены фиолетовым.',
       match: (r) => BatchAR._overAsLimit(r) },
   ],
+
+  // Страхователь — ФИЛИАЛ по структуре БИН. Сначала отсекаем ИИН: у ИИН
+  // 6-я цифра — единицы дня рождения и может быть 1. БИН/ИИН различаем тем же
+  // правилом, что и резидентство (ResidentCheck.idKind: 5-я цифра 4/5/6 → БИН).
+  // 6-я цифра БИН: 0 — ГО, 1 — филиал, 2 — представительство (сюда не входит).
+  _insurerIsFilialByBin(r) {
+    const id = String(BatchAR._insurerBin(r) || '').replace(/\D/g, '');
+    if (id.length !== 12) return false;
+    const isBin = (typeof ResidentCheck !== 'undefined' && ResidentCheck.idKind)
+      ? ResidentCheck.idKind(id) === 'bin'
+      : '456'.includes(id[4]);
+    return isBin && id[5] === '1';
+  },
 
   // Строка относится к договору свыше лимитов АС (см. _exceedsAsLimit — считает
   // по всему договору, а не по строке). Кэш по номеру договора: при 16 тыс. строк
