@@ -990,14 +990,14 @@ const Dossier = {
       '3': { label: 'Крестьянское хозяйство (совместное предпринимательство)', cls: '' },
     };
     const m = map[s[5]] || { label: 'не определено', cls: 'ds-dim' };
-    return { ...m, note: `6-я цифра БИН — ${s[5]}` };
+    return { ...m, note: '' };
   },
   _unitRow(id) {
     const u = Dossier._unitByBin(id);
     if (!u) return null;
     const e = Dossier._esc;
     return ['Подразделение', `<b class="ds-v ${u.cls}">${e(u.label)}</b>`
-      + `<span class="ds-vnote ds-vnote--block">${e(u.note)}</span>`];
+      + (u.note ? `<span class="ds-vnote ds-vnote--block">${e(u.note)}</span>` : '')];
   },
 
   _partyCard(ctx, sgo, title, bin, isCtxId) {
