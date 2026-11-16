@@ -973,6 +973,33 @@ const Dossier = {
 
   // Одна карточка стороны. isCtxId — карточка о том же БИН, что открыт в досье:
   // тогда подмешиваются kyc/egov (они догружаются только для ctx.id).
+  // Тип подразделения по структуре БИН. Сначала отсекаем ИИН (5-я цифра 0–3:
+  // у ИИН 6-я цифра — единицы дня рождения, по ней судить нельзя), затем
+  // 6-я цифра БИН: 0 — ГО, 1 — филиал, 2 — представительство, 3 — КХ (СП).
+  // Правило то же, что у фильтра «Филиалы (по БИН)» в «Проверке договоров».
+  _unitByBin(id) {
+    const s = String(id == null ? '' : id).replace(/\D/g, '');
+    if (s.length !== 12) return null;
+    const isBin = (typeof ResidentCheck !== 'undefined' && ResidentCheck.idKind)
+      ? ResidentCheck.idKind(s) === 'bin' : '456'.includes(s[4]);
+    if (!isBin) return { label: 'ИИН — физлицо / ИП', cls: 'ds-dim', note: 'подразделение по ИИН не определяется' };
+    const map = {
+      '0': { label: 'Головная организация (ГО)', cls: 'ds-good' },
+      '1': { label: 'Филиал', cls: 'ds-warnc' },
+      '2': { label: 'Представительство', cls: 'ds-warnc' },
+      '3': { label: 'Крестьянское хозяйство (совместное предпринимательство)', cls: '' },
+    };
+    const m = map[s[5]] || { label: 'не определено', cls: 'ds-dim' };
+    return { ...m, note: `6-я цифра БИН — ${s[5]}` };
+  },
+  _unitRow(id) {
+    const u = Dossier._unitByBin(id);
+    if (!u) return null;
+    const e = Dossier._esc;
+    return ['Подразделение', `<b class="ds-v ${u.cls}">${e(u.label)}</b>`
+      + `<span class="ds-vnote ds-vnote--block">${e(u.note)}</span>`];
+  },
+
   _partyCard(ctx, sgo, title, bin, isCtxId) {
     const e = Dossier._esc;
     const S = Dossier.SRC;
@@ -1002,6 +1029,7 @@ const Dossier = {
     const name = (sgo && sgo.name) || (isCtxId ? Dossier._bestName(ctx) : '') || '';
     const rows = [
       bin ? ['БИН', `<span class="ds-v ds-v--num">${e(bin)}</span> ${Dossier._copyBtnHtml(bin, true)}`] : null,
+      Dossier._unitRow(bin),
       name ? ['Наименование', `<span class="ds-v">${e(name)}</span>`] : null,
       act ? ['Вид деятельности', `<span class="ds-v">${e(act)}</span>`] : null,
       form ? ['Форма', `<span class="ds-v">${e(form.form)}</span><span class="ds-vnote">— ${e(form.note)}</span>`] : null,
