@@ -207,7 +207,7 @@ const ZaklGenerator = {
     // Company assets
     paragraphs.push(new Paragraph({
       children: [
-        trB(`Активы ${Utils.COMPANY_FULL_NAME}`),
+        trB(`Активы за вычетом активов перестрахования ${Utils.COMPANY_FULL_NAME}`),
         tr(` (далее – Компания) на ${normativDate} составляют ${Utils.fmtMoneyThousands(fullAssetsThousands)}.`),
       ],
       alignment: AlignmentType.JUSTIFIED,
@@ -405,7 +405,7 @@ const ZaklGenerator = {
     paragraphs.push(new Paragraph({
       children: [tr(
         `Резюмируя вышесказанное отмечаем, что вероятность возникновения травмы в страхуемой группе ` +
-        `в силу профессиональной деятельности возможен, факт получения одна травма ` +
+        `в силу профессиональной деятельности возможен, факт получения травмы ` +
         `(прогнозируемый убыток нетрудоспособности 900 000 тг.), ` +
         `в связи с чем данные убытки на приемлемом уровне для Компании ` +
         `и страховой премии будет достаточно для покрытия данных убытков.`
